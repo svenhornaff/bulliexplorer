@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     log_json: bool = False
 
     # --- Database ------------------------------------------------------------
-    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/bulliexplorer"
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5433/bulliexplorer"
 
     # --- S3 / R2 (media storage) --------------------------------------------
     s3_endpoint_url: str = ""
