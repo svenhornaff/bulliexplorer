@@ -45,7 +45,9 @@ def create_app() -> FastAPI:
     app.state.templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
     # --- Routers -------------------------------------------------------------
-    # TODO: include routers from app.routes.*
+    from app.routes.home import router as home_router
+
+    app.include_router(home_router)
 
     # --- Health endpoint -----------------------------------------------------
     @app.get("/health")
