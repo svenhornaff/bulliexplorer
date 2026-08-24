@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+
+# Media (large, lives in R2 not git)
+static/uploads/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# pi
+.pi
