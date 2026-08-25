@@ -66,6 +66,8 @@ async def clean_db():
 
     factory = get_session_factory()
     async with factory() as session:
+        await session.execute(text("DELETE FROM points_of_interest"))
+        await session.execute(text("DELETE FROM routes"))
         await session.execute(text("DELETE FROM posts"))
         await session.commit()
 

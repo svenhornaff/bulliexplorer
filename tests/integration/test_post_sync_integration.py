@@ -40,6 +40,8 @@ async def clean_db_engine():
     # Wipe posts table before each test so tests are independent.
     factory = get_session_factory()
     async with factory() as session:
+        await session.execute(text("DELETE FROM points_of_interest"))
+        await session.execute(text("DELETE FROM routes"))
         await session.execute(text("DELETE FROM posts"))
         await session.commit()
 

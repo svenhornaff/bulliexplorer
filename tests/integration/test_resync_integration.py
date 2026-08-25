@@ -54,6 +54,8 @@ async def clean_db_and_fixture():
 
     factory = get_session_factory()
     async with factory() as session:
+        await session.execute(text("DELETE FROM points_of_interest"))
+        await session.execute(text("DELETE FROM routes"))
         await session.execute(text("DELETE FROM posts"))
         await session.commit()
 
@@ -62,6 +64,8 @@ async def clean_db_and_fixture():
     # Clean up fixture file and its DB row.
     _FIXTURE_FILE.unlink(missing_ok=True)
     async with factory() as session:
+        await session.execute(text("DELETE FROM points_of_interest"))
+        await session.execute(text("DELETE FROM routes"))
         await session.execute(
             text("DELETE FROM posts WHERE slug = :slug"),
             {"slug": _FIXTURE_SLUG},
