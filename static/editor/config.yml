@@ -14,6 +14,7 @@ backend:
   name: github
   repo: svenhornaff/bulliexplorer
   branch: develop
+  auth_type: token  # Use GitHub PAT — no OAuth app or Cloudflare Worker needed
 
 # Images uploaded via the editor land in static/uploads/ (bind-mounted
 # on the server — no container restart needed after an upload).

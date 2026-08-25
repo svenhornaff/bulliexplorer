@@ -96,8 +96,10 @@ def test_config_yml_backend_github():
     assert backend["name"] == "github"
     assert backend["repo"] == "svenhornaff/bulliexplorer"
     assert backend["branch"] == "develop"
-    # PAT auth — no base_url needed
+    # PAT auth — no base_url needed, auth_type must be token to suppress
+    # the default OAuth button (which points at Netlify and returns 404).
     assert "base_url" not in backend
+    assert backend.get("auth_type") == "token"
 
 
 @pytest.mark.unit
