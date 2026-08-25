@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     s3_bucket: str = "bulliexplorer"
 
+    # --- Monitoring -----------------------------------------------------------
+    # Empty default is deliberate: a missing SENTRY_DSN should not crash the
+    # app — that would mean a monitoring misconfiguration takes down the very
+    # app it's supposed to monitor.  Sentry is initialised only when non-empty.
+    sentry_dsn: str = ""
+
     # --- Auth ----------------------------------------------------------------
     secret_key: str  # no default — missing config crashes on startup
 

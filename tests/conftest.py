@@ -2,10 +2,28 @@
 
 from __future__ import annotations
 
-import pytest
-from httpx import ASGITransport, AsyncClient
+import os
 
-from app.main import create_app
+# Set required secrets BEFORE any app import so Settings() never crashes.
+# These are dummy values — tests must never hit real services.
+os.environ.setdefault("SECRET_KEY", "test-secret-not-for-production")
+os.environ.setdefault("RESYNC_TOKEN", "test-resync-token")
+os.environ.setdefault("GITHUB_TOKEN", "test-github-token")
+os.environ.setdefault("WEBHOOK_SECRET", "test-webhook-secret")
+
+import pytest  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+
+from app.core.config import get_settings  # noqa: E402
+from app.main import create_app  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache():
+    """Clear the lru_cache so each test gets fresh Settings."""
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture

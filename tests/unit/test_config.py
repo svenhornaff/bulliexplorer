@@ -38,17 +38,21 @@ def test_default_database_url():
 
 
 @pytest.mark.unit
-def test_missing_secret_key_raises():
+def test_missing_secret_key_raises(monkeypatch):
     """secret_key has no default — missing it must raise ValidationError."""
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("WEBHOOK_SECRET", raising=False)
     with pytest.raises(PydanticValidationError):
-        # _env_file=None prevents pydantic-settings from reading .env,
-        # so only explicitly passed kwargs are available.
         Settings(resync_token="tok", _env_file=None)  # type: ignore[call-arg]  # noqa: S106 — test sentinel
 
 
 @pytest.mark.unit
-def test_missing_resync_token_raises():
+def test_missing_resync_token_raises(monkeypatch):
     """resync_token has no default — missing it must raise ValidationError."""
+    monkeypatch.delenv("RESYNC_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("WEBHOOK_SECRET", raising=False)
     with pytest.raises(PydanticValidationError):
         Settings(secret_key="sec", _env_file=None)  # type: ignore[call-arg]  # noqa: S106 — test sentinel
 

@@ -1,5 +1,9 @@
 # BulliExplorer
 
+<!-- Replace MONITOR_API_KEY with your UptimeRobot monitor-specific API key -->
+<!-- (My Monitors → gear icon → Monitor-Specific API Key) -->
+[![Uptime Robot status](https://img.shields.io/uptimerobot/status/MONITOR_API_KEY)](https://bulliexplorer.com)
+
 A gravel & adventure blog with interactive maps, campsites, routes, and GPX tracks.
 
 Server-rendered with **FastAPI + Jinja2 + HTMX** — no client-side build step, no npm.
@@ -126,6 +130,7 @@ All config flows through `app/core/config.py` (pydantic-settings). Copy `.env.ex
 | `S3_ACCESS_KEY` | — | R2 access key |
 | `S3_SECRET_KEY` | — | R2 secret key |
 | `S3_BUCKET` | `bulliexplorer` | R2 bucket name |
+| `SENTRY_DSN` | `""` (disabled) | Sentry error tracking DSN |
 
 ## Blog posts
 

@@ -19,11 +19,52 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 logger = get_logger(__name__)
 
 
+def _sentry_before_send(event: dict[str, object], hint: dict[str, object]) -> dict[str, object] | None:
+    """Drop expected HTTP errors (404s) so they don't pollute Sentry.
+
+    Parameters
+    ----------
+    event
+        The Sentry event payload.
+    hint
+        Additional context, including the original exception via ``exc_info``.
+
+    Returns
+    -------
+    dict or None
+        The event to send, or ``None`` to drop it.
+    """
+    exc_info = hint.get("exc_info")
+    if exc_info:
+        exc_tuple = (exc_info[0], exc_info[1], exc_info[2]) if isinstance(exc_info, (list, tuple)) else None  # type: ignore[index]
+        if exc_tuple is not None:
+            exc = exc_tuple[1]
+            # Both Starlette and FastAPI HTTPException have .status_code
+            if hasattr(exc, "status_code") and exc.status_code == 404:  # noqa: PLR2004 — HTTP status code
+                return None
+    return event
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup / shutdown lifecycle."""
     settings = get_settings()
     logger.info("BulliExplorer starting up")
+
+    # --- Sentry (error tracking) --------------------------------------------
+    if settings.sentry_dsn:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.app_env,
+            traces_sample_rate=0.0,
+            before_send=_sentry_before_send,  # type: ignore[arg-type] — Sentry Event is a TypedDict; our signature is compatible at runtime
+        )
+        logger.info("Sentry initialised (env=%s)", settings.app_env)
+    else:
+        logger.info("SENTRY_DSN not set — Sentry disabled")
+
     init_engine(settings.database_url)
 
     # Sync Markdown posts → DB on every startup so new/changed files are

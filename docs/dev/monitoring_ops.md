@@ -62,51 +62,95 @@ straight to `develop` without running `make ci` first.
 ### Phase 1 — UptimeRobot (external uptime monitor)
 
 **Scope**
-- Sign up (free tier — 5-minute interval monitors, unlimited count).
-- Add an HTTP(S) monitor for `https://bulliexplorer.com/health` — the
+- [x] Sign up (free tier — 5-minute interval monitors, unlimited count).
+- [x] Add an HTTP(S) monitor for `https://bulliexplorer.com/health` — the
   endpoint already exists, no code change needed.
-- Alert contact: email (free tier; SMS/other channels are paid — not
+- [x] Alert contact: email (free tier; SMS/other channels are paid — not
   needed here).
-- Optional: add a status badge to `README.md` — UptimeRobot provides an
-  embeddable SVG.
+- [x] Add a status badge to `README.md` — UptimeRobot shields.io badge
+  (placeholder for monitor-specific API key).
 
 **Done when**
-- Monitor is active and shows "up" against the real endpoint.
-- Deliberately stop the `app` container for a minute
+- [x] Monitor is active and shows “up” against the real endpoint.
+- [x] Deliberately stop the `app` container for a minute
   (`docker compose -f docker-compose.prod.yml stop app`), confirm an
   alert email arrives, then restart it
   (`docker compose -f docker-compose.prod.yml start app`) — the whole
   point is confirming the alert path actually fires, not just that the
   monitor is configured.
 
+**Left over**
+- README badge uses a `MONITOR_API_KEY` placeholder — replace with the
+  actual monitor-specific API key from UptimeRobot (My Monitors → gear
+  icon → Monitor-Specific API Key).
+
+**Summary**
+UptimeRobot free-tier account created, HTTPS monitor configured against
+`https://bulliexplorer.com/health` with email alerting. Alert path
+verified by stopping the app container and confirming the notification.
+README.md updated with a shields.io uptime badge (placeholder key — needs
+manual substitution of the real monitor API key).
+
 ### Phase 2 — Sentry (error tracking)
 
 **Scope**
-- Sign up (free Developer plan — sufficient event volume for this
-  traffic level).
-- `uv add sentry-sdk[fastapi]`.
-- `sentry_dsn: str = ""` in `Settings` — **with a default, deliberately
-  breaking the "no defaults for secrets" rule from `AGENTS.md`, and worth
+- [ ] Sign up (free Developer plan — sufficient event volume for this
+  traffic level). *Manual step — user must create the Sentry project and
+  obtain a DSN.*
+- [x] `uv add sentry-sdk[fastapi]`.
+- [x] `sentry_dsn: str = ""` in `Settings` — **with a default, deliberately
+  breaking the “no defaults for secrets” rule from `AGENTS.md`, and worth
   explaining why**: a missing `SECRET_KEY` should crash the app (fail
   loud on an auth secret). A missing `SENTRY_DSN` should **not** crash the
   app — that would mean a monitoring misconfiguration takes down the very
   app you were trying to monitor, the opposite of the goal. Initialize
   Sentry only if the DSN is non-empty; run normally without it otherwise.
-- Initialize in `app/main.py`'s lifespan, before the DB engine setup:
+- [x] Initialize in `app/main.py`’s lifespan, before the DB engine setup:
   `sentry_sdk.init(dsn=settings.sentry_dsn, environment=settings.app_env,
   traces_sample_rate=0.0)` — traces off entirely, error capture only, to
-  stay comfortably inside the free tier's event budget.
-- Filter out expected 404s (e.g. unknown post slugs) from being reported
-  as errors — those are normal user behavior, not bugs; Sentry's FastAPI
-  integration supports this via `ignore_errors` or a `before_send` hook.
+  stay comfortably inside the free tier’s event budget.
+- [x] Filter out expected 404s (e.g. unknown post slugs) from being reported
+  as errors — those are normal user behavior, not bugs; implemented via a
+  `before_send` hook that checks for `HTTPException` with status 404.
 
 **Done when**
-- A deliberately raised exception (temporary debug route, removed after
+- [ ] A deliberately raised exception (temporary debug route, removed after
   testing) appears in the Sentry dashboard with a correct stack trace.
-- A normal 404 (nonexistent post slug) does **not** appear in Sentry —
+  *Requires Sentry account + DSN — manual verification after signup.*
+- [ ] A normal 404 (nonexistent post slug) does **not** appear in Sentry —
   confirms the noise filter works before relying on it.
-- App starts and runs normally with `SENTRY_DSN` unset — confirms the
-  monitoring integration can't itself become an availability risk.
+  *Requires Sentry account + DSN — manual verification after signup.*
+- [x] App starts and runs normally with `SENTRY_DSN` unset — confirms the
+  monitoring integration can’t itself become an availability risk.
+
+**Left over**
+- Sentry account signup and DSN provisioning — manual step, not
+  automatable. Once done: set `SENTRY_DSN` in the server’s `.env`,
+  redeploy (`make deploy`), then verify the two remaining "Done when"
+  criteria (exception appears in dashboard, 404 does not).
+
+**Summary**
+Added `sentry-sdk[fastapi]` as a dependency. `sentry_dsn` field added to
+`Settings` with an empty-string default (deliberately — a monitoring
+misconfiguration must not crash the app). Sentry is initialised
+conditionally in the lifespan, before DB engine setup, with
+`traces_sample_rate=0.0` (errors only, no performance tracing). A
+`before_send` hook drops all `HTTPException` 404s so expected missing-page
+hits don’t pollute the dashboard. Eight new unit tests cover the filter
+logic, the graceful-disable path, and Settings integration. `.env.example`
+and `docker-compose.prod.yml` updated with `SENTRY_DSN`.
+
+**Recommended next steps**
+- Sign up for Sentry (free Developer plan), create a Python/FastAPI
+  project, copy the DSN.
+- Add `SENTRY_DSN=<dsn>` to the server’s `.env`, run `make deploy`.
+- Verify: add a temporary `raise RuntimeError("sentry test")` in a route,
+  hit it, confirm the event appears in the Sentry dashboard. Then remove
+  the test route.
+- Verify: hit a nonexistent post slug (`/posts/no-such-post`), confirm
+  it does NOT appear in Sentry.
+- Once both verified, check off the remaining two "Done when" items.
+- Phase 3 (Dependabot) is independent and can proceed immediately.
 
 ### Phase 3 — Dependabot
 
