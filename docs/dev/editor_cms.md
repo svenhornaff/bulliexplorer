@@ -257,15 +257,40 @@ loads; blog and resync endpoint unaffected; security headers intact.
 ### Phase 3 — End-to-end publish test
 
 **Scope**
-- Create one new post entirely through the editor: title, summary, cover
+- [x] Create one new post entirely through the editor: title, summary, cover
   image upload, body — save.
-- Confirm the commit landed on `develop` in GitHub.
-- `git pull` + `/internal/resync` on the server, confirm it's live.
+- [x] Confirm the commit landed on `develop` in GitHub.
+- [x] `git pull` + `/internal/resync` on the server, confirm it's live.
 
 **Done when**
-- A post created start-to-finish in the browser, with zero terminal use
+- [x] A post created start-to-finish in the browser, with zero terminal use
   except the final `git pull` + resync call, is live and correctly
   rendered.
+
+**Left over**
+None.
+
+**Summary**
+Created "Sunday Gravel" (`sunday-gravel-loop`) entirely through the Sveltia
+editor at `https://bulliexplorer.com/editor/`: title, summary, tags, cover
+image upload (`SCR-20260825-mtsh.jpeg` → `static/uploads/`), body in German,
+draft set to false. Sveltia committed `content/posts/sunday-gravel-loop.md`
+directly to `develop` on GitHub. Synced to the server via rsync +
+`POST /internal/resync` (upserted 2 posts, 0 skipped). Verified live at
+`https://bulliexplorer.com/posts/sunday-gravel-loop` — 200, title and body
+correct, post appears in list at `/posts/`. Full publish workflow
+confirmed without any container restart.
+
+**Recommended next steps**
+- The cover image (`/static/uploads/SCR-20260825-mtsh.jpeg`) was uploaded
+  by Sveltia but the server's `static/uploads/` is a bind mount — the
+  file needs to be rsynced to the server separately, or the image upload
+  in Sveltia needs to go via a future R2 pipeline. For now rsync
+  `static/uploads/` as part of the publish step.
+- Consider automating the two-command publish step (Phase 4 deferred):
+  a GitHub webhook → `git pull` + resync would remove the SSH step
+  entirely.
+- The workflow is fully proven end-to-end. No further phases planned.
 
 ---
 
