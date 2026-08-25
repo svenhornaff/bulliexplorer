@@ -43,8 +43,9 @@ collections:
 
       - label: "Published date"
         name: "date"
-        widget: "date"
-        format: "YYYY-MM-DD"
+        widget: "datetime"
+        date_format: "YYYY-MM-DD"
+        time_format: false
         hint: "Date the post is (or will be) published."
 
       - label: "Summary"

@@ -119,6 +119,16 @@ def test_config_yml_posts_collection():
 
 
 @pytest.mark.unit
+def test_config_yml_date_field_uses_datetime_widget():
+    """Sveltia deprecated the 'date' widget — must use 'datetime' with time_format: false."""
+    parsed = yaml.safe_load(CONFIG_YML.read_text())
+    fields = parsed["collections"][0]["fields"]
+    date_field = next(f for f in fields if f["name"] == "date")
+    assert date_field["widget"] == "datetime", "Use widget: datetime (date widget is deprecated)"
+    assert date_field.get("time_format") is False, "Set time_format: false for date-only output"
+
+
+@pytest.mark.unit
 def test_config_yml_field_names_match_frontmatter():
     """Field names in config.yml must match the actual YAML keys in *.md files,
     not the Python field names in PostFrontmatter.
