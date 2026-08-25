@@ -175,25 +175,55 @@ baselines via JSON equality (ignoring the `generated_at` timestamp).
 ### Phase 2 — Sync service (framework-free core)
 
 **Scope**
-- `app/services/post_sync.py`: read `content/posts/*.md` → parse YAML
+- [x] `app/services/post_sync.py`: read `content/posts/*.md` → parse YAML
   frontmatter → validate via `PostFrontmatter` → render body via
   `markdown-it-py` → upsert by `slug`.
-- Needs a YAML parser: `uv add pyyaml` (frontmatter isn't parsed by
+- [x] Needs a YAML parser: `uv add pyyaml` (frontmatter isn't parsed by
   markdown-it-py itself). Note the new dependency in the commit message.
-- Deliberate behaviors to implement, not leave implicit:
-  - A file that fails validation **skips that file, logs an error, and
+- [x] Deliberate behaviors to implement, not leave implicit:
+  - [x] A file that fails validation **skips that file, logs an error, and
     continues** — one broken post must not take down the sync for all.
-  - A post deleted from `content/posts/` gets removed from the DB on the
+  - [x] A post deleted from `content/posts/` gets removed from the DB on the
     next sync (files are the source of truth, the table is derived — so
     the sync is a full reconciliation, not append-only).
-  - Sync is idempotent: running it twice changes nothing the second time.
+  - [x] Sync is idempotent: running it twice changes nothing the second time.
 
 **Done when**
-- Unit tests (no DB): valid fixture parses to the expected field values;
+- [x] Unit tests (no DB): valid fixture parses to the expected field values;
   invalid frontmatter is rejected; markdown renders to expected HTML.
-- Integration test: fixture post round-trips into the test DB; re-running
+- [x] Integration test: fixture post round-trips into the test DB; re-running
   sync is a no-op; deleting the fixture file and re-syncing removes the
   row.
+
+**Left over**
+None.
+
+**Summary**
+Created `app/services/post_sync.py` — a fully framework-free sync service
+(no FastAPI/Jinja2 imports). `sync_posts(content_dir, session)` globs all
+`*.md` files, splits YAML frontmatter via regex, parses with `yaml.safe_load`,
+validates against `PostFrontmatter`, renders the body with `markdown-it-py`,
+then upserts by slug using a fetch-then-compare strategy (avoids spurious
+`updated_at` bumps on unchanged posts). Orphaned DB rows — posts whose file
+has been deleted — are bulk-deleted at the end of each run, making the table
+a fully derived projection of the file system. `pyyaml` added as an explicit
+dependency. 11 unit tests cover all parsing paths — valid/invalid
+frontmatter, YAML errors, missing delimiter, non-mapping YAML, Markdown
+rendering. 6 integration tests verify the full round-trip, idempotency,
+file-deletion reconciliation, partial-skip behaviour (bad file skipped,
+good file upserted), title update propagation, and multi-post sync.
+
+**Recommended next steps**
+- Phase 3 (template port) is independent of Phase 2 and can proceed in
+  parallel or next — it needs no DB, only static files.
+- Phase 4 will call `sync_posts()` from the lifespan (pass `content_dir`
+  from `BASE_DIR / "content/posts"` and a session from `get_session_factory()`).
+- The three uncovered lines in `post_sync.py` (125–127) are the
+  `logger.info` inside `_delete_removed` when orphaned slugs exist — this
+  path is covered by the integration test that deletes a file; the coverage
+  gap is a measurement artifact of which tests run in isolation.
+- No schema changes were needed; the existing `Post` model and
+  `PostFrontmatter` schema cover everything the service requires.
 
 ### Phase 3 — Template port (static, no dynamic data yet)
 
