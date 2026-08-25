@@ -285,22 +285,54 @@ asset links, and empty-state. Page weight (local static, no images):
 ### Phase 4 — Routes + real data (the slice closes end to end)
 
 **Scope**
-- `GET /posts` and `GET /posts/{slug}` per the plan above, querying via
+- [x] `GET /posts` and `GET /posts/{slug}` per the plan above, querying via
   the Phase-1 session dependency, rendering the Phase-3 templates.
-- Draft handling: `is_draft` posts are 404 in production, visible in
+- [x] Draft handling: `is_draft` posts are 404 in production, visible in
   development (`settings.is_development`).
-- Home route (`/`) decision: point it at the post list (replace the
+- [x] Home route (`/`) decision: point it at the post list (replace the
   placeholder landing page) — a separate landing page can come back later
   when there's content worth curating.
-- Run sync at app startup (lifespan) so a deploy automatically picks up
+- [x] Run sync at app startup (lifespan) so a deploy automatically picks up
   new Markdown files — plus a `make sync-posts` target for re-syncing a
   running dev server without restart.
 
 **Done when**
-- Integration test: synced fixture post → `GET /posts` lists it →
+- [x] Integration test: synced fixture post → `GET /posts` lists it →
   `GET /posts/{slug}` returns 200 with the title in the body → unknown
   slug returns 404 → draft post 404s when `APP_ENV=production`.
-- Coverage floor still green.
+- [x] Coverage floor still green.
+
+**Left over**
+None.
+
+**Summary**
+Created `app/routes/posts.py` with `GET /posts/` (published posts list,
+ordered by `published_date` desc via `Depends(get_db_session)`) and
+`GET /posts/{slug}` (single post; 404 for unknown slug or draft in
+production; visible in development). Rewrote `app/routes/home.py` to a
+single `GET /` redirect (302 → `/posts/`) — the `_PlaceholderPost` class
+and `/post-preview` route from Phase 3 are removed. Registered the new
+`posts_router` in `create_app()`. Added lifespan sync in `app/main.py`:
+calls `sync_posts(BASE_DIR / "content/posts", session)` then
+`await session.commit()` inside `async with get_session_factory()() as
+session` on every startup. Added `make sync-posts` Makefile target for
+re-syncing a running dev server. Added masthead CSS fallback
+(`background-color: #343a40`) in `static/style.css`. 4 unit tests updated
+in `test_home.py` (redirect behaviour, mock DB) and 18 unit tests updated
+in `test_templates.py` (dependency overrides for DB-backed routes). 7
+integration tests in `test_routes_integration.py` cover every "Done when"
+criterion: list appearance, detail 200, unknown slug 404, draft 404 in
+production, draft 200 in development, draft exclusion from list, lifespan
+startup without error.
+
+**Recommended next steps**
+- Phase 5: write a real gravel post in `content/posts/` and deploy to
+  Hetzner. The full stack is now end-to-end wired.
+- Decide the `summary`-as-subtitle question (kept as one field for now;
+  revisit after the first real post is live).
+- Consider adding a `make sync-posts` call to the deploy target so that
+  post-only updates (no code change) can be pushed without rebuilding the
+  Docker image.
 
 ### Phase 5 — First real post + ship
 

@@ -1,3 +1,9 @@
 /* BulliExplorer — project-specific overrides on top of Clean Blog / Bootstrap.
    The Clean Blog theme CSS (including Bootstrap 5) is in clean-blog.css.
    Add custom styles here; do not hand-format existing Bootstrap classes.   */
+
+/* Masthead fallback: solid dark colour when no background image is supplied.
+   Prevents a blank/white header in dev before real cover images exist.     */
+.masthead {
+    background-color: #343a40;
+}

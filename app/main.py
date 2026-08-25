@@ -11,7 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.config import get_settings
-from app.core.db import dispose_engine, init_engine
+from app.core.db import dispose_engine, get_session_factory, init_engine
+from app.services.post_sync import sync_posts
 from app.utils.log_factory import configure_logging, get_logger
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -24,6 +25,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     logger.info("BulliExplorer starting up")
     init_engine(settings.database_url)
+
+    # Sync Markdown posts → DB on every startup so new/changed files are
+    # picked up automatically without a manual step.
+    content_dir = BASE_DIR / "content" / "posts"
+    async with get_session_factory()() as session:
+        await sync_posts(content_dir, session)
+        await session.commit()
+
     yield
     logger.info("BulliExplorer shutting down")
     await dispose_engine()
@@ -48,8 +57,10 @@ def create_app() -> FastAPI:
 
     # --- Routers -------------------------------------------------------------
     from app.routes.home import router as home_router
+    from app.routes.posts import router as posts_router
 
     app.include_router(home_router)
+    app.include_router(posts_router)
 
     # --- Health endpoint -----------------------------------------------------
     @app.get("/health")

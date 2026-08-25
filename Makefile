@@ -44,6 +44,21 @@ dev: ## Run the app locally with reload
 db-upgrade: ## Apply Alembic migrations
 	uv run alembic upgrade head
 
+.PHONY: sync-posts
+sync-posts: ## Re-sync content/posts/*.md into the database
+	uv run python -c "\
+import asyncio, pathlib; \
+from app.core.db import init_engine, get_session_factory; \
+from app.core.config import get_settings; \
+from app.services.post_sync import sync_posts; \
+async def run(): \
+    init_engine(get_settings().database_url); \
+    async with get_session_factory()() as s: \
+        counts = await sync_posts(pathlib.Path('content/posts'), s); \
+        await s.commit(); \
+        print(counts); \
+asyncio.run(run())"
+
 .PHONY: db-revision
 db-revision: ## Autogenerate a new migration — usage: make db-revision m="add campsite table"
 	uv run alembic revision --autogenerate -m "$(m)"
