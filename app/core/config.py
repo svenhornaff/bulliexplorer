@@ -25,7 +25,10 @@ class Settings(BaseSettings):
     s3_bucket: str = "bulliexplorer"
 
     # --- Auth ----------------------------------------------------------------
-    secret_key: str = "change-me-in-production"  # noqa: S105
+    secret_key: str  # no default — missing config crashes on startup
+
+    # --- Internal endpoints --------------------------------------------------
+    resync_token: str  # no default — missing config crashes on startup
 
     model_config = {
         "env_file": ".env",
@@ -46,4 +49,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Cached singleton — import this, not the class."""
-    return Settings()
+    return Settings()  # type: ignore[call-arg] — values come from env / .env file at runtime

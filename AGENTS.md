@@ -51,6 +51,24 @@ make ci            # lint + test + security — run before considering any chang
   in `static/`, not npm packages. If a task seems to need `npm install`,
   `vite`, or a bundler, stop — that's the wrong direction for this project;
   flag it instead of adding it.
+- **No working defaults for secrets.** Settings like `secret_key` must have
+  no default value — missing config should crash on startup, not silently
+  run with a placeholder. If bandit flags a hardcoded secret, fix the
+  default; don't suppress the warning.
+- **Logging: always lazy `%`-style args** (`logger.info("x=%d", x)`), never
+  f-strings inside a log call (`logger.info(f"x={x}")`) — the former skips
+  string formatting entirely when the log level filters the line out, the
+  latter always pays the cost. Already the convention throughout the
+  codebase — keep it that way as it grows.
+- **`# noqa` always pairs a specific code with a one-line reason** —
+  `# noqa: S101 — guaranteed by init_engine()`, not a bare `# noqa` or a
+  code with no explanation. Nearly every suppression in the codebase
+  already does this correctly; the one exception (`config.py`'s old
+  `secret_key` line) is the bug above, not a style to follow.
+- **Public functions get a NumPy-style docstring** (summary line, then
+  `Parameters`/`Returns` sections for anything non-trivial) — matches
+  `post_sync.py` and `db.py` already. Internal `_prefixed` helpers can stay
+  terser.
 
 ## Testing
 

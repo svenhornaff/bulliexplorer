@@ -75,7 +75,7 @@ ci: lint test security ## Full CI pipeline
 .PHONY: deploy
 deploy: ci ## Deploy to production (runs ci first)
 	rsync -avz $(RSYNC_EXCLUDE) -e "$(SSH)" ./ $(REMOTE):~/bulliexplorer/
-	$(SSH) $(REMOTE) 'cd ~/bulliexplorer && docker compose -f docker-compose.prod.yml up -d --build && docker compose -f docker-compose.prod.yml exec app alembic upgrade head'
+	$(SSH) $(REMOTE) 'cd ~/bulliexplorer && mkdir -p static/uploads content/posts && docker compose -f docker-compose.prod.yml up -d --build && docker compose -f docker-compose.prod.yml exec app alembic upgrade head'
 
 .PHONY: deploy-logs
 deploy-logs: ## Tail production logs
