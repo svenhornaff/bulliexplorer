@@ -33,19 +33,25 @@ outcome as a config file, not a feature to build.
 Two pieces, deployed separately, neither touching FastAPI:
 
 ```
-┌───────────────────────┐   commits Markdown, auth'd     ┌───────────────────┐
+┌───────────────────────┐   commits Markdown + images    ┌───────────────────┐
 │  Sveltia CMS          │   via personal access token    │  GitHub repo      │
 │  (static JS, at       │ ──────────────────────────────▶│  (develop branch) │
 │  /editor/ on the      │                                └───────────────────┘
 │  Hetzner box)         │                                         │
-└───────────────────────┘                                         │ git pull
+└───────────────────────┘                                         │ push event
+                                                                  │ webhook
                                                                   ▼
                                                          ┌───────────────────┐
                                                          │  Hetzner box      │
+                                                         │  POST /internal/  │
+                                                         │  webhook/github   │
+                                                         │  → GitHub API     │
+                                                         │    fetch          │
+                                                         │  → sync_posts()   │
+                                                         │                   │
                                                          │  content/posts/   │
                                                          │  static/uploads/  │
-                                                         │  (volume-mounted, │
-                                                         │   see below)      │
+                                                         │  (volume-mounted) │
                                                          └───────────────────┘
 ```
 
@@ -83,9 +89,14 @@ whole value depends on "commit → live" actually being fast:
 services:
   app:
     volumes:
-      - ./content/posts:/app/content/posts:ro
-      - ./static/uploads:/app/static/uploads
+      - ./content/posts:/app/content/posts   # rw — webhook writes fetched files here
+      - ./static/uploads:/app/static/uploads # rw — webhook writes uploaded images here
 ```
+
+Note: `content/posts` was initially mounted `:ro` but changed to read-write
+in Phase 4 so the webhook can write files fetched from the GitHub API.
+`static/uploads/` is **no longer gitignored** (changed in Phase 4) —
+Sveltia commits images there and the webhook delivers them to the server.
 
 Plus a `/admin/resync` **(FastAPI app path — not the Sveltia `/editor/` path
 above; different tool, coincidentally similar naming, worth double-checking
@@ -403,13 +414,17 @@ sync:{upserted:2}}`, app logs show both GitHub API calls succeeded.
 - The webhook is now the primary publish path. The manual
   `rsync + /internal/resync` workflow from Phase 3 still works as a
   fallback if GitHub is unreachable.
-- `static/uploads/` is gitignored so images uploaded via Sveltia don't
-  appear in `fetch_and_write` (GitHub API returns 404 for that dir).
-  This is handled gracefully. When R2 is wired (deferred), image uploads
-  go directly to R2 and this is no longer an issue.
-- To test the full end-to-end: create a post in Sveltia, save — GitHub
-  webhook fires automatically, post appears at `/posts/<slug>` within
-  seconds. No SSH, no terminal.
+- `static/uploads/` is **no longer gitignored** (fixed post-Phase 4) —
+  Sveltia commits images to the repo, the webhook fetches and delivers
+  them to the server automatically. Full end-to-end image publish is
+  working: save in Sveltia → image live on site within seconds, no SSH.
+- To test: create a post with a cover image in Sveltia, save — both the
+  post and image appear at `/posts/<slug>` within seconds. No SSH, no
+  terminal, no manual steps.
+- When R2 is wired (deferred), `media_folder` in `config.yml` changes
+  to an S3-compatible target and the `static/uploads/` fetch step in
+  `github_sync.py` becomes redundant — small config change, not a
+  redesign.
 
 ---
 
