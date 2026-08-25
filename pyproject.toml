@@ -22,6 +22,7 @@ dependencies = [
     "sqladmin>=0.31.0",
     "sqlalchemy>=2.0.52",
     "uvicorn[standard]>=0.32.0",
+    "httpx>=0.28.1",
 ]
 
 [build-system]
@@ -33,7 +34,6 @@ packages = ["app"]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

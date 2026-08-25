@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # --- Internal endpoints --------------------------------------------------
     resync_token: str  # no default — missing config crashes on startup
 
+    # --- GitHub Contents API (webhook auto-publish) -------------------------
+    # Fine-grained PAT with Contents: Read on the bulliexplorer repo.
+    # Used by POST /internal/webhook/github to fetch committed files.
+    github_token: str  # no default — missing config crashes on startup
+    webhook_secret: str  # no default — generated when registering the webhook
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

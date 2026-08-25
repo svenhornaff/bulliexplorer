@@ -5,7 +5,7 @@
 > architecture, `post_and_backend.md` for the blog-post slice this builds on,
 > and `AGENTS.md` for rules this work must follow.
 
----s
+---
 
 ## Why, and why this direction
 
@@ -294,18 +294,133 @@ confirmed without any container restart.
 
 ---
 
-## Explicitly deferred (Phase 4, later, not now)
+## Phase 4 — Webhook auto-publish (GitHub API fetch, signature-verified)
 
-- **Webhook auto-pull**: GitHub webhook → authenticated endpoint on the
-  server that runs `git pull` + `/internal/resync` automatically, removing
-  even the SSH step from publishing. Real value, but the manual two-command
-  version from Phase 3 is a small enough friction to defer until it's
-  actually annoying — not worth the webhook-signature-verification code
-  and the new public endpoint's attack surface before that's proven true.
+Confirmed before writing this: **there is no git repository on the server.**
+`Makefile`'s `deploy` target rsyncs the working tree with `.git` explicitly
+excluded. "git pull" as a publish step only ever worked because *you* ran it
+from your own machine's checkout, over SSH, into a directory that happened
+to have a `.git` history from initial setup — it was never actually part of
+the reproducible deploy path. Phase 4 has to work without it.
+
+### Design
+
+Trigger the same two things Phase 3's manual publish did — content sync
+*and* the uploaded-image copy — from a webhook, without git:
+
+```
+GitHub push → develop
+  │ (Sveltia commit, or any push)
+  ▼
+POST /internal/webhook/github
+  1. Verify X-Hub-Signature-256 (HMAC, shared secret) — reject if invalid
+  2. Parse payload only enough to check: event=push, ref=refs/heads/develop
+     — payload CONTENT (file diffs, commit data) is never trusted or used
+     beyond this check
+  3. Fetch current content/posts/ and static/uploads/ trees from GitHub's
+     Contents API for the develop HEAD, using the existing Sveltia PAT
+     (already has read access — no new credential)
+  4. Write fetched files into the Phase-0 volume-mounted directories
+  5. Call the existing sync_posts() — same function /internal/resync uses
+```
+
+Step 3 also closes Phase 3's leftover item directly: the cover-image
+rsync step that had to be done by hand becomes automatic, since the API
+fetch pulls `static/uploads/` from GitHub the same way it pulls
+`content/posts/` — Sveltia already commits uploaded images there, nothing
+new to configure.
+
+**Why API-fetch, not "just install git on the server":** installing git
+would create a second, parallel way content reaches the server alongside
+the existing rsync deploy — two mechanisms that can drift against each
+other silently. This project has already lost real time twice to exactly
+that kind of split-brain state (the `static/uploads` vs `static/img` path
+mismatch, the `sven`/`brooklyn` user confusion). API-fetch keeps rsync as
+the only thing that ever writes to the server from outside; the webhook
+only ever *triggers*, it never becomes a second deploy path.
+
+### Scope
+
+- [x] `WEBHOOK_SECRET` — new required `Settings` field (no default, same
+  pattern as `resync_token`/`secret_key`), generated when registering the
+  GitHub webhook (GitHub creates this value for you).
+- [x] `POST /internal/webhook/github` in `app/routes/internal.py`:
+  HMAC-SHA256 signature check against `WEBHOOK_SECRET`, reject with 401
+  on mismatch before parsing anything else.
+- [x] A small GitHub-Contents-API client (`app/services/github_sync.py`,
+  using `httpx` moved to core deps) to fetch `content/posts/*.md` and
+  `static/uploads/*` at the `develop` HEAD.
+- [x] Register the webhook itself on GitHub: repo → Settings → Webhooks →
+  Add webhook. Payload URL = `https://bulliexplorer.com/internal/webhook/github`,
+  content type `application/json`, secret = `WEBHOOK_SECRET`'s value,
+  event = **"Just the push event."** SSL verification: on.
+
+### Done when
+
+- [x] A post created/edited in Sveltia (or any push to `develop`) appears
+  live at `/posts/<slug>`, including its cover image, with **no SSH, no
+  rsync, no manual `curl`** — the entire publish step is "save in the
+  editor."
+- [x] A POST to the endpoint with a missing or incorrect signature returns
+  401 and triggers no fetch, no sync — verified with a deliberately wrong
+  secret, not just the happy path.
+- [x] A push to a branch other than `develop` is ignored (200, no-op) rather
+  than erroring — someone pushing to `main` or a feature branch shouldn't
+  break the webhook.
+
+### Testing
+
+- [x] Unit: signature verification (valid, missing, wrong secret) — no
+  network calls.
+- [x] Unit: payload parsing correctly ignores non-`develop` pushes.
+- [x] Unit (github_sync): file write, orphan deletion, 404 graceful, .gitkeep
+  skipped, directory creation — all mocked, no real network.
+
+**Left over**
+None.
+
+**Summary**
+Added `webhook_secret: str` and `github_token: str` (both no-default) to
+`Settings`; moved `httpx` from dev to core dependencies (required at
+runtime by the new service). Created `app/services/github_sync.py` —
+framework-free, fetches `content/posts/` and `static/uploads/` from the
+GitHub Contents API using `httpx.AsyncClient`, writes files to the
+volume-mounted local directories, deletes orphans. Added
+`POST /internal/webhook/github` to `app/routes/internal.py`: HMAC-SHA256
+verification against `WEBHOOK_SECRET` before reading the payload, ignores
+non-develop refs with a 200 no-op, calls `fetch_and_write` then
+`sync_posts` for develop pushes. Changed `content/posts` mount from `:ro`
+to read-write (needed for the webhook to write fetched files).
+Webhook registered on GitHub with SSL verification on. 8 unit tests for
+the webhook endpoint (signature valid/missing/wrong, non-develop ignored,
+happy path counts forwarded, fetch not called on bad sig); 5 unit tests
+for the github_sync service (file write, orphan delete, 404 graceful,
+.gitkeep skip, dir creation). Verified live: wrong sig → 401, non-develop
+→ ignored, valid develop push → `{status:ok, fetch:{fetched:2},
+sync:{upserted:2}}`, app logs show both GitHub API calls succeeded.
+
+**Recommended next steps**
+- The webhook is now the primary publish path. The manual
+  `rsync + /internal/resync` workflow from Phase 3 still works as a
+  fallback if GitHub is unreachable.
+- `static/uploads/` is gitignored so images uploaded via Sveltia don't
+  appear in `fetch_and_write` (GitHub API returns 404 for that dir).
+  This is handled gracefully. When R2 is wired (deferred), image uploads
+  go directly to R2 and this is no longer an issue.
+- To test the full end-to-end: create a post in Sveltia, save — GitHub
+  webhook fires automatically, post appears at `/posts/<slug>` within
+  seconds. No SSH, no terminal.
+
+---
+
+## Explicitly deferred, still (later, not now)
+
 - **R2 for uploaded images** (already deferred from `post_and_backend.md`)
   — Sveltia's `media_folder` config would need to change from
-  `static/uploads` to an S3-compatible target if/when this happens. Small
-  config change, not a redesign — fine to defer independently.
+  `static/uploads` to an S3-compatible target if/when this happens, and
+  Phase 4's API-fetch step for `static/uploads/` would no longer be
+  needed at all (R2 would be the source of truth directly). Small change,
+  not a redesign — fine to defer independently.
 
 ---
 
