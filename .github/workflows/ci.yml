@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      db:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bulliexplorer
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5433/bulliexplorer
+      SECRET_KEY: ci-test-secret-not-for-production
+      RESYNC_TOKEN: ci-test-resync-token
+      GITHUB_TOKEN_APP: ci-test-github-token
+      WEBHOOK_SECRET: ci-test-webhook-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --group security
+
+      - name: Lint (ruff + pyright)
+        run: |
+          uv run ruff format app tests --check
+          uv run ruff check app tests
+          uv run pyright app tests
+
+      - name: Test (pytest + coverage)
+        env:
+          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN_APP }}
+        run: uv run pytest
+
+      - name: Security (bandit + detect-secrets + pip-audit)
+        run: |
+          uv run bandit -r app -c pyproject.toml
+          uv run detect-secrets scan app/ > /tmp/secrets-scan.json && \
+            python3 -c "
+          import json, sys
+          a=json.load(open('.secrets.baseline')); b=json.load(open('/tmp/secrets-scan.json'))
+          a.pop('generated_at',None); b.pop('generated_at',None)
+          sys.exit(0 if a==b else (print('detect-secrets: baseline mismatch',file=sys.stderr) or 1))"
+          uv run pip-audit

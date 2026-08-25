@@ -219,18 +219,41 @@ step the user needs to enable.
 ### Phase 5 — CI/CD (GitHub Actions)
 
 **Scope**
-- `.github/workflows/ci.yml` — on every push and PR to `develop`, run the
+- [x] `.github/workflows/ci.yml` — on every push and PR to `develop`, run the
   same `make ci` steps (lint, test, security) already run locally.
-- Deliberately **not** wiring this into deployment — deploy stays
+- [x] Deliberately **not** wiring this into deployment — deploy stays
   `make deploy` from your machine, per the existing rsync-based flow.
   This phase is a safety net that runs earlier and more often, not a
   replacement for how deploys actually happen.
 
 **Done when**
-- A deliberately broken commit (failing test, temporarily) pushed to a
-  branch shows a red check in GitHub before you'd have caught it locally.
-- A clean commit shows green, and the check appears on the repo's main
+- [ ] A deliberately broken commit (failing test, temporarily) pushed to a
+  branch shows a red check in GitHub before you’d have caught it locally.
+- [ ] A clean commit shows green, and the check appears on the repo’s main
   page / PR view.
+
+**Left over**
+- The two “Done when” criteria require observing the workflow run in
+  GitHub after this push lands. The first push with the workflow file
+  will itself be the clean-commit verification.
+
+**Summary**
+Created `.github/workflows/ci.yml` triggered on push and PR to `develop`.
+The workflow runs on `ubuntu-latest` with a PostGIS 16 service container
+on port 5433, installs uv + Python + all dependency groups, then runs
+the same three gates as `make ci`: lint (ruff format + ruff check +
+pyright), test (pytest with coverage floor), and security (bandit +
+detect-secrets + pip-audit). Uses `GITHUB_TOKEN_APP` to avoid conflicting
+with GitHub Actions’ reserved `GITHUB_TOKEN` secret. Deployment is
+deliberately not wired in — stays `make deploy` from the local machine.
+
+**Recommended next steps**
+- After this push, check the Actions tab on GitHub — the workflow should
+  trigger automatically and show a green check.
+- Optionally push a deliberately broken commit to a branch to confirm
+  the red-check path works, then revert.
+- Phase 4 (backup verification) is skipped for now; revisit before
+  SQLAdmin ships.
 
 ---
 
