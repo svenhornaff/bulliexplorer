@@ -15,8 +15,8 @@ htmlcov/
 # Logs
 logs/
 
-# Media (large, lives in R2 not git)
-static/uploads/
+# static/uploads/ is committed — Sveltia writes images here and the
+# GitHub webhook delivers them to the server. Move to R2 when volume justifies it.
 
 # Build
 dist/
