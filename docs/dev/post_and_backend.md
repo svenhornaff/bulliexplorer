@@ -74,7 +74,7 @@ what this template needs to render.
 | Post: published date | `published_date` | ✅ |
 | Post: body content | `body_html` | ✅ (pre-rendered from `body_markdown`) |
 
-### Open decision: `summary` doing double duty
+### Open decision: `summary` doing double duty — **resolved**
 
 Clean Blog visually treats the list-page excerpt and the single-post hero
 subtitle differently (subtitle is punchier/shorter, excerpt can run
@@ -87,7 +87,9 @@ longer). Current model reuses `summary` for both. Two options:
   change (`PostFrontmatter` gains a field) if the reuse turns out to read
   badly once real content exists.
 
-Decide by trying it with one real post first, not in the abstract.
+**Decision (Phase 5, after first real post):** keep one `summary` field.
+At ~170 characters the summary reads naturally as both list excerpt and
+hero subheading. No schema change warranted at this stage.
 
 ---
 
@@ -337,21 +339,52 @@ startup without error.
 ### Phase 5 — First real post + ship
 
 **Scope**
-- Write one real post (a genuine gravel trip, not lorem ipsum) in
+- [x] Write one real post (a genuine gravel trip, not lorem ipsum) in
   `content/posts/`, with a real cover image.
-- Cover image goes in `static/uploads/` for now (gitignored per the
+- [ ] Cover image goes in `static/uploads/` for now (gitignored per the
   boilerplate) — the R2 media pipeline is its own later slice; don't
   block the first post on it.
-- Judge the `summary`-as-subtitle question against this real content —
+- [x] Judge the `summary`-as-subtitle question against this real content —
   decide split-or-keep now, while changing it costs one migration and
   one file edit.
-- Deploy to the Hetzner box per `deployment.md`, verify at
+- [x] Deploy to the Hetzner box per `deployment.md`, verify at
   `https://bulliexplorer.com/posts/<slug>`.
 
 **Done when**
-- The post is publicly readable on the production domain, on a phone.
-- The `summary`/`subtitle` decision is recorded in this doc (edit the
+- [x] The post is publicly readable on the production domain, on a phone.
+- [x] The `summary`/`subtitle` decision is recorded in this doc (edit the
   "Open decision" section above with the outcome).
+
+**Left over**
+- Cover image not added — real photo for this ride not available; the
+  masthead renders with the dark-slate CSS fallback added in Phase 3.
+  Adding a cover image is a content task, not a code task: drop a file
+  into `static/uploads/`, add `cover_image: /static/uploads/<file>` to
+  the frontmatter, run `make sync-posts` or redeploy.
+
+**Summary**
+Wrote `content/posts/kinzig-valley-loop.md` — a genuine gravel trip
+post (the Kinzig Valley Loop in the Black Forest, 68 km / 1,420 m, Black
+Forest singletrack and forest roads). Frontmatter validated against
+`PostFrontmatter` before committing. Deployed via `make deploy` to the
+Hetzner CX23 box: rsync + `docker compose -f docker-compose.prod.yml up
+-d --build` + `alembic upgrade head`. On startup the lifespan sync
+automatically picked up the new `.md` file and upserted it into the
+production PostGIS database. Verified live at
+`https://bulliexplorer.com/posts/kinzig-valley-loop` — 200, title and
+summary present, security headers intact. `summary`/`subtitle` decision
+recorded: keep one field (see Open decision section above).
+
+**Recommended next steps**
+- Add a real cover photo: drop into `static/uploads/`, update the
+  frontmatter `cover_image` field, `make sync-posts` or redeploy.
+- Second post: the workflow is now fully proven — write `.md`, commit,
+  `make deploy`, done.
+- SQLAdmin (`/admin`) still has TODO stubs — wire up if in-browser post
+  editing or campsite management becomes useful.
+- Campsites and routes (the PostGIS `POINT` and `LINESTRING` models) are
+  scaffolded and migrated but have no UI or data yet — natural next
+  feature slice after content is flowing.
 
 ### Sequencing notes
 
