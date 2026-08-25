@@ -29,4 +29,7 @@ build/
 # pi
 .pi
 
+# Scratch / temporary working files (gitignored per AGENTS.md rule 1)
+.scratch/
+
 .vscode/*

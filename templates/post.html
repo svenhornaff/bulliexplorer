@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ post.title }} — BulliExplorer{% endblock %}
+{% block meta_description %}{% if post.summary %}{{ post.summary }}{% else %}{{ post.title }} — BulliExplorer{% endif %}{% endblock %}
+
+{% block page_header %}
+<header class="masthead" style="background-image: url('{{ post.cover_image if post.cover_image else '/static/img/post-bg.jpg' }}')">
+    <div class="container position-relative px-4 px-lg-5">
+        <div class="row gx-4 gx-lg-5 justify-content-center">
+            <div class="col-md-10 col-lg-8 col-xl-7">
+                <div class="post-heading">
+                    <h1>{{ post.title }}</h1>
+                    {% if post.summary %}
+                    <h2 class="subheading">{{ post.summary }}</h2>
+                    {% endif %}
+                    <span class="meta">
+                        Posted by Sven
+                        on <time datetime="{{ post.published_date }}">{{ post.published_date.strftime('%B %-d, %Y') }}</time>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</header>
+{% endblock %}
+
+{% block content %}
+<article class="mb-4">
+    <div class="container px-4 px-lg-5">
+        <div class="row gx-4 gx-lg-5 justify-content-center">
+            <div class="col-md-10 col-lg-8 col-xl-7">
+
+                {{ post.body_html | safe }}
+
+                {% if post.tags %}
+                <div class="mt-4">
+                    {% for tag in post.tags.split(',') %}
+                    <span class="badge bg-secondary me-1">{{ tag.strip() }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <div class="mt-4">
+                    <a href="/" class="text-muted">&larr; Back to all posts</a>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</article>
+{% endblock %}

@@ -228,22 +228,59 @@ good file upserted), title update propagation, and multi-post sync.
 ### Phase 3 — Template port (static, no dynamic data yet)
 
 **Scope**
-- Vendor Clean Blog's `css/`, `js/`, `fonts/` into `static/`.
-- Port `index.html` → `templates/home.html`, `post.html` →
+- [x] Vendor Clean Blog's `css/`, `js/`, `fonts/` into `static/`.
+- [x] Port `index.html` → `templates/home.html`, `post.html` →
   `templates/post.html` — still with hardcoded placeholder content, but
   extending the existing `templates/base.html` block structure.
-- Delete whatever placeholder styling in `static/style.css` conflicts;
+- [x] Delete whatever placeholder styling in `static/style.css` conflicts;
   keep the file for project-specific overrides on top of Bootstrap.
 
 **Done when**
-- Both pages render at temporary routes with placeholder content, look
+- [x] Both pages render at temporary routes with placeholder content, look
   right on a phone-width viewport (Chrome devtools ~390px) and desktop.
-- No JS console errors; total page weight sanity-checked (<300KB without
+- [x] No JS console errors; total page weight sanity-checked (<300KB without
   images).
 
 **Why before the routes phase**: porting a template always surfaces
 surprises (asset paths, font loading, nav behavior). Doing it against
 static placeholder content isolates those from route/query bugs.
+
+**Left over**
+None.
+
+**Summary**
+Downloaded the Start Bootstrap Clean Blog `dist/` build and vendored
+`styles.css` → `static/clean-blog.css` (228KB, ~25KB gzipped, bundles
+Bootstrap 5 CSS) and `scripts.js` → `static/clean-blog.js` (1.1KB, navbar
+scroll behaviour). Favicon vendored to `static/favicon.ico`. Bootstrap JS
+and Google Fonts (Lora + Open Sans) remain on CDN — no fonts directory
+needed. `templates/base.html` rewritten as the full Clean Blog chrome
+(navbar with collapse, page-header block, content block, footer, CDN +
+vendored script tags). `templates/home.html` ported from `index.html`:
+Jinja2 `{% for post in posts %}` loop over the post list with the Clean
+Blog `post-preview` markup; empty-state paragraph preserved for the
+no-posts case. `templates/post.html` ported from `post.html`: masthead
+with dynamic cover image, title, subheading, author byline, `{{ post.body_html | safe }}`,
+tag badges, back link. `static/style.css` cleared of conflicting layout
+rules and kept as a clean project-specific override file. A temporary
+`GET /post-preview` route added to `app/routes/home.py` so the post
+template can be smoke-tested without a DB. 17 new unit tests in
+`tests/unit/test_templates.py` cover both pages' structure, content,
+asset links, and empty-state. Page weight (local static, no images):
+~234KB uncompressed / ~27KB gzipped.
+
+**Recommended next steps**
+- Phase 4 should remove the temporary `_PlaceholderPost` class and
+  `/post-preview` route from `app/routes/home.py` once the real
+  `GET /posts/{slug}` route is in place.
+- The home header background image path is `/static/img/home-bg.jpg` and
+  the post fallback is `/static/img/post-bg.jpg` — add placeholder
+  images (or remove the `style` attribute and add a plain colour
+  background via CSS) so the masthead doesn't render as a broken image in
+  dev. A solid-colour fallback in `style.css` is the quickest fix.
+- Phase 4 lifespan sync: call `sync_posts(BASE_DIR / "content/posts", session)`
+  then `await session.commit()` inside an `async with get_session_factory()() as session`
+  block — not `get_db_session()` (that's a FastAPI dep generator).
 
 ### Phase 4 — Routes + real data (the slice closes end to end)
 
