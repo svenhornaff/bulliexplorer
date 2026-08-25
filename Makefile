@@ -28,7 +28,12 @@ test: ## Run tests (coverage floor via addopts)
 .PHONY: security
 security: ## bandit + detect-secrets + pip-audit
 	uv run bandit -r app -c pyproject.toml
-	uv run detect-secrets scan app/ | diff .secrets.baseline -
+	uv run detect-secrets scan app/ > /tmp/secrets-scan.json && \
+		python3 -c "\
+import json, sys; \
+a=json.load(open('.secrets.baseline')); b=json.load(open('/tmp/secrets-scan.json')); \
+a.pop('generated_at',None); b.pop('generated_at',None); \
+sys.exit(0 if a==b else (print('detect-secrets: baseline mismatch',file=sys.stderr) or 1))"
 	uv run pip-audit
 
 .PHONY: dev

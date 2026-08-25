@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.config import get_settings
+from app.core.db import dispose_engine, init_engine
 from app.utils.log_factory import configure_logging, get_logger
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,11 +21,12 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup / shutdown lifecycle."""
+    settings = get_settings()
     logger.info("BulliExplorer starting up")
-    # TODO: init DB engine, run migrations check
+    init_engine(settings.database_url)
     yield
     logger.info("BulliExplorer shutting down")
-    # TODO: dispose DB engine
+    await dispose_engine()
 
 
 def create_app() -> FastAPI:

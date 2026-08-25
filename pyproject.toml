@@ -3,10 +3,8 @@ name = "bulliexplorer"
 version = "0.1.0"
 description = "FastAPI + Jinja2 + HTMX blog with PostGIS-backed campsites/routes"
 readme = "README.md"
-authors = [
-    { name = "Sven Hornaff", email = "sven.hornaff@t-systems.com" }
-]
-requires-python = ">=3.12.13"
+authors = [{ name = "Sven Hornaff", email = "sven.hornaff@t-systems.com" }]
+requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.19.1",
     "boto3>=1.43.78",
