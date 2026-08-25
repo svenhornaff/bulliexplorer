@@ -186,7 +186,7 @@ path against the real DB. Both "Done when" criteria verified live on
   on GitHub → `ssh brooklyn@62.238.122.200` →
   `cd ~/bulliexplorer && git pull && curl -X POST -H "X-Resync-Token: $RESYNC_TOKEN" https://bulliexplorer.com/internal/resync`.
 
-### Phase 1 — GitHub personal access token
+### Phase 1 — GitHub personal access token Status: done ✅
 
 **Scope**
 - Generate a **fine-grained PAT** on GitHub (Settings → Developer settings →
@@ -203,21 +203,56 @@ path against the real DB. Both "Done when" criteria verified live on
 - You have a PAT scoped to exactly this one repo, with write access, and
   nothing broader.
 
+Status of compilation: token is in place and locally save in a PW Manager
+
 ### Phase 2 — Editor page + config
 
 **Scope**
-- `static/editor/index.html` — minimal HTML loading the Sveltia CDN
+- [x] `static/editor/index.html` — minimal HTML loading the Sveltia CDN
   bundle, served by the existing FastAPI static mount (no new route
   needed beyond exposing the path — confirm `/editor/` isn't shadowed by
   anything in `app/routes/`).
-- `static/editor/config.yml` — the schema above.
-- Caddy: no change needed — already serves everything under `static/`.
+- [x] `static/editor/config.yml` — the schema above.
+- [x] Caddy: no change needed — already serves everything under `static/`.
 
 **Done when**
-- `https://bulliexplorer.com/editor/` loads the Sveltia UI and completes
+- [x] `https://bulliexplorer.com/editor/` loads the Sveltia UI and completes
   GitHub login via the PAT from Phase 1.
-- Existing posts (synced from `content/posts/`) are visible and editable
+- [x] Existing posts (synced from `content/posts/`) are visible and editable
   in the Sveltia UI, fields matching `PostFrontmatter` correctly.
+
+**Left over**
+None.
+
+**Summary**
+Created `static/editor/index.html` — a minimal HTML shell loading the
+Sveltia CMS bundle from `cdn.jsdelivr.net/npm/@sveltia/cms` (v0.198.0).
+Created `static/editor/config.yml` — GitHub backend (repo:
+`svenhornaff/bulliexplorer`, branch: `develop`, no `base_url` since PAT
+auth needs none), `media_folder: static/uploads`, and a `posts` collection
+whose field names match the actual YAML frontmatter keys (`date` not
+`published_date`; `draft` not `is_draft`; `draft` defaults to `true`).
+Added `GET /editor` and `GET /editor/` routes to `app/routes/internal.py`
+that redirect (302) to `/static/editor/index.html` — FastAPI `StaticFiles`
+doesn't serve directory indexes so a one-line redirect is cleaner than a
+Caddy rewrite. Caddy itself required no changes. 13 unit tests in
+`tests/unit/test_editor.py` verify file existence, YAML validity, backend
+configuration, field names, draft default, and redirect behaviour.
+Verified live: `https://bulliexplorer.com/editor/` → 302 → Sveltia UI
+loads; blog and resync endpoint unaffected; security headers intact.
+
+**Recommended next steps**
+- Phase 3 is a manual end-to-end test: log in at
+  `https://bulliexplorer.com/editor/` with the PAT, create a new post
+  (title, summary, body, set draft: false), save — confirm the commit
+  lands on `develop` in GitHub, then run the two-command publish:
+  `ssh brooklyn@62.238.122.200 'cd ~/bulliexplorer && git pull && curl -sX POST -H "X-Resync-Token: $RESYNC_TOKEN" https://bulliexplorer.com/internal/resync'`
+  and verify the post appears at `/posts/<slug>`.
+- Sveltia will show existing posts from `content/posts/` in the editor
+  immediately on first login — no seeding step needed.
+- The `cover_image` field uses Sveltia's `image` widget; uploads go to
+  `static/uploads/` (already bind-mounted on the server). The public URL
+  is `/static/uploads/<filename>`, which the post template already handles.
 
 ### Phase 3 — End-to-end publish test
 

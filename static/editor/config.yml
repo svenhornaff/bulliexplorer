@@ -1,0 +1,77 @@
+# Sveltia CMS configuration for BulliExplorer.
+#
+# Auth: GitHub personal access token (PAT).
+# On the login screen click "Sign In with Token" and paste your fine-grained
+# PAT (repository: bulliexplorer, permission: Contents Read+Write).
+# No base_url / OAuth Worker needed for single-user instances.
+#
+# Fields mirror PostFrontmatter (app/models/post_schema.py) exactly.
+# Key names match the YAML frontmatter keys written to content/posts/*.md,
+# not the Python field names (e.g. "date" not "published_date",
+# "draft" not "is_draft").
+
+backend:
+  name: github
+  repo: svenhornaff/bulliexplorer
+  branch: develop
+
+# Images uploaded via the editor land in static/uploads/ (bind-mounted
+# on the server — no container restart needed after an upload).
+media_folder: "static/uploads"
+public_folder: "/static/uploads"
+
+collections:
+  - name: "posts"
+    label: "Posts"
+    label_singular: "Post"
+    folder: "content/posts"
+    create: true
+    # Sveltia uses the slug field value as the filename: <slug>.md
+    slug: "{{fields.slug}}"
+    format: "frontmatter"
+    fields:
+      - label: "Title"
+        name: "title"
+        widget: "string"
+        hint: "Post title, shown in the list and as the page <h1>."
+
+      - label: "Slug"
+        name: "slug"
+        widget: "string"
+        hint: "URL path segment — e.g. 'kinzig-valley-loop'. Lowercase, hyphens only."
+        pattern: ['^[a-z0-9-]+$', "Lowercase letters, digits and hyphens only"]
+
+      - label: "Published date"
+        name: "date"
+        widget: "date"
+        format: "YYYY-MM-DD"
+        hint: "Date the post is (or will be) published."
+
+      - label: "Summary"
+        name: "summary"
+        widget: "text"
+        required: false
+        hint: "One-paragraph excerpt shown in the post list and as the hero subheading."
+
+      - label: "Cover image"
+        name: "cover_image"
+        widget: "image"
+        required: false
+        hint: "Uploaded to /static/uploads/. Leave blank for the default dark header."
+
+      - label: "Tags"
+        name: "tags"
+        widget: "list"
+        required: false
+        hint: "Comma-separated list of tags, e.g. gravel, germany, bikepacking."
+
+      - label: "Draft"
+        name: "draft"
+        widget: "boolean"
+        default: true
+        hint: "Draft posts are hidden on production but visible in development."
+
+      - label: "Body"
+        name: "body"
+        widget: "markdown"
+        hint: "Post body in Markdown. Images can be uploaded via the toolbar."

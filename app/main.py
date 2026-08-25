@@ -57,11 +57,13 @@ def create_app() -> FastAPI:
 
     # --- Routers -------------------------------------------------------------
     from app.routes.home import router as home_router
-    from app.routes.internal import router as internal_router
+    from app.routes.internal import _internal as internal_router
+    from app.routes.internal import router as editor_router
     from app.routes.posts import router as posts_router
 
     app.include_router(home_router)
     app.include_router(posts_router)
+    app.include_router(editor_router)
     app.include_router(internal_router)
 
     # --- Health endpoint -----------------------------------------------------

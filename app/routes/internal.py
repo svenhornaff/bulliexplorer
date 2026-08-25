@@ -1,13 +1,13 @@
-"""Internal / operational endpoints.
+"""Internal / operational endpoints + editor redirect.
 
-These are not public-facing routes.  They are protected by a shared-secret
-header and intended for single-operator use (e.g. triggering a post-sync
-after a ``git pull`` on the server without restarting the container).
+- ``GET /editor`` / ``GET /editor/`` — redirects to Sveltia CMS static page.
+- ``POST /internal/resync`` — re-runs sync_posts; requires X-Resync-Token.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from fastapi.security import APIKeyHeader
 
 from app.core.config import get_settings
@@ -17,14 +17,38 @@ from app.utils.log_factory import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/internal")
+# Two routers: one for the editor redirect (no prefix), one for /internal/*.
+router = APIRouter()
+_internal = APIRouter(prefix="/internal")
 
-# Header name the caller must supply.
+
+# ---------------------------------------------------------------------------
+# Editor redirect
+# ---------------------------------------------------------------------------
+
+
+@router.get("/editor")
+@router.get("/editor/")
+async def editor_redirect() -> RedirectResponse:
+    """Redirect /editor and /editor/ to the Sveltia CMS static index page.
+
+    Sveltia CMS lives at ``/static/editor/index.html`` served by FastAPI's
+    StaticFiles mount.  FastAPI StaticFiles does not serve directory indexes,
+    so this one-line redirect makes ``/editor/`` a usable entry point without
+    needing a Caddy rewrite rule.
+    """
+    return RedirectResponse(url="/static/editor/index.html", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Resync endpoint
+# ---------------------------------------------------------------------------
+
 _TOKEN_HEADER = APIKeyHeader(name="X-Resync-Token", auto_error=False)
 
 
 def _require_resync_token(token: str | None = Depends(_TOKEN_HEADER)) -> str:  # noqa: B008 — FastAPI Depends pattern
-    """Dependency: reject requests that don't carry the correct resync token."""
+    """Dependency: reject requests missing or carrying the wrong resync token."""
     settings = get_settings()
     if not token or token != settings.resync_token:
         raise HTTPException(
@@ -34,7 +58,7 @@ def _require_resync_token(token: str | None = Depends(_TOKEN_HEADER)) -> str:  #
     return token
 
 
-@router.post("/resync", status_code=status.HTTP_200_OK)
+@_internal.post("/resync", status_code=status.HTTP_200_OK)
 async def resync(
     request: Request,
     db=Depends(get_db_session),  # noqa: B008 — FastAPI Depends pattern
