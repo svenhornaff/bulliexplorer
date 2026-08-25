@@ -84,9 +84,11 @@ def test_sentry_dsn_picked_up_from_env(monkeypatch):
 
 
 @pytest.mark.unit
-def test_sentry_dsn_defaults_to_empty():
+def test_sentry_dsn_defaults_to_empty(monkeypatch):
     """SENTRY_DSN defaults to empty string — Sentry stays disabled."""
+    monkeypatch.delenv("SENTRY_DSN", raising=False)
+
     from app.core.config import Settings
 
-    s = Settings()
+    s = Settings(_env_file=None)  # type: ignore[call-arg]
     assert s.sentry_dsn == ""

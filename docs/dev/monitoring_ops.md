@@ -155,31 +155,41 @@ and `docker-compose.prod.yml` updated with `SENTRY_DSN`.
 ### Phase 3 — Dependabot
 
 **Scope**
-- `.github/dependabot.yml`:
-  ```yaml
-  version: 2
-  updates:
-    - package-ecosystem: "uv"
-      directory: "/"
-      schedule:
-        interval: "weekly"
-      open-pull-requests-limit: 5
-  ```
-  Dependabot has supported the `uv` ecosystem natively since March 2025 —
-  reads `pyproject.toml` and `uv.lock` directly, no `pip`-ecosystem
-  workaround needed.
-- Enable Dependabot security updates in the repo settings (Settings →
+- [x] `.github/dependabot.yml` committed with `uv` ecosystem, weekly
+  schedule, 5 open PR limit.
+- [ ] Enable Dependabot security updates in the repo settings (Settings →
   Code security → Dependabot alerts + security updates) — the config
-  file alone doesn't turn on vulnerability alerts, both pieces are
-  needed.
+  file alone doesn’t turn on vulnerability alerts, both pieces are
+  needed. *Manual step in GitHub UI.*
 
 **Done when**
-- Dependabot's first scheduled run produces either a PR (if any dependency
-  has an update) or shows a clean run in the repo's Insights → Dependency
+- [ ] Dependabot’s first scheduled run produces either a PR (if any dependency
+  has an update) or shows a clean run in the repo’s Insights → Dependency
   graph → Dependabot tab.
 - A deliberately outdated pinned dependency (temporarily loosen a version
-  constraint, don't commit it) confirms Dependabot would propose a bump —
+  constraint, don’t commit it) confirms Dependabot would propose a bump —
   optional verification, skip if the weekly wait is fine to trust as-is.
+
+**Left over**
+- Enable Dependabot alerts + security updates in the GitHub repo UI
+  (Settings → Code security). The config file alone handles version
+  updates; vulnerability alerts require the toggle.
+
+**Summary**
+Created `.github/dependabot.yml` with the `uv` package ecosystem
+(native support since March 2025), weekly schedule, and a 5-PR limit.
+Dependabot will read `pyproject.toml` + `uv.lock` directly. The config
+file is committed; the GitHub UI toggle for security alerts is a manual
+step the user needs to enable.
+
+**Recommended next steps**
+- Go to github.com/svenhornaff/bulliexplorer → Settings → Code security
+  and enable Dependabot alerts + security updates.
+- Wait for the first weekly run or check Insights → Dependency graph →
+  Dependabot to confirm it picked up the config.
+- Phase 4 (backup verification) is next but lower urgency — only becomes
+  critical once SQLAdmin ships and campsite/route data is entered
+  directly into the DB.
 
 ### Phase 4 — Backup verification (do before SQLAdmin ships, not before this)
 
