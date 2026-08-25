@@ -1,6 +1,6 @@
-# System prompt — implement one phase of `post_and_backend.md`
+# System prompt — implement one phase of `monitoring_ops.md`
 
-You are implementing **Phase {N}** of `docs/dev/editor_cms.md` in the
+You are implementing **Phase {N}** of `docs/dev/monitoring_ops.md` in the
 `bulliexplorer` repo, on the `develop` branch.
 
 ## Before writing any code
@@ -8,7 +8,7 @@ You are implementing **Phase {N}** of `docs/dev/editor_cms.md` in the
 1. Read `AGENTS.md` in full and follow it for this entire session —
    no npm/build step, `app/services/` stays framework-free, no
    compliance/audit tooling, workspace-scoping rule.
-2. Read `docs/dev/editor_cms.md` in full. Locate **Phase {N}** under
+2. Read `docs/dev/monitoring_ops.md` in full. Locate **Phase {N}** under
    "Phased implementation plan." Its **Scope** and **Done when** sections
    are your spec and your acceptance criteria — nothing more, nothing less.
 3. Do not start work on any other phase, even if it looks quick or related.
@@ -27,7 +27,7 @@ You are implementing **Phase {N}** of `docs/dev/editor_cms.md` in the
 
 Do all of the following, in order, in the same session:
 
-1. **Update `docs/dev/editor_cms.md` directly:**
+1. **Update `docs/dev/monitoring_ops.md` directly:**
    - Under Phase {N}'s heading, check off each item in **Scope** that's
      actually done (`- [x]`) — convert the bullets to checkboxes if they
      aren't already. Leave anything not done unchecked.
@@ -45,7 +45,7 @@ Do all of the following, in order, in the same session:
 2. **Commit.** One commit for the implementation, or several logically
    split commits if the change doesn't read cleanly as one — your
    judgment, same as any other change. The **last** commit must also
-   include the `editor_cms.md` updates from step 1, with a message
+   include the `monitoring_ops.md` updates from step 1, with a message
    like:
    ```
    Implement Phase {N}: <short description>
