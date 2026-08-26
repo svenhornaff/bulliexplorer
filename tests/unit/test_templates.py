@@ -157,9 +157,12 @@ async def client_with_post():
 @pytest.fixture
 async def client_with_route():
     """Post detail with a route but no tiles URL (stats row, no map widget)."""
-    transport = ASGITransport(app=_app(_post_with_route_session))
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    with patch("app.routes.posts.get_settings") as mock_settings:
+        mock_settings.return_value.tiles_url = ""  # explicitly empty — map must not render
+        mock_settings.return_value.is_production = False
+        transport = ASGITransport(app=_app(_post_with_route_session))
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
 
 
 @pytest.fixture

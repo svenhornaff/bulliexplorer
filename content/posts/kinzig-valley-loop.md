@@ -9,6 +9,40 @@ tags:
   - germany
   - bikepacking
 draft: false
+route:
+  name: Kinzig Valley Loop
+  gpx_file: /static/uploads/kinzig-valley-loop.gpx
+  description: 68 km loop through the Black Forest via Hausach, Wolfach, Schiltach
+    and the Schenkenzell ridge. One very steep hike-a-bike above Schiltach included.
+points_of_interest:
+  - name: Zell am Harmersbach Campsite
+    category: campsite
+    lat: 48.3194
+    lng: 8.0607
+    notes: Starting point. Flushing toilets, cold showers. No booking needed in
+      shoulder season.
+  - name: "Konditorei Wehrle, Haslach"
+    category: restaurant
+    lat: 48.2780
+    lng: 8.0892
+    notes: Pre-ride Weckle and espresso stop. Opens before 07:00 on weekdays.
+  - name: Schiltach Coffee Stop
+    category: restaurant
+    lat: 48.2931
+    lng: 8.3399
+    notes: Good flat white here. The bridge over the Schiltach is worth a photo.
+  - name: Schenkenzell Ridge Viewpoint
+    category: viewpoint
+    lat: 48.2419
+    lng: 8.3985
+    notes: Three-valley view on a clear day. The 23-minute push to get here
+      is worth it.
+  - name: Wolfach Water Fountain
+    category: water_point
+    lat: 48.2873
+    lng: 8.2226
+    notes: Drinkable. Useful on the return leg if you misjudged your bottle
+      capacity.
 ---
 
 There's a specific kind of quiet you only get in the Black Forest at seven in the morning. Fog in the valley, mist caught in the firs, and no sound except your tyres on wet gravel. I pulled out of the Zell am Harmersbach campsite at first light, panniers off, the van locked, and nothing but a frame bag and the vague intention of doing the Kinzig loop before lunch.

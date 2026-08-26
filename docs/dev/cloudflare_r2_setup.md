@@ -8,16 +8,16 @@
 
 ## Checklist
 
-- [ ] R2 enabled on the Cloudflare account (free tier)
-- [ ] Bucket `bulliexplorer` created
-- [ ] Account API token created (Object Read & Write, scoped to this bucket)
-- [ ] Credentials filled into `.env`
-- [ ] PMTiles file uploaded to the bucket
-- [ ] Public Development URL enabled
-- [ ] CORS policy applied
-- [ ] Upload + CORS verified via `curl`
-- [ ] `static/basemap-test.html` updated to the R2 URL and visually confirmed
-- [ ] `docs/dev/r2-cors.json` + updated test page committed and pushed
+- [x] R2 enabled on the Cloudflare account (free tier)
+- [x] Bucket `bulliexplorer` created
+- [x] Account API token created (Object Read & Write, scoped to this bucket)
+- [x] Credentials filled into `.env`
+- [x] PMTiles file uploaded to the bucket
+- [x] Public Development URL enabled (r2.dev subdomain)
+- [x] CORS policy applied (Dashboard → flat-array JSON from `docs/dev/r2-cors.json`)
+- [x] Upload + CORS verified via `curl` (HTTP 206 + `Access-Control-Allow-Origin: *`)
+- [x] `static/basemap-test.html` updated to the R2 URL and visually confirmed
+- [x] `docs/dev/r2-cors.json` + updated test page committed and pushed
 
 ---
 
