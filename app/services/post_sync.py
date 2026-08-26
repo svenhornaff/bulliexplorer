@@ -26,8 +26,11 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.point_of_interest import PointOfInterest
 from app.models.post import Post
 from app.models.post_schema import PostFrontmatter
+from app.models.route import Route
+from app.services.geo_sync import sync_pois, sync_route
 from app.utils.log_factory import get_logger
 
 logger = get_logger(__name__)
@@ -81,7 +84,11 @@ async def sync_posts(
 
     # ── 2. Upsert all successfully parsed posts ──────────────────────────────
     for _slug, pp in parsed.items():
-        await _upsert_post(session, pp)
+        post = await _upsert_post(session, pp)
+        # Flush so ``post.id`` is available for FK references in geo rows.
+        await session.flush()
+        await sync_route(session, post.id, pp.frontmatter.route, content_dir)
+        await sync_pois(session, post.id, pp.frontmatter.points_of_interest)
         counts["upserted"] += 1
 
     # ── 3. Delete DB rows whose slug is no longer in the file set ────────────
@@ -159,8 +166,13 @@ def _parse_file(path: Path) -> _ParsedPost | None:
 # ---------------------------------------------------------------------------
 
 
-async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> None:
-    """Insert or update a single post row by slug."""
+async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> Post:
+    """Insert or update a single post row by slug.
+
+    Returns
+    -------
+    The ``Post`` ORM object (either newly created or the existing one).
+    """
     fm = pp.frontmatter
 
     # Fetch existing row (if any) by slug.
@@ -183,6 +195,7 @@ async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> None:
         )
         session.add(post)
         logger.debug("Inserted post slug=%r", fm.slug)
+        return post
     else:
         # Only touch the row if something actually changed — keeps sync
         # idempotent and avoids spurious `updated_at` bumps.
@@ -205,21 +218,29 @@ async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> None:
             logger.debug("Updated post slug=%r", fm.slug)
         else:
             logger.debug("Post slug=%r unchanged — no write", fm.slug)
+        return existing
 
 
 async def _delete_removed(session: AsyncSession, live_slugs: set[str]) -> int:
     """Delete any DB rows whose slug is not in ``live_slugs``.
 
-    Returns the number of rows deleted.
-    """
-    # Fetch all slugs currently in the table.
-    result = await session.execute(select(Post.slug))
-    db_slugs = {row[0] for row in result.all()}
+    Child rows (Route, PointOfInterest) are deleted explicitly before the
+    Post rows because the FK constraints do not specify CASCADE DELETE.
 
-    orphaned = db_slugs - live_slugs
-    if not orphaned:
+    Returns the number of Post rows deleted.
+    """
+    # Fetch all (id, slug) pairs currently in the table.
+    result = await session.execute(select(Post.id, Post.slug))
+    db_rows = result.all()
+
+    orphaned_ids = [row[0] for row in db_rows if row[1] not in live_slugs]
+    orphaned_slugs = [row[1] for row in db_rows if row[1] not in live_slugs]
+    if not orphaned_ids:
         return 0
 
-    await session.execute(delete(Post).where(Post.slug.in_(orphaned)))
-    logger.info("Deleted %d removed post(s): %s", len(orphaned), sorted(orphaned))
-    return len(orphaned)
+    # Delete child rows first to satisfy FK constraints.
+    await session.execute(delete(Route).where(Route.post_id.in_(orphaned_ids)))
+    await session.execute(delete(PointOfInterest).where(PointOfInterest.post_id.in_(orphaned_ids)))
+    await session.execute(delete(Post).where(Post.id.in_(orphaned_ids)))
+    logger.info("Deleted %d removed post(s): %s", len(orphaned_slugs), sorted(orphaned_slugs))
+    return len(orphaned_ids)

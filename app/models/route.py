@@ -7,7 +7,7 @@ Each route belongs to exactly one :class:`~app.models.post.Post`
 from __future__ import annotations
 
 from geoalchemy2 import Geometry
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -21,3 +21,11 @@ class Route(Base):
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text, default=None)
     track: Mapped[str] = mapped_column(Geometry("LINESTRING", srid=4326))
+
+    # Ride stats computed from the GPX during sync (Phase 2).
+    # Nullable because not all GPX files contain every field
+    # (e.g. no timestamps → no duration).
+    distance_km: Mapped[float | None] = mapped_column(Float, default=None)
+    elevation_gain_m: Mapped[float | None] = mapped_column(Float, default=None)
+    elevation_loss_m: Mapped[float | None] = mapped_column(Float, default=None)
+    duration_minutes: Mapped[float | None] = mapped_column(Float, default=None)

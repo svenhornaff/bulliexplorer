@@ -43,3 +43,8 @@ def test_route_table_columns():
     assert "name" in columns
     assert "track" in columns
     assert "post_id" in columns
+    # Phase 2 stats columns
+    assert "distance_km" in columns
+    assert "elevation_gain_m" in columns
+    assert "elevation_loss_m" in columns
+    assert "duration_minutes" in columns
