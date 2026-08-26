@@ -356,14 +356,66 @@ the live DB with `_geocode` mocked.
 ### Phase 4 — Basemap setup
 
 **Scope**
-- Generate/extract the regional PMTiles file (Protomaps' extraction
+- [x] Generate/extract the regional PMTiles file (Protomaps' extraction
   tooling, one-time, not app code).
-- Upload to R2, confirm it's reachable via the `pmtiles` protocol from a
+- [ ] Upload to R2, confirm it's reachable via the `pmtiles` protocol from a
   local MapLibre test page.
 
 **Done when**
-- A minimal standalone HTML page (not yet wired into the app) renders the
+- [ ] A minimal standalone HTML page (not yet wired into the app) renders the
   regional basemap correctly via MapLibre + PMTiles from the R2 URL.
+
+**Left over**
+- R2 upload not completed — `S3_ENDPOINT_URL`, `S3_ACCESS_KEY`, and
+  `S3_SECRET_KEY` are all empty in `.env`; the upload command and full
+  instructions are documented in `static/basemap-test.html`.  Once
+  credentials are filled in, run:
+  ```bash
+  AWS_ACCESS_KEY_ID=$S3_ACCESS_KEY \
+  AWS_SECRET_ACCESS_KEY=$S3_SECRET_KEY \
+  aws s3 cp static/pmtiles/black-forest-20260826.pmtiles \
+    s3://bulliexplorer/tiles/black-forest.pmtiles \
+    --endpoint-url $S3_ENDPOINT_URL \
+    --content-type application/x-protomaps-tiles
+  ```
+  Then update `TILES_URL` in `static/basemap-test.html` to the public R2
+  URL and verify the page renders.
+
+**Summary**
+Installed `pmtiles` 1.31.2 CLI via Homebrew.  Extracted the Black Forest /
+Baden-Württemberg region (bbox 7.0,47.5 — 9.5,49.0, zoom 0–14) from
+the Protomaps daily build `20260826.pmtiles` using HTTP range requests —
+265 MB local file at `static/pmtiles/black-forest-20260826.pmtiles`
+(gitignored).  Created `static/basemap-test.html`: a standalone MapLibre
+GL page using pmtiles.js + `@protomaps/basemaps` v5 from CDN, served by
+the existing FastAPI `StaticFiles` mount (which correctly returns HTTP 206
+partial-content range responses).  Verified the PMTiles file is correctly
+extracted (right bounds, zoom range, OSM data from 2026-08-26).  Verified
+the FastAPI server returns HTTP 206 for range requests on the file — the
+stack is fully wired up locally.  The only remaining step is the R2 upload
+and switching the `TILES_URL` constant in the test page.
+
+Also completed in this session (pre-Phase-5 items from Phase 3 recommendations):
+- Updated `static/editor/config.yml` with `route` and `points_of_interest`
+  fields matching the Sveltia schema in maps_gis.md.
+- Fixed `_resolve_gpx_path` to handle Sveltia's `/static/uploads/...`
+  public paths (resolved relative to project root, not filesystem root).
+- Added 1 new unit test for the Sveltia path case; updated editor config
+  tests to assert `route` and `points_of_interest` are present.
+
+**Recommended next steps**
+1. Fill in R2 credentials in `.env` (`S3_ENDPOINT_URL`, `S3_ACCESS_KEY`,
+   `S3_SECRET_KEY`) and run the upload command above.
+2. Update `TILES_URL` in `static/basemap-test.html` to the R2 URL and
+   verify the page renders — that closes the Phase 4 "Done when" criterion.
+3. Phase 5 (Frontend rendering): the backend infrastructure (Route/POI data,
+   GPX sync, geocoding, CMS config) is now complete.  Phase 5 needs:
+   - `app/routes/posts.py`: add a separate optional query for Route +
+     `PointOfInterest` per post (LEFT JOIN semantics, never inner join).
+   - `templates/post.html`: conditionally render the MapLibre map and stats
+     row when `post.route` is present.
+   - Vendor MapLibre GL + pmtiles.js into `static/` (the test page uses CDN;
+     production templates must vendor per AGENTS.md's no-npm rule).
 
 ### Phase 5 — Frontend rendering
 

@@ -79,10 +79,23 @@ def test_resolve_gpx_path_relative(tmp_path):
 
 @pytest.mark.unit
 def test_resolve_gpx_path_absolute():
-    """An absolute path is returned unchanged."""
+    """A non-static absolute path is returned unchanged."""
     abs_path = "/some/absolute/path/route.gpx"
     result = _resolve_gpx_path(abs_path, Path("/content/posts"))
     assert result == Path(abs_path)
+
+
+@pytest.mark.unit
+def test_resolve_gpx_path_sveltia_public_path(tmp_path):
+    """A /static/... path (from Sveltia's file widget) resolves relative to
+    the project root (content_dir.parent.parent), not the filesystem root."""
+    # Simulate: project_root = tmp_path, content_dir = tmp_path/content/posts
+    content_dir = tmp_path / "content" / "posts"
+    content_dir.mkdir(parents=True)
+
+    result = _resolve_gpx_path("/static/uploads/my-route.gpx", content_dir)
+    expected = (tmp_path / "static" / "uploads" / "my-route.gpx").resolve()
+    assert result == expected
 
 
 # ---------------------------------------------------------------------------

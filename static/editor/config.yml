@@ -77,3 +77,48 @@ collections:
         name: "body"
         widget: "markdown"
         hint: "Post body in Markdown. Images can be uploaded via the toolbar."
+
+      # ── Geo fields (Phase 3 — maps_gis.md) ────────────────────────────────
+      # Both fields are optional — posts without a route or POIs are unaffected.
+
+      - label: "Route (GPX)"
+        name: "route"
+        widget: "object"
+        required: false
+        hint: "Upload the GPX track recorded on a bike computer or app."
+        fields:
+          - { label: "Route name", name: "name", widget: "string" }
+          - label: "GPX file"
+            name: "gpx_file"
+            widget: "file"
+            accept: ".gpx,application/gpx+xml"
+            hint: "Uploaded to /static/uploads/. Sync reads it from there automatically."
+          - { label: "Description", name: "description", widget: "text", required: false }
+
+      - label: "Points of interest"
+        name: "points_of_interest"
+        widget: "list"
+        required: false
+        hint: "Campsites, restaurants, viewpoints, etc. mentioned in the post."
+        fields:
+          - { label: "Name", name: "name", widget: "string" }
+          - label: "Category"
+            name: "category"
+            widget: "select"
+            options:
+              - { label: "Campsite", value: "campsite" }
+              - { label: "Restaurant", value: "restaurant" }
+              - { label: "Hotel", value: "hotel" }
+              - { label: "Gas station", value: "gas_station" }
+              - { label: "Viewpoint", value: "viewpoint" }
+              - { label: "Bike shop", value: "bike_shop" }
+              - { label: "Water point", value: "water_point" }
+              - { label: "Other", value: "other" }
+          - label: "Place name or address"
+            name: "place_query"
+            widget: "string"
+            required: false
+            hint: "Geocoded automatically on sync. Leave blank if you prefer to set coordinates manually."
+          - { label: "Latitude (manual override)", name: "lat", widget: "number", value_type: "float", required: false }
+          - { label: "Longitude (manual override)", name: "lng", widget: "number", value_type: "float", required: false }
+          - { label: "Notes", name: "notes", widget: "text", required: false }

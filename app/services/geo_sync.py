@@ -324,8 +324,16 @@ def _resolve_poi_location(poi_fm: PoiFrontmatter) -> Point | None:
 def _resolve_gpx_path(gpx_file: str, content_dir: Path) -> Path:
     """Resolve a GPX file reference to an absolute Path.
 
-    If ``gpx_file`` is already absolute, use it as-is.  Otherwise resolve
-    relative to ``content_dir``.
+    Sveltia's ``file`` widget stores uploads prefixed with ``public_folder``
+    (configured as ``/static/uploads``), so the frontmatter value looks like
+    ``/static/uploads/route.gpx``.  Paths that start with ``/static/`` are
+    resolved relative to the *project root* (``content_dir.parent.parent``
+    when ``content_dir`` is ``content/posts/``), not the filesystem root.
+
+    For all other paths:
+
+    - Absolute paths are used as-is.
+    - Relative paths are resolved against ``content_dir``.
 
     Parameters
     ----------
@@ -340,6 +348,11 @@ def _resolve_gpx_path(gpx_file: str, content_dir: Path) -> Path:
     """
     p = Path(gpx_file)
     if p.is_absolute():
+        # Sveltia public path: "/static/uploads/route.gpx"
+        # → project_root/static/uploads/route.gpx
+        relative = Path(gpx_file.lstrip("/"))
+        if relative.parts and relative.parts[0] == "static":
+            return (content_dir.parent.parent / relative).resolve()
         return p
     return (content_dir / gpx_file).resolve()
 

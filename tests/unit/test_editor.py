@@ -156,6 +156,10 @@ def test_config_yml_field_names_match_frontmatter():
     assert "tags" in fields
     assert "body" in fields
 
+    # Geo fields added in Phase 3 (maps_gis.md) — must match PostFrontmatter keys.
+    assert "route" in fields
+    assert "points_of_interest" in fields
+
 
 @pytest.mark.unit
 def test_config_yml_draft_defaults_to_true():

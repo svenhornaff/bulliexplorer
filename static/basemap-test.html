@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BulliExplorer — Basemap Test (Phase 4)</title>
+
+    <!-- MapLibre GL JS — renderer chosen for this project, see maps_gis.md -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css"
+      crossorigin="anonymous"
+    />
+    <script
+      src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"
+      crossorigin="anonymous"
+    ></script>
+
+    <!-- pmtiles JS — addProtocol bridge that lets MapLibre read PMTiles via
+         HTTP range requests, whether local or from R2. -->
+    <script
+      src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"
+      crossorigin="anonymous"
+    ></script>
+
+    <!-- @protomaps/basemaps v5 — cartographic style functions compatible with
+         Protomaps build v4.x (the build channel used for this project). -->
+    <script
+      src="https://unpkg.com/@protomaps/basemaps@5/dist/basemaps.js"
+      crossorigin="anonymous"
+    ></script>
+
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: sans-serif; }
+
+      #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+
+      #info {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255,255,255,0.9);
+        padding: 8px 14px;
+        border-radius: 4px;
+        font-size: 13px;
+        box-shadow: 0 1px 4px rgba(0,0,0,.2);
+        max-width: 480px;
+        text-align: center;
+        z-index: 10;
+      }
+      #info code { background: #f3f3f3; padding: 1px 4px; border-radius: 2px; }
+      #tiles-url { font-size: 11px; color: #666; word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="info">
+      <strong>BulliExplorer basemap — Phase 4 test</strong><br />
+      Serving local PMTiles extract · Black Forest / Baden-Württemberg<br />
+      <span id="tiles-url"></span>
+    </div>
+
+    <script>
+      // ── Tile source configuration ────────────────────────────────────────
+      //
+      // LOCAL DEV  (default):
+      //   1. Run the app:  make dev   (uvicorn on port 8000)
+      //   2. Open:  http://localhost:8000/static/basemap-test.html
+      //   FastAPI's StaticFiles mount handles HTTP 206 range requests, which
+      //   the pmtiles.js protocol requires — do NOT use `python3 -m http.server`
+      //   as it does not support range requests.
+      //
+      // PRODUCTION (R2):
+      //   1. Upload the extract:
+      //      AWS_ACCESS_KEY_ID=$S3_ACCESS_KEY \
+      //      AWS_SECRET_ACCESS_KEY=$S3_SECRET_KEY \
+      //      aws s3 cp static/pmtiles/black-forest-20260826.pmtiles \
+      //        s3://bulliexplorer/tiles/black-forest.pmtiles \
+      //        --endpoint-url $S3_ENDPOINT_URL \
+      //        --content-type application/x-protomaps-tiles
+      //   2. Set PRODUCTION_TILES_URL to the public R2 URL.
+      //   3. Switch the active TILES_URL below.
+
+      const LOCAL_TILES_URL =
+        "pmtiles://http://localhost:8000/static/pmtiles/black-forest-20260826.pmtiles";
+
+      // Fill in after uploading to R2 (see S3_ENDPOINT_URL in .env):
+      const PRODUCTION_TILES_URL =
+        "pmtiles://https://<account-id>.r2.cloudflarestorage.com/bulliexplorer/tiles/black-forest.pmtiles";
+
+      // Switch this to PRODUCTION_TILES_URL once R2 credentials are set:
+      const TILES_URL = LOCAL_TILES_URL;
+
+      document.getElementById("tiles-url").textContent = TILES_URL;
+
+      // ── Register the pmtiles:// protocol with MapLibre ───────────────────
+      const protocol = new pmtiles.Protocol();
+      maplibregl.addProtocol("pmtiles", protocol.tile);
+
+      // ── Map ──────────────────────────────────────────────────────────────
+      const map = new maplibregl.Map({
+        container: "map",
+        style: {
+          version: 8,
+          // Protomaps-hosted glyphs (fontstacks for labels).
+          glyphs:
+            "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
+          // Sprite for point-of-interest icons and highway shields.
+          sprite:
+            "https://protomaps.github.io/basemaps-assets/sprites/v4/light",
+          sources: {
+            protomaps: {
+              type: "vector",
+              url: TILES_URL,
+              attribution:
+                '<a href="https://protomaps.com">Protomaps</a> © ' +
+                '<a href="https://openstreetmap.org">OpenStreetMap</a>',
+            },
+          },
+          // Generate all cartographic layers from the "light" flavor.
+          // "de" = prefer German labels, matching the blog's focus area.
+          layers: basemaps.layers(
+            "protomaps",
+            basemaps.namedFlavor("light"),
+            { lang: "de" }
+          ),
+        },
+        // Centre on the Black Forest (Schwarzwald).
+        center: [8.1, 48.1],
+        zoom: 10,
+        maxBounds: [
+          [5.5, 46.5],   // SW — allow some panning outside the extract
+          [11.0, 50.0],  // NE
+        ],
+      });
+
+      map.addControl(new maplibregl.NavigationControl());
+      map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
+    </script>
+  </body>
+</html>

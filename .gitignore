@@ -32,4 +32,8 @@ build/
 # Scratch / temporary working files (gitignored per AGENTS.md rule 1)
 .scratch/
 
+# PMTiles regional tile extracts — kept locally for dev, hosted on R2 in prod.
+# Re-generate with: pmtiles extract <CDN_URL> <output> --bbox=... --maxzoom=14
+static/pmtiles/
+
 .vscode/*

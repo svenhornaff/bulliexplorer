@@ -6,6 +6,19 @@
 
 ---
 
+## Two separate publish paths — don't conflate them
+
+**Content** (blog posts, images, routes/POIs) publishes via Sveltia CMS
+(`/editor/`) → GitHub webhook → automatic sync. No SSH, no rsync, no
+`make deploy`. See `docs/dev/editor_cms.md` for the full design.
+
+**Code** (anything in `app/`, templates, config) deploys via `make deploy`
+(rsync-based) as described below. This never touches content, and
+publishing content never triggers a code deploy — the two are intentionally
+decoupled.
+
+Everything from here on in this document is the *code* deploy path.
+
 ## 0. Architecture overview
 
 ```
@@ -78,9 +91,20 @@ Some hardening steps from the tech concept doc are still pending:
 ssh -i ~/.ssh/bulliexplorer_hetzner root@62.238.122.200
 
 # 1. Lock down SSH — disable root login + password auth
-sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-sed -i 's/^#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+#
+# NOTE: the previous version of this used `sed -i 's/^#PermitRootLogin.*/.../'`,
+# which only fires if a line starting with exactly "#PermitRootLogin" already
+# exists to match against. On a config that doesn't have that exact commented
+# line (common — this bit us live during initial setup), the sed silently
+# does nothing and exits 0: no error, no change, false sense of security.
+# grep -q + conditional append guarantees the setting lands regardless of
+# the file's starting state:
+grep -q '^PermitRootLogin no' /etc/ssh/sshd_config || echo 'PermitRootLogin no' >> /etc/ssh/sshd_config
+grep -q '^PasswordAuthentication no' /etc/ssh/sshd_config || echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config
 systemctl restart sshd
+# Verify before trusting it — sshd -t validates syntax, sshd -T dumps the
+# effective config so you can confirm the setting actually took:
+sshd -t && sshd -T | grep -i "permitrootlogin\|passwordauthentication
 
 # ⚠️  BEFORE running the above, verify you can SSH as brooklyn:
 #     ssh -i ~/.ssh/bulliexplorer_hetzner brooklyn@62.238.122.200
