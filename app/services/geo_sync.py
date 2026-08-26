@@ -2,24 +2,30 @@
 
 Extends the post sync pipeline (post_sync.py) to handle the geo data
 embedded in a post's frontmatter: a GPX track → Route row, and manual
-lat/lng POIs → PointOfInterest rows.
+lat/lng or geocoded POIs → PointOfInterest rows.
 
 Design rules (per AGENTS.md):
 - **Framework-free**: no FastAPI, Jinja2, or sqladmin imports.
-- **Resilient**: a bad GPX or a missing file is skipped with an error log;
-  it must not abort the sync for the post as a whole.
+- **Resilient**: a bad GPX, a missing file, or a failed geocode is skipped
+  with a warning; it must not abort the sync for the post as a whole.
 - **Reconciling**: if a post's frontmatter previously had a route/POIs and
   a later edit removes them, the now-orphaned DB rows are deleted.
 - **Idempotent**: re-syncing unchanged content produces no DB writes.
+
+Nominatim usage policy (https://operations.osmfoundation.org/policies/nominatim/):
+- Identify your application via ``User-Agent``.
+- No more than 1 request per second — enforced by :data:`_MIN_REQUEST_INTERVAL`
+  and the module-level :data:`_last_geocode_time` timestamp.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import gpxpy
+import httpx
 from geoalchemy2.shape import from_shape
 from shapely.geometry import LineString, Point
 from sqlalchemy import delete, select
@@ -29,10 +35,23 @@ from app.models.point_of_interest import PointOfInterest
 from app.models.post_schema import PoiFrontmatter, RouteFrontmatter
 from app.models.route import Route
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Nominatim constants and rate-limit state
+# ---------------------------------------------------------------------------
+
+_NOMINATIM_SEARCH_URL: str = "https://nominatim.openstreetmap.org/search"
+
+# Nominatim usage policy requires a descriptive User-Agent.
+_NOMINATIM_UA: str = "bulliexplorer/1.0 (https://github.com/svenhornaff/bulliexplorer)"
+
+# Nominatim allows at most 1 request per second.
+_MIN_REQUEST_INTERVAL: float = 1.0
+
+# Last-request monotonic timestamp — updated after each Nominatim call so
+# that consecutive geocoding calls in the same sync run are spaced correctly.
+_last_geocode_time: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -129,8 +148,17 @@ async def sync_pois(
     session: AsyncSession,
     post_id: int,
     pois_fm: list[PoiFrontmatter],
+    *,
+    http_client: httpx.AsyncClient | None = None,
 ) -> None:
     """Replace all PointOfInterest rows for a post with the current list.
+
+    POI coordinates come from one of two sources (in priority order):
+
+    1. **Manual override** — explicit ``lat``/``lng`` in frontmatter.
+    2. **Nominatim geocoding** — ``place_query`` text, resolved via the
+       OpenStreetMap Nominatim API.  A geocoding failure skips that one POI
+       and logs a warning rather than aborting the whole sync.
 
     Parameters
     ----------
@@ -143,34 +171,136 @@ async def sync_pois(
         set of existing rows is replaced — delete-then-insert keeps the
         logic simple and correct for any combination of adds, edits, and
         removals.
+    http_client:
+        Optional ``httpx.AsyncClient`` used for Nominatim requests.  When
+        ``None`` a default client is created internally — pass an explicit
+        client in tests to inject a mock transport.
     """
     # Delete all existing POIs for this post, then re-insert the current set.
-    # This avoids the complexity of diffing by name/position.
     await session.execute(delete(PointOfInterest).where(PointOfInterest.post_id == post_id))
 
-    for poi_fm in pois_fm:
-        point = _resolve_poi_location(poi_fm)
-        if point is None:
-            logger.warning(
-                "POI %r for post_id=%d has no usable coordinates — skipping",
-                poi_fm.name,
-                post_id,
-            )
-            continue
+    if not pois_fm:
+        return
 
-        poi = PointOfInterest(
-            post_id=post_id,
-            name=poi_fm.name,
-            category=poi_fm.category,
-            notes=poi_fm.notes,
-            location=from_shape(point, srid=4326),
-        )
-        session.add(poi)
-        logger.debug("Upserted POI %r for post_id=%d", poi_fm.name, post_id)
+    # Only open an HTTP client when at least one POI actually needs geocoding.
+    _needs_geocoding = any(p.place_query is not None and p.lat is None and p.lng is None for p in pois_fm)
+    _close_client = False
+    client: httpx.AsyncClient | None = http_client
+    if _needs_geocoding and client is None:
+        client = httpx.AsyncClient(headers={"User-Agent": _NOMINATIM_UA})
+        _close_client = True
+
+    try:
+        for poi_fm in pois_fm:
+            point = await _resolve_poi_location_with_geocoding(poi_fm, client)
+            if point is None:
+                logger.warning(
+                    "POI %r for post_id=%d has no usable coordinates — skipping",
+                    poi_fm.name,
+                    post_id,
+                )
+                continue
+
+            poi = PointOfInterest(
+                post_id=post_id,
+                name=poi_fm.name,
+                category=poi_fm.category,
+                notes=poi_fm.notes,
+                location=from_shape(point, srid=4326),
+            )
+            session.add(poi)
+            logger.debug("Upserted POI %r for post_id=%d", poi_fm.name, post_id)
+    finally:
+        if _close_client and client is not None:
+            await client.aclose()
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# Geocoding
+# ---------------------------------------------------------------------------
+
+
+async def _geocode(query: str, client: httpx.AsyncClient) -> tuple[float, float] | None:
+    """Call the Nominatim search API and return ``(lat, lon)`` on success.
+
+    Enforces the 1 req/s rate limit required by Nominatim's usage policy.
+    Any network error, non-200 response, or empty result set is logged as a
+    warning and returns ``None`` — the caller decides whether to skip or retry.
+
+    Parameters
+    ----------
+    query:
+        Free-text place name or address, e.g. ``"Café Sonnenberg, Freiburg"``.
+    client:
+        An open ``httpx.AsyncClient``.  The caller owns its lifetime.
+
+    Returns
+    -------
+    ``(latitude, longitude)`` floats on success, or ``None`` on any failure.
+    """
+    global _last_geocode_time  # noqa: PLW0603 — module-level rate-limit timestamp
+
+    # Enforce Nominatim's 1 req/s cap before each call.
+    loop = asyncio.get_running_loop()
+    elapsed = loop.time() - _last_geocode_time
+    if elapsed < _MIN_REQUEST_INTERVAL:
+        await asyncio.sleep(_MIN_REQUEST_INTERVAL - elapsed)
+    _last_geocode_time = loop.time()
+
+    try:
+        resp = await client.get(
+            _NOMINATIM_SEARCH_URL,
+            params={"q": query, "format": "json", "limit": 1},
+            headers={"User-Agent": _NOMINATIM_UA},
+        )
+        resp.raise_for_status()
+        results = resp.json()
+    except Exception as exc:  # noqa: BLE001 — any network/HTTP/parse failure is non-fatal
+        logger.warning("Nominatim request failed for %r: %s — POI skipped", query, exc)
+        return None
+
+    if not results:
+        logger.warning("Nominatim: no results for %r — POI skipped", query)
+        return None
+
+    return float(results[0]["lat"]), float(results[0]["lon"])
+
+
+async def _resolve_poi_location_with_geocoding(
+    poi_fm: PoiFrontmatter,
+    client: httpx.AsyncClient | None,
+) -> Point | None:
+    """Return a Shapely Point for the POI, trying geocoding if manual coords absent.
+
+    Priority order:
+    1. If ``lat`` and ``lng`` are both set, use them directly — no network call.
+    2. If only ``place_query`` is set and a ``client`` is available, geocode.
+    3. Otherwise return ``None`` (caller logs a warning and skips this POI).
+
+    Parameters
+    ----------
+    poi_fm:
+        Parsed POI frontmatter.
+    client:
+        ``httpx.AsyncClient`` for geocoding, or ``None`` to skip it.
+    """
+    # Manual override always wins — no network call.
+    manual = _resolve_poi_location(poi_fm)
+    if manual is not None:
+        return manual
+
+    # Geocoding path — only when place_query is present and a client is provided.
+    if poi_fm.place_query is not None and client is not None:
+        coords = await _geocode(poi_fm.place_query, client)
+        if coords is not None:
+            lat, lon = coords
+            return Point(lon, lat)  # Shapely/PostGIS: (lon, lat)
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers (GPX + route)
 # ---------------------------------------------------------------------------
 
 
@@ -181,10 +311,10 @@ async def _get_existing_route(session: AsyncSession, post_id: int) -> Route | No
 
 
 def _resolve_poi_location(poi_fm: PoiFrontmatter) -> Point | None:
-    """Return a Shapely Point if ``lat``/``lng`` are set, else ``None``.
+    """Return a Shapely Point if ``lat``/``lng`` are both set, else ``None``.
 
-    Phase 3 will add Nominatim resolution for ``place_query``; for now the
-    manual override is the only path that produces a coordinate.
+    This is the fast, sync, no-network path.  Geocoding lives in
+    :func:`_resolve_poi_location_with_geocoding`.
     """
     if poi_fm.lat is not None and poi_fm.lng is not None:
         return Point(poi_fm.lng, poi_fm.lat)  # Shapely/PostGIS: (lon, lat)

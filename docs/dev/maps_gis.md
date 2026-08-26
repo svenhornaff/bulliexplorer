@@ -301,25 +301,57 @@ when" criteria; `make ci` green at 94.86% coverage.
 ### Phase 3 — Geocoding
 
 **Scope**
-- Small Nominatim client (`httpx`, already a dependency) in the sync
+- [x] Small Nominatim client (`httpx`, already a dependency) in the sync
   service: if `place_query` is set and `lat`/`lng` are blank, geocode and
   fill them in; if `lat`/`lng` are explicitly set, skip geocoding entirely
   (manual override always wins).
-- Respect Nominatim's usage policy: identify via `User-Agent`, cap request
+- [x] Respect Nominatim's usage policy: identify via `User-Agent`, cap request
   rate (trivial at this content volume, but do it correctly rather than
   assuming volume stays low forever).
-- Log (not crash) on a failed/ambiguous geocode — a POI that fails to
+- [x] Log (not crash) on a failed/ambiguous geocode — a POI that fails to
   resolve should skip that one POI, not break the whole post sync, same
   "one broken thing doesn't take down the batch" principle already
   established for post frontmatter validation.
 
 **Done when**
-- A fixture POI with only `place_query` set resolves to correct
+- [x] A fixture POI with only `place_query` set resolves to correct
   coordinates.
-- A fixture POI with manual `lat`/`lng` set is *not* geocoded (network
+- [x] A fixture POI with manual `lat`/`lng` set is *not* geocoded (network
   call never happens — verify via a mock that asserts zero calls).
-- A deliberately bad `place_query` ("asdkfjasldkfj") fails gracefully —
+- [x] A deliberately bad `place_query` ("asdkfjasldkfj") fails gracefully —
   POI skipped, sync continues, logged.
+
+**Left over**
+None.
+
+**Summary**
+Added a `_geocode(query, client)` async helper to `geo_sync.py` that calls
+the Nominatim search endpoint via `httpx`, enforces the 1 req/s usage-policy
+limit with a module-level monotonic timestamp, identifies via the required
+`User-Agent` header, and returns `(lat, lon)` or `None` on any failure (never
+raises). Added `_resolve_poi_location_with_geocoding(poi_fm, client)` that
+wraps the existing sync `_resolve_poi_location` helper: manual `lat`/`lng`
+always wins without a network call; `place_query` triggers `_geocode` only
+when no manual coords are present. Updated `sync_pois` to accept an optional
+`http_client` keyword argument (injectable for testing), create a default
+`httpx.AsyncClient` only when at least one POI actually needs geocoding, and
+clean it up in a `finally` block. 15 new unit tests cover the HTTP client
+behaviour (mock transport), priority logic, and error paths. 4 new
+integration tests verify all three "Done when" criteria end-to-end against
+the live DB with `_geocode` mocked.
+
+**Recommended next steps**
+- Phase 4 (Basemap setup) is infrastructure-only (PMTiles extraction + R2
+  upload) — no app code.
+- Phase 5 (Frontend rendering) needs the Sveltia CMS config updated first
+  so authors can author geo content before the template renders it.  The
+  `static/editor/config.yml` `route` / `points_of_interest` fields (shown
+  in the Sveltia config section of this doc) should be added as a
+  pre-step to Phase 5.
+- GPX path resolution in `_resolve_gpx_path` currently resolves relative
+  to `content_dir` (i.e. `content/posts/`).  Sveltia uploads files to
+  `static/uploads/` — the path convention will need aligning in Phase 5
+  (or when real posts with GPX files are authored).
 
 ### Phase 4 — Basemap setup
 

@@ -4,17 +4,28 @@ Tests cover the pure helper functions:
 - _resolve_gpx_path: absolute vs relative path handling.
 - _resolve_poi_location: lat/lng → Shapely Point, None when no coords.
 - _parse_gpx: fixture GPX file produces correct geometry and stats.
+- _geocode: Nominatim client behaviour (mock HTTP transport).
+- _resolve_poi_location_with_geocoding: priority logic, mock _geocode.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from shapely.geometry import Point
 
+import app.services.geo_sync as _geo_module
 from app.models.post_schema import PoiFrontmatter
-from app.services.geo_sync import _parse_gpx, _resolve_gpx_path, _resolve_poi_location  # noqa: PLC2701
+from app.services.geo_sync import (  # noqa: PLC2701
+    _geocode,
+    _parse_gpx,
+    _resolve_gpx_path,
+    _resolve_poi_location,
+    _resolve_poi_location_with_geocoding,
+)
 
 # Minimal valid GPX with two track points and elevation/timestamp data.
 # Distance ≈ 11.13 km (straight-line Haversine between the two points).
@@ -219,3 +230,184 @@ def test_parse_gpx_single_point_returns_none(tmp_path):
     gpx_file.write_text(one_point, encoding="utf-8")
     result = _parse_gpx("one.gpx", tmp_path)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit reset
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    """Reset the module-level geocode timestamp so tests never sleep."""
+    _geo_module._last_geocode_time = 0.0  # noqa: SLF001 — module-level rate-limit state
+    yield
+    _geo_module._last_geocode_time = 0.0  # noqa: SLF001
+
+
+# ---------------------------------------------------------------------------
+# _geocode — Nominatim HTTP client tests (mock transport, no real network)
+# ---------------------------------------------------------------------------
+
+
+class _JsonTransport(httpx.AsyncBaseTransport):
+    """Mock httpx transport that returns a fixed JSON response."""
+
+    def __init__(self, payload: list | dict, status_code: int = 200) -> None:
+        self._payload = payload
+        self._status_code = status_code
+        self.requests: list[httpx.Request] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(self._status_code, json=self._payload)
+
+
+class _ErrorTransport(httpx.AsyncBaseTransport):
+    """Mock httpx transport that raises a network error."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Connection refused")
+
+
+@pytest.mark.unit
+async def test_geocode_returns_lat_lon_on_success():
+    """A valid Nominatim response yields (lat, lon) as floats."""
+    transport = _JsonTransport([{"lat": "48.05", "lon": "8.12", "display_name": "Somewhere"}])
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _geocode("Café Sonnenberg, Freiburg", client)
+
+    assert result is not None
+    lat, lon = result
+    assert lat == pytest.approx(48.05)
+    assert lon == pytest.approx(8.12)
+
+
+@pytest.mark.unit
+async def test_geocode_empty_results_returns_none():
+    """An empty Nominatim result list returns None (logged, not raised)."""
+    transport = _JsonTransport([])
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _geocode("asdkfjasldkfj", client)
+
+    assert result is None
+
+
+@pytest.mark.unit
+async def test_geocode_network_error_returns_none():
+    """A network error returns None (logged, not raised)."""
+    async with httpx.AsyncClient(transport=_ErrorTransport()) as client:
+        result = await _geocode("somewhere", client)
+
+    assert result is None
+
+
+@pytest.mark.unit
+async def test_geocode_http_error_returns_none():
+    """A 500 response returns None (logged, not raised)."""
+    transport = _JsonTransport({"error": "server error"}, status_code=500)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _geocode("somewhere", client)
+
+    assert result is None
+
+
+@pytest.mark.unit
+async def test_geocode_sends_user_agent_header():
+    """Every Nominatim request carries the required User-Agent header."""
+    transport = _JsonTransport([{"lat": "48.0", "lon": "8.0"}])
+    async with httpx.AsyncClient(transport=transport) as client:
+        await _geocode("Test Place", client)
+
+    assert len(transport.requests) == 1
+    ua = transport.requests[0].headers.get("user-agent", "")
+    assert "bulliexplorer" in ua
+
+
+@pytest.mark.unit
+async def test_geocode_sends_correct_query_params():
+    """The search endpoint receives ``q``, ``format=json``, and ``limit=1``."""
+    transport = _JsonTransport([{"lat": "48.0", "lon": "8.0"}])
+    async with httpx.AsyncClient(transport=transport) as client:
+        await _geocode("My Place", client)
+
+    req = transport.requests[0]
+    assert req.url.params["q"] == "My Place"
+    assert req.url.params["format"] == "json"
+    assert req.url.params["limit"] == "1"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_poi_location_with_geocoding — priority logic
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_geocoding_manual_coords_skip_network():
+    """Manual lat/lng always wins — _geocode is never called."""
+    poi = PoiFrontmatter(name="Summit", category="viewpoint", lat=48.05, lng=8.05)
+
+    with patch("app.services.geo_sync._geocode", new_callable=AsyncMock) as mock_gc:
+        point = await _resolve_poi_location_with_geocoding(poi, client=None)
+
+    assert point is not None
+    assert point.x == pytest.approx(8.05)  # longitude → x
+    assert point.y == pytest.approx(48.05)  # latitude  → y
+    mock_gc.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_geocoding_place_query_calls_geocode():
+    """A POI with only place_query triggers _geocode."""
+    poi = PoiFrontmatter(
+        name="Café Sonnenberg",
+        category="restaurant",
+        place_query="Café Sonnenberg, Freiburg",
+    )
+
+    with patch("app.services.geo_sync._geocode", new_callable=AsyncMock) as mock_gc:
+        mock_gc.return_value = (48.0, 7.82)  # (lat, lon) from Nominatim
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        point = await _resolve_poi_location_with_geocoding(poi, client=mock_client)
+
+    assert point is not None
+    assert point.x == pytest.approx(7.82)  # lon → x
+    assert point.y == pytest.approx(48.0)  # lat → y
+    mock_gc.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_geocoding_failed_geocode_returns_none():
+    """When _geocode returns None, the function returns None (POI will be skipped)."""
+    poi = PoiFrontmatter(name="Nowhere", category="other", place_query="asdkfjasldkfj")
+
+    with patch("app.services.geo_sync._geocode", new_callable=AsyncMock) as mock_gc:
+        mock_gc.return_value = None
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        point = await _resolve_poi_location_with_geocoding(poi, client=mock_client)
+
+    assert point is None
+
+
+@pytest.mark.unit
+async def test_geocoding_no_coords_no_query_returns_none():
+    """A POI with neither lat/lng nor place_query always returns None."""
+    poi = PoiFrontmatter(name="Empty", category="other")
+
+    with patch("app.services.geo_sync._geocode", new_callable=AsyncMock) as mock_gc:
+        point = await _resolve_poi_location_with_geocoding(poi, client=None)
+
+    assert point is None
+    mock_gc.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_geocoding_place_query_without_client_returns_none():
+    """place_query is ignored when no HTTP client is provided."""
+    poi = PoiFrontmatter(name="Some Place", category="campsite", place_query="Some Place, DE")
+
+    with patch("app.services.geo_sync._geocode", new_callable=AsyncMock) as mock_gc:
+        point = await _resolve_poi_location_with_geocoding(poi, client=None)
+
+    assert point is None
+    mock_gc.assert_not_awaited()
