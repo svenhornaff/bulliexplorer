@@ -7,3 +7,39 @@
 .masthead {
     background-color: #343a40;
 }
+
+/* ── Route / map styles ─────────────────────────────────────────────────── */
+
+/* Stats pill row shown above the map (or alone if no tiles URL configured). */
+.route-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    margin-bottom: 1.25rem;
+    padding: 0.75rem 1rem;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border-left: 3px solid #e87722;
+    font-size: 0.9rem;
+    color: #495057;
+}
+
+.route-stats .stat-item {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+}
+
+.route-stats .stat-item i {
+    color: #e87722;
+    font-size: 0.8rem;
+}
+
+/* MapLibre map container in the post body. */
+#post-map {
+    height: 420px;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+}

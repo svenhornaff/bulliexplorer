@@ -3,6 +3,13 @@
 {% block title %}{{ post.title }} — BulliExplorer{% endblock %}
 {% block meta_description %}{% if post.summary %}{{ post.summary }}{% else %}{{ post.title }} — BulliExplorer{% endif %}{% endblock %}
 
+{% block head %}
+{# Load MapLibre GL CSS only on posts that actually have a map to render.    #}
+{% if route_geojson and tiles_url %}
+<link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
+{% endif %}
+{% endblock %}
+
 {% block page_header %}
 <header class="masthead" style="background-image: url('{{ post.cover_image if post.cover_image else '/static/img/post-bg.jpg' }}')">
     <div class="container position-relative px-4 px-lg-5">
@@ -32,6 +39,55 @@
 
                 {{ post.body_html | safe }}
 
+                {# ── Route block ─────────────────────────────────────────────
+                   Guarded explicitly — never assumed to render harmlessly
+                   when absent.  Stats always show when route data is present;
+                   the map only renders when a tiles URL is also configured.  #}
+                {% if route %}
+                <div class="route-stats" aria-label="Ride statistics">
+                    {% if route.distance_km %}
+                    <span class="stat-item">
+                        <i class="fas fa-road" aria-hidden="true"></i>
+                        {{ "%.1f"|format(route.distance_km) }}&thinsp;km
+                    </span>
+                    {% endif %}
+
+                    {% if route.elevation_gain_m %}
+                    <span class="stat-item">
+                        <i class="fas fa-arrow-up" aria-hidden="true"></i>
+                        {{ route.elevation_gain_m | int }}&thinsp;m
+                    </span>
+                    {% endif %}
+
+                    {% if route.elevation_loss_m %}
+                    <span class="stat-item">
+                        <i class="fas fa-arrow-down" aria-hidden="true"></i>
+                        {{ route.elevation_loss_m | int }}&thinsp;m
+                    </span>
+                    {% endif %}
+
+                    {% if route.duration_minutes %}
+                    {% set dur_h = (route.duration_minutes / 60) | int %}
+                    {% set dur_m = (route.duration_minutes % 60) | int %}
+                    <span class="stat-item">
+                        <i class="fas fa-clock" aria-hidden="true"></i>
+                        {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{ "%02d"|format(dur_m) }}min
+                    </span>
+                    {% endif %}
+
+                    {% if route.name %}
+                    <span class="stat-item text-muted" style="margin-left:auto;font-size:0.8rem;">
+                        {{ route.name }}
+                    </span>
+                    {% endif %}
+                </div>
+
+                {% if route_geojson and tiles_url %}
+                <div id="post-map" role="img" aria-label="Interactive map of {{ route.name }}"></div>
+                {% endif %}
+                {% endif %}
+                {# ── End route block ──────────────────────────────────────── #}
+
                 {% if post.tags %}
                 <div class="mt-4">
                     {% for tag in post.tags.split(',') %}
@@ -48,4 +104,125 @@
         </div>
     </div>
 </article>
+{% endblock %}
+
+{% block scripts %}
+{% if route_geojson and tiles_url %}
+{# Vendor JS loaded last — only on posts that actually render a map.         #}
+<script src="/static/vendor/maplibre-gl.js"></script>
+<script src="/static/vendor/pmtiles.js"></script>
+<script src="/static/vendor/basemaps.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ── Data injected from server ──────────────────────────────────────────
+  // |tojson filter escapes forward-slashes and special chars — safe in <script>.
+  const ROUTE_GEOJSON = {{ route_geojson | tojson }};
+  const POIS_GEOJSON  = {{ pois_geojson  | tojson }};
+  const TILES_URL     = {{ tiles_url     | tojson }};
+
+  // ── Category → marker colour map ──────────────────────────────────────
+  const CATEGORY_COLOURS = {
+    campsite:    "#4CAF50",  // green
+    restaurant:  "#FF9800",  // orange
+    hotel:       "#2196F3",  // blue
+    gas_station: "#9C27B0",  // purple
+    viewpoint:   "#00BCD4",  // cyan
+    bike_shop:   "#F44336",  // red
+    water_point: "#03A9F4",  // light-blue
+    other:       "#607D8B",  // slate
+  };
+
+  // ── Register the pmtiles:// protocol with MapLibre ─────────────────────
+  const protocol = new pmtiles.Protocol();
+  maplibregl.addProtocol("pmtiles", protocol.tile);
+
+  // ── Initialise map ──────────────────────────────────────────────────────
+  const map = new maplibregl.Map({
+    container: "post-map",
+    style: {
+      version: 8,
+      glyphs:  "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
+      sprite:  "https://protomaps.github.io/basemaps-assets/sprites/v4/light",
+      sources: {
+        protomaps: {
+          type: "vector",
+          url:  TILES_URL,
+          attribution:
+            '<a href="https://protomaps.com">Protomaps</a> © ' +
+            '<a href="https://openstreetmap.org">OpenStreetMap</a>',
+        },
+      },
+      layers: basemaps.layers("protomaps", basemaps.namedFlavor("light"), { lang: "de" }),
+    },
+    // Rough centre — overridden once the map loads and fits to the route.
+    center: [8.1, 48.1],
+    zoom: 10,
+    attributionControl: false,
+  });
+
+  map.addControl(new maplibregl.AttributionControl({ compact: true }));
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }));
+  map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
+
+  map.on("load", function () {
+
+    // ── Route line ──────────────────────────────────────────────────────
+    map.addSource("route", { type: "geojson", data: ROUTE_GEOJSON });
+
+    // Subtle casing shadow so the line reads on both light and dark tiles.
+    map.addLayer({
+      id: "route-casing",
+      type: "line",
+      source: "route",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#fff", "line-width": 6, "line-opacity": 0.5 },
+    });
+    map.addLayer({
+      id: "route-line",
+      type: "line",
+      source: "route",
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#e87722", "line-width": 3.5 },
+    });
+
+    // ── Fit viewport to the route ───────────────────────────────────────
+    var coords = ROUTE_GEOJSON.geometry.coordinates;
+    var bounds = coords.reduce(function (b, c) {
+      return b.extend(c);
+    }, new maplibregl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(bounds, { padding: 48, maxZoom: 14 });
+
+    // ── POI markers ─────────────────────────────────────────────────────
+    var features = (POIS_GEOJSON && POIS_GEOJSON.features) || [];
+    features.forEach(function (feature) {
+      var props  = feature.properties;
+      var colour = CATEGORY_COLOURS[props.category] || CATEGORY_COLOURS.other;
+
+      // Custom circular HTML marker.
+      var el = document.createElement("div");
+      el.setAttribute("aria-label", props.name);
+      el.style.cssText = [
+        "width:14px", "height:14px", "border-radius:50%",
+        "background:" + colour,
+        "border:2px solid #fff",
+        "box-shadow:0 1px 4px rgba(0,0,0,.45)",
+        "cursor:pointer",
+      ].join(";");
+
+      var popupHtml = "<strong>" + props.name + "</strong>";
+      if (props.notes) {
+        popupHtml += "<br><small class='text-muted'>" + props.notes + "</small>";
+      }
+
+      new maplibregl.Marker({ element: el })
+        .setLngLat(feature.geometry.coordinates)
+        .setPopup(new maplibregl.Popup({ offset: 10 }).setHTML(popupHtml))
+        .addTo(map);
+    });
+  });
+}());
+</script>
+{% endif %}
 {% endblock %}

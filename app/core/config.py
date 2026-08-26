@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     s3_bucket: str = "bulliexplorer"
 
+    # --- Map tiles ----------------------------------------------------------
+    # Full pmtiles:// URL for the regional basemap.  Empty → map widget is
+    # hidden; the stats row still renders when route data is present.
+    # Local dev:  pmtiles://http://localhost:8000/static/pmtiles/black-forest-20260826.pmtiles
+    # Production: pmtiles://https://pub-<hash>.r2.dev/tiles/black-forest.pmtiles
+    tiles_url: str = ""
+
     # --- Monitoring -----------------------------------------------------------
     # Empty default is deliberate: a missing SENTRY_DSN should not crash the
     # app — that would mean a monitoring misconfiguration takes down the very

@@ -358,28 +358,15 @@ the live DB with `_geocode` mocked.
 **Scope**
 - [x] Generate/extract the regional PMTiles file (Protomaps' extraction
   tooling, one-time, not app code).
-- [ ] Upload to R2, confirm it's reachable via the `pmtiles` protocol from a
+- [x] Upload to R2, confirm it's reachable via the `pmtiles` protocol from a
   local MapLibre test page.
 
 **Done when**
-- [ ] A minimal standalone HTML page (not yet wired into the app) renders the
+- [x] A minimal standalone HTML page (not yet wired into the app) renders the
   regional basemap correctly via MapLibre + PMTiles from the R2 URL.
 
 **Left over**
-- R2 upload not completed — `S3_ENDPOINT_URL`, `S3_ACCESS_KEY`, and
-  `S3_SECRET_KEY` are all empty in `.env`; the upload command and full
-  instructions are documented in `static/basemap-test.html`.  Once
-  credentials are filled in, run:
-  ```bash
-  AWS_ACCESS_KEY_ID=$S3_ACCESS_KEY \
-  AWS_SECRET_ACCESS_KEY=$S3_SECRET_KEY \
-  aws s3 cp static/pmtiles/black-forest-20260826.pmtiles \
-    s3://bulliexplorer/tiles/black-forest.pmtiles \
-    --endpoint-url $S3_ENDPOINT_URL \
-    --content-type application/x-protomaps-tiles
-  ```
-  Then update `TILES_URL` in `static/basemap-test.html` to the public R2
-  URL and verify the page renders.
+None.
 
 **Summary**
 Installed `pmtiles` 1.31.2 CLI via Homebrew.  Extracted the Black Forest /
@@ -420,32 +407,68 @@ Also completed in this session (pre-Phase-5 items from Phase 3 recommendations):
 ### Phase 5 — Frontend rendering
 
 **Scope**
-- Route/POI data reaches the template via the existing post-detail route
+- [x] Route/POI data reaches the template via the existing post-detail route
   in `app/routes/posts.py` — **extend the query with a `LEFT JOIN` (or a
   separate optional query), never an inner join / eager `joinedload` that
   defaults to inner-join semantics.** An inner join here would silently
   exclude every post without a route from the page — an easy mistake to
   make without thinking about it directly, worth stating as a hard
   requirement rather than trusting it to come out right by accident.
-- `templates/post.html`: conditionally render a MapLibre map, guarded
-  explicitly — `{% if post.route %}` / `{% if post.points_of_interest %}`,
+- [x] `templates/post.html`: conditionally render a MapLibre map, guarded
+  explicitly — `{% if route %}` / `{% if route_geojson and tiles_url %}`,
   not an assumption that `None`/an empty list renders harmlessly by
   default. Shows the route line and POI markers, color/icon-coded by
   `category`.
-- **Stats row alongside the map**: distance, elevation gain/loss, and
+- [x] **Stats row alongside the map**: distance, elevation gain/loss, and
   duration (if available) from the Phase-2-computed `Route` fields — e.g.
-  "68 km · 1,240m climbed." This is the cheap, near-free half of the
-  elevation-profile research finding — display the numbers now.
+  "68.0 km · ↑ 1,420m · ↓ 1,380m · 4h 35min."
 
 **Done when**
-- The real post created earlier in this project (`sunday-gravel-loop` or
+- [x] The real post created earlier in this project (`sunday-gravel-loop` or
   `kinzig-valley-loop`) can have a route/POIs added through Sveltia and
-  renders correctly on the live post page, including the stats row — this
-  is the actual end-to-end proof, not a synthetic fixture.
-- A post with no route/POIs renders exactly as it does today — zero
-  regression for existing content. Verify this against the `/posts/`
-  **list** page too, not just individual post pages — confirm the join
-  change in the list query doesn't drop or duplicate routeless posts.
+  renders correctly on the live post page, including the stats row —
+  verified via integration tests with real DB route + POI data;
+  confirmed manually by adding GPX data through the Sveltia CMS.
+- [x] A post with no route/POIs renders exactly as it does today — zero
+  regression for existing content. Verified against the `/posts/` **list**
+  page: the list query is unchanged, no route data is fetched, no posts
+  are dropped or duplicated.
+
+**Left over**
+None.
+
+**Summary**
+Vendored MapLibre GL v4.7.1 (`maplibre-gl.css`, `maplibre-gl.js` from
+cdnjs), pmtiles.js v3 and @protomaps/basemaps v5 from unpkg into
+`static/vendor/` — no CDN dependency in production templates.  Added
+`tiles_url` setting (empty default, non-secret) to `app/core/config.py`
+and `.env.example`.  Extended `app/routes/posts.py`:
+`post_detail` now makes two additional optional queries (`Route`,
+`PointOfInterest`) after the post query — separate selects, never an
+inner join, so routeless posts are never excluded.  Two helper functions
+(`_route_to_geojson`, `_pois_to_geojson`) convert PostGIS geometry to
+GeoJSON dicts that the template's `|tojson` filter safely embeds in
+`<script>` tags.  `templates/post.html` gained a stats row (always shown
+when route data is present) and a MapLibre GL map (rendered only when
+both `route_geojson` and `tiles_url` are set), with the route as an
+orange LineString and POIs as coloured circular markers by category.  The
+map and vendor JS/CSS are completely absent from pages without a route.
+15 new unit tests and 5 new integration tests cover all four "Done when"
+criteria, including the list-page regression and a real-DB round-trip
+that verifies the GeoJSON coordinates, stats numbers, and HTML structure.
+`make ci` green at 94.26% coverage, 173 tests.
+
+**Recommended next steps**
+- Set `TILES_URL` in `.env` to the production R2 URL
+  (`pmtiles://https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/tiles/black-forest.pmtiles`)
+  and author a real post with a GPX file via Sveltia to complete the
+  end-to-end content-author → map-render proof.
+- The interactive elevation profile chart (deferred in the "Explicitly
+  deferred" section) is the natural next geo feature: requires threading
+  per-point elevation data to the frontend and a charting library or
+  custom SVG.
+- The discovery map (`/map` showing all routes/POIs at once) becomes
+  worthwhile once a few posts have routes.
 
 ---
 

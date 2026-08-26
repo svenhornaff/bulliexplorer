@@ -88,10 +88,10 @@
 
       // Fill in after uploading to R2 (see S3_ENDPOINT_URL in .env):
       const PRODUCTION_TILES_URL =
-        "pmtiles://https://<account-id>.r2.cloudflarestorage.com/bulliexplorer/tiles/black-forest.pmtiles";
+        "pmtiles://https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/tiles/black-forest.pmtiles";
 
       // Switch this to PRODUCTION_TILES_URL once R2 credentials are set:
-      const TILES_URL = LOCAL_TILES_URL;
+      const TILES_URL = PRODUCTION_TILES_URL;
 
       document.getElementById("tiles-url").textContent = TILES_URL;
 
