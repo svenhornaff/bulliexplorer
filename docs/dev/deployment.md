@@ -62,7 +62,7 @@ to resolve for Let's Encrypt).
 Go to the hosted zone for `bulliexplorer.com` and create/update:
 
 | Record | Type | Value | TTL |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `bulliexplorer.com` | A | `62.238.122.200` | 300 |
 | `www.bulliexplorer.com` | CNAME | `bulliexplorer.com` | 300 |
 
@@ -158,6 +158,7 @@ services:
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-}
       - S3_BUCKET=${S3_BUCKET:-bulliexplorer}
+      - TILES_URL=${TILES_URL:-}
     depends_on:
       db:
         condition: service_healthy
@@ -287,6 +288,7 @@ S3_ENDPOINT_URL=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=
 S3_BUCKET=bulliexplorer
+TILES_URL=
 ```
 
 Generate secrets:
@@ -362,20 +364,20 @@ RSYNC_EXCLUDE := --exclude='.venv' --exclude='__pycache__' --exclude='.git' \
 
 .PHONY: deploy
 deploy: ci ## Deploy to production (runs ci first)
-	rsync -avz $(RSYNC_EXCLUDE) -e "$(SSH)" ./ $(REMOTE):~/bulliexplorer/
-	$(SSH) $(REMOTE) 'cd ~/bulliexplorer && docker compose -f docker-compose.prod.yml up -d --build && docker compose -f docker-compose.prod.yml exec app alembic upgrade head'
+ rsync -avz $(RSYNC_EXCLUDE) -e "$(SSH)" ./ $(REMOTE):~/bulliexplorer/
+ $(SSH) $(REMOTE) 'cd ~/bulliexplorer && docker compose -f docker-compose.prod.yml up -d --build && docker compose -f docker-compose.prod.yml exec app alembic upgrade head'
 
 .PHONY: deploy-logs
 deploy-logs: ## Tail production logs
-	$(SSH) $(REMOTE) 'cd ~/bulliexplorer && docker compose -f docker-compose.prod.yml logs -f --tail=50'
+ $(SSH) $(REMOTE) 'cd ~/bulliexplorer && docker compose -f docker-compose.prod.yml logs -f --tail=50'
 
 .PHONY: deploy-status
 deploy-status: ## Check production container status
-	$(SSH) $(REMOTE) 'cd ~/bulliexplorer && docker compose -f docker-compose.prod.yml ps'
+ $(SSH) $(REMOTE) 'cd ~/bulliexplorer && docker compose -f docker-compose.prod.yml ps'
 
 .PHONY: deploy-ssh
 deploy-ssh: ## SSH into the server
-	$(SSH) $(REMOTE)
+ $(SSH) $(REMOTE)
 ```
 
 ---
@@ -442,7 +444,7 @@ docker compose -f docker-compose.prod.yml exec app alembic downgrade -1
 ## 7. Future improvements (not now)
 
 | Improvement | When |
-|---|---|
+| --- | --- |
 | **GitHub Actions CI/CD** | When manual `make deploy` gets tedious — auto-build image on push to `main`, deploy via SSH or Docker registry pull |
 | **Docker registry (GHCR)** | Push built images to GitHub Container Registry instead of building on the server — faster deploys, smaller attack surface |
 | **Cloudflare proxy** | Orange-cloud the DNS through Cloudflare for WAF/DDoS/edge caching — flip the switch in Route 53 or move nameservers |
