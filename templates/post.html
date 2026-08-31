@@ -127,13 +127,31 @@
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol("pmtiles", protocol.tile);
 
+  // ── Dark-mode-aware basemap flavor (Phase 2, §5.4) ─────────────────────
+  // Reads the data-theme attribute the pre-paint script in base.html has
+  // already set before this script runs, so no flash on initial load.
+  // Doesn't react to a live toggle click after the map has rendered —
+  // that would need map.setStyle() and a re-add of the route/POI layers;
+  // out of scope for this pass, reload picks up the new theme.
+  function currentFlavor() {
+    return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  }
+  const flavor = currentFlavor();
+
+  // Route line color: unchanged light-mode value (#e87722, ~2.2:1 against
+  // the light basemap's earth fill — a known pre-existing gap, tracked
+  // separately, not introduced here) plus a lightened dark-mode value
+  // chosen for AA graphical-object contrast (3:1) against the dark
+  // basemap's earth fill (~#1f1f1f): #f0954a measures ~7.7:1.
+  const ROUTE_LINE_COLOR = flavor === "dark" ? "#f0954a" : "#e87722";
+
   // ── Initialise map ──────────────────────────────────────────────────────
   const map = new maplibregl.Map({
     container: "post-map",
     style: {
       version: 8,
       glyphs:  "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
-      sprite:  "https://protomaps.github.io/basemaps-assets/sprites/v4/light",
+      sprite:  "https://protomaps.github.io/basemaps-assets/sprites/v4/" + flavor,
       sources: {
         protomaps: {
           type: "vector",
@@ -143,7 +161,7 @@
             '<a href="https://openstreetmap.org">OpenStreetMap</a>',
         },
       },
-      layers: basemaps.layers("protomaps", basemaps.namedFlavor("light"), { lang: "de" }),
+      layers: basemaps.layers("protomaps", basemaps.namedFlavor(flavor), { lang: "de" }),
     },
     // Rough centre — overridden once the map loads and fits to the route.
     center: [8.1, 48.1],
@@ -173,7 +191,7 @@
       type: "line",
       source: "route",
       layout: { "line-join": "round", "line-cap": "round" },
-      paint: { "line-color": "#e87722", "line-width": 3.5 },
+      paint: { "line-color": ROUTE_LINE_COLOR, "line-width": 3.5 },
     });
 
     // ── Fit viewport to the route ───────────────────────────────────────
