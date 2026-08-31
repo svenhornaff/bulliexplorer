@@ -37,7 +37,11 @@
   --color-surface-2: #f4f1ec; /* route-stats-style panels */
   --color-text: #1f1c18;
   --color-text-muted: #5c564d;
-  --color-accent: #e87722; /* kept — proven, matches the route line color */
+  --color-accent: #e87722; /* decorative/brand only — route line, stat icons.
+     ~2.9:1 against --color-bg, below WCAG AA's 4.5:1 for text and 3:1 for
+     UI components, so never used for link text or focus indicators. */
+  --color-link: #a65111; /* darkened accent for text/interactive use —
+     ~5.4:1 against --color-bg, passes AA normal-text (4.5:1). */
   --color-border: #e4ddd2;
 
   /* Typography */
@@ -64,7 +68,10 @@
   --color-surface-2: #29251d;
   --color-text: #ece7de;
   --color-text-muted: #b4ac9d;
-  --color-accent: #f0954a; /* lightened for AA contrast on the dark bg */
+  --color-accent: #f0954a; /* lightened for AA contrast on the dark bg;
+     ~8:1 against --color-bg here, so also reused for --color-link — no
+     separate dark-mode link color needed. */
+  --color-link: #f0954a;
   --color-border: #3a352a;
 }
 
@@ -97,7 +104,7 @@ img {
 }
 
 a {
-  color: var(--color-accent);
+  color: var(--color-link);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   transition: color var(--transition-fast);
@@ -110,7 +117,7 @@ a:hover {
 a:focus-visible,
 button:focus-visible,
 summary:focus-visible {
-  outline: 3px solid var(--color-accent);
+  outline: 3px solid var(--color-link);
   outline-offset: 2px;
 }
 
@@ -186,7 +193,7 @@ p {
 }
 
 .site-nav .nav-links a:hover {
-  color: var(--color-accent);
+  color: var(--color-link);
 }
 
 .site-nav .nav-right {
@@ -313,7 +320,7 @@ p {
 }
 
 .post-preview a:hover .post-title {
-  color: var(--color-accent);
+  color: var(--color-link);
 }
 
 .post-preview .post-subtitle {
@@ -429,7 +436,9 @@ article pre code {
 }
 
 .route-stats .stat-item .icon {
-  color: var(--color-accent);
+  /* Graphical object alongside text (WCAG 1.4.11, 3:1) -- --color-link
+     clears this more comfortably than the raw --color-accent value. */
+  color: var(--color-link);
 }
 
 #post-map {
