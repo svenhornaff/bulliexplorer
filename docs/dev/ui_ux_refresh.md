@@ -469,16 +469,28 @@ CLS also improved, confirming no regression against the §7 budgets.
   real browsers" specifically because `prefers-color-scheme`/
   `localStorage`/pre-paint-script timing can differ. No second engine
   (WebKit/Firefox) was available in this sandboxed session.
-- **`--color-accent` contrast in light mode** — not a scope item, but
-  surfaced while contrast-checking the dark-mode accent value: computed
-  light-mode contrast for `--color-accent` (#e87722) against
-  `--color-bg` is ~2.9:1, under WCAG AA's 4.5:1 for normal text. This is
-  a **pre-existing Phase 1 token value**, not introduced in this phase
-  (the dark-mode accent, #f0954a, was chosen with AA contrast in mind
-  and passes at ~8:1). It's currently used for link-text color
-  (`a { color: var(--color-accent) }`) in light mode. Not fixed here
-  since changing a brand color is a design call, not a Phase 2
-  mechanical task — flagged for a decision.
+- ~~`--color-accent` contrast in light mode~~ — **fixed in a follow-up
+  commit** (after this phase's initial write-up): split into
+  `--color-accent` (kept at #e87722, restricted to decorative-only use
+  — route line, decorative border accents, stat-item icon color) and a
+  new `--color-link` (#a65111 light / #f0954a dark) for every
+  text/interactive use — body links, nav-link hover, focus-visible
+  outlines, post-preview title hover. Light `--color-link` measures
+  5.38:1 against `--color-bg`, clearing WCAG AA's 4.5:1 with margin;
+  dark reuses the existing accent value (~8:1). This was an engineering-
+  judgment fix (a mechanical WCAG contrast correction, not a brand-color
+  redesign), consistent with advisor guidance sought specifically on
+  this point.
+- **Cross-browser verification — still not resolved.** A Safari spot-
+  check was attempted via AppleScript automation of the live desktop
+  Safari instance, but aborted mid-check: that approach was driving the
+  user's actual personal browser session (real tabs, an in-progress
+  browser-extension pairing flow), which is not an appropriate target
+  for scripted automation without being asked first. No second-engine
+  verification exists yet. Needs either a manual spot-check from the
+  user, or a properly isolated test-browser-profile automation approach
+  in a future session — not a repeat of the live-session approach tried
+  here.
 
 **Summary**
 
@@ -512,13 +524,13 @@ touch map code" hard stop (see "Left over").
   everywhere except the map itself, which simply keeps its current
   light-only tile style regardless of theme — not broken, just not
   theme-aware yet).
-- Decide on the `--color-accent` light-mode contrast question (see
-  "Left over") before or during Phase 3 — it affects every post-list
-  link and homepage link color, not just something Phase 3 introduces,
-  so worth resolving before more UI is built on top of it.
-- Get a second browser engine into the verification loop (even a manual
-  Safari/Firefox spot-check) before calling the cross-browser Testing
-  requirement satisfied — this session only had Chromium available.
+- ~~Decide on the `--color-accent` light-mode contrast question~~ —
+  done, see updated "Left over" above.
+- Get a second browser engine into the verification loop — a manual
+  spot-check from the user in their own Safari/Firefox, or a future
+  session using an isolated test profile, not scripted automation of
+  the live desktop browser — before calling the cross-browser Testing
+  requirement satisfied.
 - Phase 3 (editorial homepage) can build on `theme.css`'s tokens and the
   prose pass unchanged — no rework implied by this phase's work.
 
