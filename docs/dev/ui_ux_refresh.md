@@ -28,9 +28,29 @@ This doc does **not** own:
   them; #8 is the outside check that they were actually hit.
 
 **Bucket #10's warning is taken seriously here**: 2 real posts exist.
-Every phase below is scoped to work correctly at 0, 1, or 2 posts, not
-just at some imagined future volume — no feature that only looks good
-with 20 posts ships gated behind having 20 posts.
+That warning is actually two separate questions, and this doc answers
+both rather than only the smaller one:
+
+1. *If this bucket is built, how should it be scoped so it doesn't
+   require content that doesn't exist?* — every phase below is scoped to
+   work correctly at 0, 1, or 2 posts; no feature that only looks good
+   with 20 posts ships gated behind having 20 posts.
+2. *Should bucket #2 be built at all right now, versus writing more
+   content on the existing Clean Blog and coming back to this later?* —
+   this is the question the original text glossed over by jumping straight
+   to (1). Answered directly: **yes, proceed now**, for a reason specific
+   to this bucket and not a generic "UI matters" appeal — §5.1 recommends
+   *retiring* Bootstrap/Clean Blog, and that swap is cheapest at the
+   current 3-template, ~45-line-override size (stated in §5.1's
+   rationale). Writing more content first under the current template
+   only makes that later swap more expensive (more pages, more overrides,
+   more visual regressions to re-check), for zero compounding benefit —
+   unlike, say, bucket #5's media pipeline, where waiting for more real
+   photos to exist before building it costs nothing. If the sign-off in
+   §9 goes the other way — keep Bootstrap, skip the retirement — that
+   cost-asymmetry argument for doing this *now* no longer holds, and
+   deferring bucket #2 until there's more content to actually showcase
+   becomes the more defensible call.
 
 ---
 
@@ -115,6 +135,24 @@ body-level content blocks beyond prose + the one fixed map slot, and
 ## 5. Design system
 
 ### 5.1 Architecture decision: retire Bootstrap/Clean Blog
+
+**This is a reversal of a stated project decision, named explicitly as
+such — not a natural next increment.** `post_and_backend.md` chose
+Bootstrap + Start Bootstrap's "Clean Blog" template *specifically because*
+the goal at the time was "porting a design, not building one from
+scratch" — the free-template-ecosystem argument was the deciding factor
+over Pico/Bulma, not a technical merit call. This doc now recommends
+doing the from-scratch design work that decision was explicitly trying to
+avoid. That original trade-off isn't wrong in retrospect — it correctly
+got a real site shipped fast with zero design effort while the backend
+was the actual risk (bucket #1's territory). But the context that made
+"port, don't build" the right call has changed: the backend is now
+proven, and the thing genuinely missing per bucket #2's own framing is a
+distinctive, dark-mode-capable identity — which "porting a 2016 template"
+can no longer supply. Reversing it is a real cost (real design/CSS effort
+that was avoided once already), not a free upgrade, and is called out
+here as a decision to confirm, not something this doc is unilaterally
+treating as settled (see §9).
 
 **Recommendation: replace Clean Blog/Bootstrap with a small custom CSS
 layer, not another round of overrides on top of it.**
@@ -262,52 +300,192 @@ About / Contact" menu).
 
 ## 8. Phases
 
+Each phase below follows the same **Scope / Done when / Testing**
+structure used in `maps_gis.md` and `post_and_backend.md` — "Done when"
+is a checkable pass/fail bar an agent (or reviewer) can verify without
+judgment calls, not a process description like "parity check, nothing
+regresses."
+
 ### Phase 1 — Foundation: retire Bootstrap, ship the token/type system
 
-- Land the CSS custom-property token set (§5.2), replace `clean-blog.css`
-  with the custom layer.
-- Rebuild `base.html` nav/footer without Bootstrap JS; mobile nav via
-  semantic HTML (+ minimal Alpine only if truly needed) — must work with
-  JS disabled for core navigation.
-- Self-host fonts / drop the Font Awesome CDN script (swap remaining
-  icons to inline SVG or a tiny hand-picked subset).
-- Parity check: every existing page (`home.html`, `post.html`, and the
-  map) renders correctly, nothing regresses.
-- Screenshot + lab-CWV baseline captured before/after for comparison in
-  later phases.
+**Scope**
+
+- [ ] Land the CSS custom-property token set (§5.2) in a new stylesheet;
+  remove `clean-blog.css` and the vendored Bootstrap CSS/JS from
+  `static/` and `base.html`'s `<link>`/`<script>` tags.
+- [ ] Rebuild `base.html` nav/footer without Bootstrap's navbar JS —
+  semantic HTML (`<details>`/`<nav>`, or a minimal Alpine toggle if
+  needed) for the mobile menu.
+- [ ] Self-host the two font families (§5.2) instead of the Google Fonts
+  CDN `<link>`; drop the Font Awesome CDN `<script>`, replacing every
+  icon currently in use with inline SVG.
+- [ ] Capture a lab-CWV baseline (LCP/CLS/INP, e.g. via Lighthouse CLI or
+  Chrome DevTools) on `home.html` and `post.html` *before* this phase's
+  changes land, for comparison in Phase 5.
+
+**Done when**
+
+- [ ] `home.html`, `post.html` (with and without a route/map), and the
+  MapLibre map render with no visual breakage and no console errors, on
+  both a desktop and a small-phone viewport — checked directly, not
+  assumed from "the CSS compiles."
+- [ ] Zero requests to `fonts.googleapis.com` or any Font Awesome CDN
+  host in the network panel on either page.
+- [ ] Core site navigation (home → post → back) works with JavaScript
+  disabled in the browser — verifies the mobile menu isn't JS-load-order
+  dependent.
+- [ ] Post-change lab CWV numbers on both pages are captured and are not
+  worse than the pre-change baseline on any of LCP/CLS/INP.
+
+**Testing**
+
+- Existing route/template tests (`GET /`, `GET /posts/{slug}`) still pass
+  unmodified — this phase is presentation-only, no route or service code
+  changes, so no new automated test is expected to be *added*; the bar is
+  that nothing existing breaks.
+- Manual: keyboard-only tab through the nav on both pages (this phase
+  introduces the nav rebuild, so it's the right place to first check tab
+  order/focus visibility on it — full keyboard/screen-reader pass across
+  all templates is Phase 5's job, not repeated per phase).
 
 ### Phase 2 — Reading experience + dark mode
 
-- Prose typography pass (measure, headings, links, blockquotes) on
-  `post.html`.
-- Dark/light/system theme + persisted toggle, no-flash pre-paint script.
-- Dark-mode-aware MapLibre tile flavor + route/marker contrast re-check.
-- `prefers-reduced-motion` support wired everywhere a transition exists.
+**Scope**
+
+- [ ] Prose typography pass on `post.html` (measure, headings, links,
+  blockquotes) using the Phase 1 token set.
+- [ ] Dark/light/system theme: `data-theme` attribute driven by a
+  no-flash inline pre-paint `<script>` in `<head>` (§5.4), toggle in the
+  nav, choice persisted to `localStorage`.
+- [ ] Dark-mode-aware MapLibre basemap flavor swap + route-line/POI-marker
+  contrast re-check against the dark tile style.
+- [ ] Every CSS transition introduced (theme cross-fade, hover states)
+  wrapped so `prefers-reduced-motion: reduce` makes it instant.
+
+**Done when**
+
+- [ ] Loading any page with the OS set to dark mode (no prior toggle use)
+  renders dark on first paint — no light-mode flash, checked by a slow
+  network throttle, not just a fast local reload where a flash wouldn't
+  be visible anyway.
+- [ ] Toggling the theme persists across a full page reload and across
+  navigating from `home.html` to `post.html`.
+- [ ] The MapLibre map on a route-bearing post switches basemap flavor to
+  match the active theme, and the route line + POI markers both meet
+  WCAG AA contrast (checked with a contrast-checker tool, both against
+  the light tile style and the dark one) — not just re-used unchanged
+  from the light-mode values.
+- [ ] With the OS "reduce motion" setting on, the theme toggle changes
+  instantly with no visible fade.
+
+**Testing**
+
+- Manual: verified in at least two real browsers (not just one engine),
+  since `prefers-color-scheme`/`localStorage` persistence and pre-paint
+  script timing are exactly the kind of thing that can silently differ.
+- No new backend/service code in this phase — no new automated test
+  expected; existing route tests must still pass.
 
 ### Phase 3 — Editorial homepage
 
-- New `home.html` per §6.1 (site proposition + latest-post hero + list).
-- Explicitly tested at 0/1/2 posts — no post-count-dependent breakage.
+**Scope**
+
+- [ ] New `home.html` per §6.1: static site-proposition line, a larger
+  "latest post" treatment (cover image, summary, route stat chips if the
+  latest post has a `Route`), remaining posts below in a simple
+  grid/list.
+
+**Done when**
+
+- [ ] Rendered correctly with 0 posts (empty-state copy, no crash), 1
+  post (hero only, empty list section handled gracefully — no dangling
+  "more posts" heading over nothing), and 2 posts (today's real content)
+  — each checked as its own case, not inferred from the 2-post case
+  working.
+- [ ] The latest post's route stat chips appear when it has a `Route` and
+  are simply absent (not a broken/empty chip) when it doesn't.
+
+**Testing**
+
+- Extend the existing homepage integration test (or add one) asserting
+  the 0/1/2-post render cases from "Done when" don't 500 and contain the
+  expected post title(s) — this is exactly the kind of case `AGENTS.md`
+  requires a test for since it's new template behavior.
 
 ### Phase 4 — Post body block vocabulary
 
-- `figure`, `gallery`, `callout` Jinja partials + content-schema fields
-  to author them via Sveltia.
-- `route-map` gains a body-placement marker with graceful "after body"
-  fallback for existing posts that don't use it.
-- Gallery images render as-uploaded until bucket #5 ships responsive
-  variants — no fake `srcset` generated ahead of that bucket existing.
-- Mandatory alt-text field enforced at the Pydantic frontmatter-schema
-  level for any gallery image (frontmatter schema change — remember the
-  AGENTS.md sync rule: update schema + every existing post in the same
-  change).
+**Scope**
+
+- [ ] `figure`, `gallery`, `callout` Jinja partials (§5.3).
+- [ ] `PostFrontmatter`/content-schema additions to author gallery images
+  (with a mandatory `alt` field per image) and callouts via Sveltia.
+- [ ] `route-map` block gains an explicit in-body placement marker;
+  falls back to "render after body" when the marker is absent.
+
+**Done when**
+
+- [ ] A fixture post using a marker to place the route map mid-body
+  renders the map at that position, not appended after all prose.
+- [ ] Both existing real posts (`sunday-gravel-loop`,
+  `kinzig-valley-loop`), which predate this schema change and contain no
+  marker, render exactly as before — map still appears after the body,
+  zero regression. **Explicit regression test**, per the same principle
+  `maps_gis.md` Phase 2 applied to routeless posts.
+- [ ] A gallery image frontmatter entry with a missing `alt` field fails
+  `PostFrontmatter` validation (schema-level enforcement, not a template
+  convention that can be silently skipped).
+- [ ] A fixture gallery of 3 images renders as a semantic `<figure>` grid
+  with each `alt` present in the rendered HTML.
+
+**Testing**
+
+- Unit test on the frontmatter schema: gallery image without `alt`
+  raises a validation error.
+- Unit test on the sync/render path for the route-map marker: with
+  marker present → map renders at marker position; without → map renders
+  after body (both cases as separate tests, not one combined assertion).
+- Integration test: the two real existing posts still sync and render
+  unchanged — the `AGENTS.md` content-schema-sync rule applies here
+  (schema change → every existing post updated in the same change, plus
+  a CHANGELOG entry).
 
 ### Phase 5 — Hardening
 
-- Full keyboard/screen-reader pass, 200%-zoom check, print stylesheet.
-- Lab CWV re-measurement against Phase 1 baseline.
-- Remove now-dead Bootstrap/Clean Blog assets from `static/`.
-- Update `buckets.md` row #2 to done, same pattern as bucket #1.
+**Scope**
+
+- [ ] Full keyboard-only and screen-reader pass across `home.html`,
+  `post.html` (with/without route, with/without gallery), and the
+  dark-mode toggle.
+- [ ] 200%-browser-zoom check (WCAG 2.2 requirement, distinct from mobile
+  responsiveness) and a print stylesheet for `post.html`.
+- [ ] Lab-CWV re-measurement against the Phase 1 baseline.
+- [ ] Remove any now-dead Bootstrap/Clean Blog assets still present in
+  `static/` (should be none after Phase 1, but confirm).
+- [ ] Update `buckets.md` row #2 to done, matching bucket #1's pattern.
+
+**Done when**
+
+- [ ] Every interactive element (nav links, theme toggle, gallery images
+  if they're focusable/expandable) is reachable and operable by keyboard
+  alone, with a visible focus indicator at every stop.
+- [ ] A screen reader (VoiceOver or NVDA) announces the page's landmark
+  structure, image alt text, and the theme-toggle's current state
+  sensibly — checked directly by running one, not inferred from having
+  used semantic HTML.
+- [ ] At 200% browser zoom, no text is clipped/overlapping and no
+  horizontal scroll appears on either template.
+- [ ] Final lab CWV numbers on `home.html` and `post.html` meet the §7
+  budgets (LCP < 2.5s, CLS < 0.1, INP < 200ms) and are not worse than the
+  Phase 1 baseline.
+- [ ] `grep -ri bootstrap static/ templates/` (or equivalent) returns
+  nothing.
+
+**Testing**
+
+- No new automated tests expected beyond what Phases 1–4 already added —
+  this phase is manual verification + budget measurement, recorded in
+  this doc's phase summary once complete (per this repo's convention of
+  a Summary section closing out each phase).
 
 ---
 
