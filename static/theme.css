@@ -1,11 +1,15 @@
-/* BulliExplorer — Phase 1 design system.
+/* BulliExplorer — Phase 1/2 design system.
    Replaces Clean Blog / Bootstrap entirely: plain CSS custom properties
    (tokens) + flexbox/grid layout. No build step, no framework — matches
    `docs/dev/ui_ux_refresh.md` §5.2.
 
-   Dark mode (§5.4/Phase 2) is not implemented yet — this file only
-   defines the light-theme token values today; a `[data-theme="dark"]`
-   block is added in Phase 2.                                              */
+   Dark mode (§5.4, Phase 2) is applied via a `[data-theme="dark"]`
+   attribute on <html>, set by the no-flash pre-paint script in
+   base.html before first paint, and toggled by the nav button (also in
+   base.html). MapLibre's own dark basemap-flavor swap and the route-
+   line/marker contrast recheck are explicitly deferred — out of scope
+   for this session per the "never touch map code" hard stop; tracked as
+   left-over work in the Phase 2 write-up.                                */
 
 /* ── Self-hosted fonts (replaces the Google Fonts CDN <link> tags) ────── */
 @font-face {
@@ -26,7 +30,8 @@
 
 /* ── Tokens ─────────────────────────────────────────────────────────────── */
 :root {
-  /* Color — light, default (dark theme added in Phase 2) */
+  /* Color — light, default. Dark-mode overrides live in the
+     [data-theme="dark"] block below. */
   --color-bg: #fdfcfb;
   --color-surface: #ffffff;
   --color-surface-2: #f4f1ec; /* route-stats-style panels */
@@ -51,6 +56,18 @@
   --transition-fast: 120ms ease;
 }
 
+[data-theme="dark"] {
+  /* Multiple luminance levels, not pure black -- per the research in
+     §2; reduces the harsh-contrast halation that pure #000 causes. */
+  --color-bg: #16140f;
+  --color-surface: #201d17;
+  --color-surface-2: #29251d;
+  --color-text: #ece7de;
+  --color-text-muted: #b4ac9d;
+  --color-accent: #f0954a; /* lightened for AA contrast on the dark bg */
+  --color-border: #3a352a;
+}
+
 /* ── Reset / base ───────────────────────────────────────────────────────── */
 *,
 *::before,
@@ -69,6 +86,9 @@ body {
   font-family: var(--font-sans);
   font-size: 1.0625rem;
   line-height: 1.6;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 img {
@@ -80,6 +100,7 @@ a {
   color: var(--color-accent);
   text-decoration: underline;
   text-decoration-thickness: 1px;
+  transition: color var(--transition-fast);
 }
 
 a:hover {
@@ -166,6 +187,38 @@ p {
 
 .site-nav .nav-links a:hover {
   color: var(--color-accent);
+}
+
+.site-nav .nav-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.theme-toggle .theme-toggle-moon {
+  display: none;
+}
+
+[data-theme="dark"] .theme-toggle .theme-toggle-sun {
+  display: none;
+}
+
+[data-theme="dark"] .theme-toggle .theme-toggle-moon {
+  display: inline;
 }
 
 /* Mobile nav toggle — semantic <details>/<summary>, no JS required.
@@ -297,12 +350,61 @@ article {
   padding: 0 var(--space-2);
 }
 
+/* Prose typography pass (Phase 2, §5.2/§6.2): measure, headings, links,
+   blockquotes inside rendered post body Markdown. `article` itself
+   already sets --measure as its max-width (Phase 1); these rules cover
+   the elements that Markdown-rendered HTML actually produces. */
+article h2 {
+  margin-top: var(--space-4);
+}
+
+article h3 {
+  margin-top: var(--space-3);
+}
+
+article p,
+article ul,
+article ol {
+  margin: 0 0 var(--space-3);
+}
+
+article li + li {
+  margin-top: 0.35rem;
+}
+
+article a {
+  text-decoration-color: var(--color-border);
+}
+
+article a:hover {
+  text-decoration-color: currentColor;
+}
+
 article blockquote {
   border-left: 3px solid var(--color-accent);
-  margin: var(--space-2) 0;
+  margin: var(--space-3) 0;
   padding-left: var(--space-2);
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+article code {
+  background: var(--color-surface-2);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+
+article pre {
+  background: var(--color-surface-2);
+  border-radius: 6px;
+  padding: var(--space-2);
+  overflow-x: auto;
+}
+
+article pre code {
+  background: none;
+  padding: 0;
 }
 
 /* ── Route / map styles (unchanged behaviour, retokenized) ─────────────── */
@@ -360,4 +462,19 @@ article blockquote {
   font-size: 0.85rem;
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+/* ── Reduced motion (§5.4/§7) ────────────────────────────────────────
+   Every transition introduced above (theme cross-fade, link-hover,
+   focus-visible) becomes an instant swap when the OS asks for reduced
+   motion — applied last, as a blanket override, so a future added
+   transition is covered automatically rather than needing its own
+   opt-out.                                                                */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
 }
