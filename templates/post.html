@@ -130,20 +130,25 @@
   // ── Dark-mode-aware basemap flavor (Phase 2, §5.4) ─────────────────────
   // Reads the data-theme attribute the pre-paint script in base.html has
   // already set before this script runs, so no flash on initial load.
-  // Doesn't react to a live toggle click after the map has rendered —
-  // that would need map.setStyle() and a re-add of the route/POI layers;
-  // out of scope for this pass, reload picks up the new theme.
+  // Also listens for the "bulliexplorer:themechange" event the nav
+  // toggle (base.html) dispatches on click, so switching theme mid-
+  // session updates the map immediately — no reload required.
   function currentFlavor() {
     return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
   }
-  const flavor = currentFlavor();
 
-  // Route line color: unchanged light-mode value (#e87722, ~2.2:1 against
-  // the light basemap's earth fill — a known pre-existing gap, tracked
-  // separately, not introduced here) plus a lightened dark-mode value
-  // chosen for AA graphical-object contrast (3:1) against the dark
-  // basemap's earth fill (~#1f1f1f): #f0954a measures ~7.7:1.
-  const ROUTE_LINE_COLOR = flavor === "dark" ? "#f0954a" : "#e87722";
+  // Route line color per flavor: light keeps the unchanged pre-Phase-2
+  // value (#e87722, ~2.2:1 against the light basemap's earth fill — a
+  // known pre-existing gap, tracked separately, not introduced here);
+  // dark uses a lightened value chosen for AA graphical-object contrast
+  // (3:1) against the dark basemap's earth fill (~#1f1f1f): #f0954a
+  // measures ~5.6:1.
+  function routeLineColor(flavor) {
+    return flavor === "dark" ? "#f0954a" : "#e87722";
+  }
+
+  const flavor = currentFlavor();
+  const ROUTE_LINE_COLOR = routeLineColor(flavor);
 
   // ── Initialise map ──────────────────────────────────────────────────────
   const map = new maplibregl.Map({
@@ -173,9 +178,12 @@
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }));
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
 
-  map.on("load", function () {
+  let routeLoaded = false;
 
-    // ── Route line ──────────────────────────────────────────────────────
+  map.on("load", function () {
+    routeLoaded = true;
+
+    // ── Route line ─────────────────────────────────────────────
     map.addSource("route", { type: "geojson", data: ROUTE_GEOJSON });
 
     // Subtle casing shadow so the line reads on both light and dark tiles.
@@ -194,14 +202,14 @@
       paint: { "line-color": ROUTE_LINE_COLOR, "line-width": 3.5 },
     });
 
-    // ── Fit viewport to the route ───────────────────────────────────────
+    // ── Fit viewport to the route ─────────────────────────────────────
     var coords = ROUTE_GEOJSON.geometry.coordinates;
     var bounds = coords.reduce(function (b, c) {
       return b.extend(c);
     }, new maplibregl.LngLatBounds(coords[0], coords[0]));
     map.fitBounds(bounds, { padding: 48, maxZoom: 14 });
 
-    // ── POI markers ─────────────────────────────────────────────────────
+    // ── POI markers ──────────────────────────────────────────
     var features = (POIS_GEOJSON && POIS_GEOJSON.features) || [];
     features.forEach(function (feature) {
       var props  = feature.properties;
@@ -228,6 +236,65 @@
         .setPopup(new maplibregl.Popup({ offset: 10 }).setHTML(popupHtml))
         .addTo(map);
     });
+  });
+
+  // ── Live theme swap: react to the nav toggle without a page reload ────
+  // map.setStyle() tears down and rebuilds every source/layer, so the
+  // route line + casing (added in the "load" handler above) have to be
+  // re-added once the new style finishes loading. POI markers are plain
+  // DOM elements attached via maplibregl.Marker, not style layers, so
+  // they survive a setStyle() call untouched — no need to re-add them.
+  document.addEventListener("bulliexplorer:themechange", function (event) {
+    if (!routeLoaded) return; // still mid-initial-load; nothing to swap yet
+    var nextFlavor = event.detail.theme === "dark" ? "dark" : "light";
+    var nextRouteColor = routeLineColor(nextFlavor);
+
+    map.setStyle(
+      {
+        version: 8,
+        glyphs:  "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
+        sprite:  "https://protomaps.github.io/basemaps-assets/sprites/v4/" + nextFlavor,
+        sources: {
+          protomaps: {
+            type: "vector",
+            url:  TILES_URL,
+            attribution:
+              '<a href="https://protomaps.com">Protomaps</a> © ' +
+              '<a href="https://openstreetmap.org">OpenStreetMap</a>',
+          },
+        },
+        layers: basemaps.layers("protomaps", basemaps.namedFlavor(nextFlavor), { lang: "de" }),
+      },
+      {
+        // transformStyle carries the route source/layers over from the
+        // outgoing style into the new one, so they don't need to be
+        // torn down and manually re-added — the MapLibre-recommended
+        // pattern for a setStyle() that must preserve custom content
+        // (see maplibre-gl-js discussion #7240/#7346 on style.load /
+        // styledata firing before a style is actually ready to mutate).
+        transformStyle: function (previousStyle, nextStyle) {
+          var carried = (previousStyle && previousStyle.sources && previousStyle.sources.route)
+            ? { route: previousStyle.sources.route }
+            : {};
+          var carriedLayers = (previousStyle && previousStyle.layers)
+            ? previousStyle.layers.filter(function (l) {
+                return l.id === "route-casing" || l.id === "route-line";
+              })
+            : [];
+          return Object.assign({}, nextStyle, {
+            sources: Object.assign({}, nextStyle.sources, carried),
+            layers: nextStyle.layers.concat(
+              carriedLayers.map(function (l) {
+                if (l.id !== "route-line") return l;
+                return Object.assign({}, l, {
+                  paint: Object.assign({}, l.paint, { "line-color": nextRouteColor }),
+                });
+              }),
+            ),
+          });
+        },
+      },
+    );
   });
 }());
 </script>

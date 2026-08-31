@@ -103,6 +103,13 @@
                     /* localStorage unavailable — toggle still works for this page load */
                 }
                 reflect();
+                // Let same-page listeners (e.g. the post map's live basemap
+                // swap in post.html) react without a reload. Dispatched on
+                // document so any page can listen without base.html knowing
+                // about them.
+                document.dispatchEvent(
+                    new CustomEvent("bulliexplorer:themechange", { detail: { theme: next } }),
+                );
             });
         })();
     </script>
