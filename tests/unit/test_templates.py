@@ -206,10 +206,10 @@ async def test_post_list_contains_site_name(mock_client):
 
 
 @pytest.mark.unit
-async def test_post_list_has_bootstrap_navbar(mock_client):
+async def test_post_list_has_nav(mock_client):
     resp = await mock_client.get("/posts/")
     assert 'id="mainNav"' in resp.text
-    assert "navbar-brand" in resp.text
+    assert 'class="brand"' in resp.text
 
 
 @pytest.mark.unit
@@ -226,15 +226,19 @@ async def test_post_list_empty_state(mock_client):
 
 
 @pytest.mark.unit
-async def test_post_list_links_clean_blog_css(mock_client):
+async def test_post_list_links_theme_css(mock_client):
     resp = await mock_client.get("/posts/")
-    assert "clean-blog.css" in resp.text
+    assert "theme.css" in resp.text
 
 
 @pytest.mark.unit
-async def test_post_list_links_clean_blog_js(mock_client):
+async def test_post_list_has_no_bootstrap_or_clean_blog(mock_client):
+    """Phase 1 retires Bootstrap/Clean Blog entirely — no CDN scripts/links left."""
     resp = await mock_client.get("/posts/")
-    assert "clean-blog.js" in resp.text
+    assert "clean-blog" not in resp.text
+    assert "bootstrap" not in resp.text.lower()
+    assert "fonts.googleapis.com" not in resp.text
+    assert "fontawesome" not in resp.text.lower()
 
 
 @pytest.mark.unit
@@ -307,9 +311,19 @@ async def test_post_detail_has_back_link(client_with_post):
 
 
 @pytest.mark.unit
-async def test_post_detail_links_clean_blog_css(client_with_post):
+async def test_post_detail_links_theme_css(client_with_post):
     resp = await client_with_post.get("/posts/test-post")
-    assert "clean-blog.css" in resp.text
+    assert "theme.css" in resp.text
+
+
+@pytest.mark.unit
+async def test_post_detail_has_no_bootstrap_or_clean_blog(client_with_post):
+    """Phase 1 retires Bootstrap/Clean Blog entirely — no CDN scripts/links left."""
+    resp = await client_with_post.get("/posts/test-post")
+    assert "clean-blog" not in resp.text
+    assert "bootstrap" not in resp.text.lower()
+    assert "fonts.googleapis.com" not in resp.text
+    assert "fontawesome" not in resp.text.lower()
 
 
 @pytest.mark.unit
