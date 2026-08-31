@@ -413,39 +413,114 @@ CLS also improved, confirming no regression against the §7 budgets.
 
 **Scope**
 
-- [ ] Prose typography pass on `post.html` (measure, headings, links,
+- [x] Prose typography pass on `post.html` (measure, headings, links,
   blockquotes) using the Phase 1 token set.
-- [ ] Dark/light/system theme: `data-theme` attribute driven by a
+- [x] Dark/light/system theme: `data-theme` attribute driven by a
   no-flash inline pre-paint `<script>` in `<head>` (§5.4), toggle in the
   nav, choice persisted to `localStorage`.
 - [ ] Dark-mode-aware MapLibre basemap flavor swap + route-line/POI-marker
   contrast re-check against the dark tile style.
-- [ ] Every CSS transition introduced (theme cross-fade, hover states)
+- [x] Every CSS transition introduced (theme cross-fade, hover states)
   wrapped so `prefers-reduced-motion: reduce` makes it instant.
 
 **Done when**
 
-- [ ] Loading any page with the OS set to dark mode (no prior toggle use)
+- [x] Loading any page with the OS set to dark mode (no prior toggle use)
   renders dark on first paint — no light-mode flash, checked by a slow
   network throttle, not just a fast local reload where a flash wouldn't
   be visible anyway.
-- [ ] Toggling the theme persists across a full page reload and across
+- [x] Toggling the theme persists across a full page reload and across
   navigating from `home.html` to `post.html`.
 - [ ] The MapLibre map on a route-bearing post switches basemap flavor to
   match the active theme, and the route line + POI markers both meet
   WCAG AA contrast (checked with a contrast-checker tool, both against
   the light tile style and the dark one) — not just re-used unchanged
   from the light-mode values.
-- [ ] With the OS "reduce motion" setting on, the theme toggle changes
+- [x] With the OS "reduce motion" setting on, the theme toggle changes
   instantly with no visible fade.
 
 **Testing**
 
-- Manual: verified in at least two real browsers (not just one engine),
-  since `prefers-color-scheme`/`localStorage` persistence and pre-paint
-  script timing are exactly the kind of thing that can silently differ.
+- Manual: verified with scripted Puppeteer checks (OS dark/light
+  preference respected on first paint under network throttling, toggle
+  persistence across navigation + full reload, `prefers-reduced-motion`
+  instant-swap, keyboard tab order + Enter-key activation of the toggle,
+  no-JS graceful degradation) plus real headless-Chrome screenshots of
+  both themes on both templates. Not yet cross-browser verified in a
+  second real engine (only Chromium/Puppeteer available this session) —
+  see "Left over."
 - No new backend/service code in this phase — no new automated test
-  expected; existing route tests must still pass.
+  added; existing route tests (174, unit + integration) still pass
+  unmodified.
+
+**Left over**
+
+- **MapLibre dark-flavor swap + route-line/POI-marker contrast
+  recheck** — not done. Blocked by this session's own hard stop
+  ("never touch ... map code, regardless of phase"), which conflicts
+  with this phase's own Scope/Done-when items exactly the way Phase 1's
+  Scope conflicted with its Testing note. Flagged mid-session and
+  confirmed by sign-off to defer rather than override the hard stop.
+  Needs either an explicit map-code carve-out for this one item, or a
+  separate session where the hard stop is lifted for it, before this can
+  be closed.
+- **Cross-browser verification** — only checked in one engine
+  (Chromium via Puppeteer); the Testing note calls for "at least two
+  real browsers" specifically because `prefers-color-scheme`/
+  `localStorage`/pre-paint-script timing can differ. No second engine
+  (WebKit/Firefox) was available in this sandboxed session.
+- **`--color-accent` contrast in light mode** — not a scope item, but
+  surfaced while contrast-checking the dark-mode accent value: computed
+  light-mode contrast for `--color-accent` (#e87722) against
+  `--color-bg` is ~2.9:1, under WCAG AA's 4.5:1 for normal text. This is
+  a **pre-existing Phase 1 token value**, not introduced in this phase
+  (the dark-mode accent, #f0954a, was chosen with AA contrast in mind
+  and passes at ~8:1). It's currently used for link-text color
+  (`a { color: var(--color-accent) }`) in light mode. Not fixed here
+  since changing a brand color is a design call, not a Phase 2
+  mechanical task — flagged for a decision.
+
+**Summary**
+
+Added dark-mode support and a prose typography pass on top of Phase 1's
+token system. `base.html` gained a tiny inline pre-paint `<script>` in
+`<head>` that reads `localStorage` (falling back to
+`prefers-color-scheme`) and sets `data-theme` on `<html>` before first
+paint, plus an end-of-body script wiring a new nav `<button id="theme-
+toggle">` (sun/moon SVG icons, added to `templates/partials/icons.html`)
+that flips `data-theme` and persists the choice. `theme.css` gained a
+`[data-theme="dark"]` token override block (multiple luminance levels,
+not pure black), a prose pass for `article`'s heading/paragraph/list/
+blockquote/code/pre spacing and link underline treatment, and a blanket
+`prefers-reduced-motion: reduce` override that collapses every
+transition (theme cross-fade, link hover, focus ring) to near-instant.
+Verified with scripted browser checks rather than assumed: no-flash on
+slow network, toggle persistence across nav/reload, reduced-motion
+instant-swap, keyboard operability, and no-JS graceful degradation (page
+renders in static light mode, toggle inert but present, no layout
+break). The MapLibre basemap dark-flavor swap and marker-contrast
+recheck were **not** done — out of scope for this session per the "never
+touch map code" hard stop (see "Left over").
+
+**Recommended next steps**
+
+- Resolve the map-code carve-out question before Phase 2 can be marked
+  fully closed: either grant an explicit exception for the MapLibre
+  dark-flavor-swap/contrast-recheck item, or schedule it as a small,
+  separately-scoped follow-up session with that specific permission.
+  Until then this phase is functionally shippable (light/dark works
+  everywhere except the map itself, which simply keeps its current
+  light-only tile style regardless of theme — not broken, just not
+  theme-aware yet).
+- Decide on the `--color-accent` light-mode contrast question (see
+  "Left over") before or during Phase 3 — it affects every post-list
+  link and homepage link color, not just something Phase 3 introduces,
+  so worth resolving before more UI is built on top of it.
+- Get a second browser engine into the verification loop (even a manual
+  Safari/Firefox spot-check) before calling the cross-browser Testing
+  requirement satisfied — this session only had Chromium available.
+- Phase 3 (editorial homepage) can build on `theme.css`'s tokens and the
+  prose pass unchanged — no rework implied by this phase's work.
 
 ### Phase 3 — Editorial homepage
 
