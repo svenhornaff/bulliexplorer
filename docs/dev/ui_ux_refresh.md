@@ -469,13 +469,30 @@ CLS also improved, confirming no regression against the §7 budgets.
   recheck~~ — **done**, after an explicit, one-item carve-out from the
   "never touch map code" hard stop was requested and granted. The
   basemap now swaps between `basemaps.namedFlavor("light"/"dark")` and
-  the matching sprite set based on `data-theme` (read once at map-init
-  time — doesn't react live to a post-load toggle click without a
-  reload, since that would need `map.setStyle()` plus re-adding the
-  route/POI layers; not attempted here). The route line got a
+  the matching sprite set based on `data-theme`, both at map-init time
+  (no flash on first paint) **and live**, without a page reload: the
+  nav toggle (base.html) now dispatches a `bulliexplorer:themechange`
+  `CustomEvent` on `document`, which `post.html` listens for and
+  reacts to with `map.setStyle()` — using MapLibre's `transformStyle`
+  option to carry the route source/layers over into the new style
+  (rather than a fragile manual tear-down/re-add on a `styledata`/
+  `style.load` timing race, which is version-dependent and unreliable
+  per MapLibre's own GitHub discussions #7240/#7346). POI markers are
+  plain DOM elements attached via `maplibregl.Marker`, not style
+  layers, so they survive `setStyle()` untouched with no extra code.
+  A `routeLoaded` guard no-ops the listener if the toggle is clicked
+  before the map's own initial `load` event has fired, avoiding a
+  race with the init-time flavor selection. The route line got a
   lightened dark-mode-only color (`#f0954a`, ~5.6:1 against the dark
   basemap's earth fill, up from the unusable ~1:1 the unlit light-mode
-  orange would have given on dark tiles).
+  orange would have given on dark tiles), applied both at init and on
+  every live swap. Verified via scripted Puppeteer: single toggle
+  click (before/after map screenshots confirm the tile style itself
+  changes, not just the surrounding page), 4 rapid successive toggles
+  with no console errors or duplicate/ghost layers, and an early click
+  before the map's `load` event with no error — this was the exact
+  bug reported ("only updates the map tile on browser page refresh"),
+  now fixed rather than deferred.
 - **Route-line light-mode contrast — confirmed pre-existing, not
   fixed.** The route line's light-mode color (`#e87722`, unchanged) is
   only ~2.2:1 against the light basemap's earth-fill background,
@@ -543,22 +560,27 @@ Verified with scripted browser checks rather than assumed: no-flash on
 slow network, toggle persistence across nav/reload, reduced-motion
 instant-swap, keyboard operability, and no-JS graceful degradation (page
 renders in static light mode, toggle inert but present, no layout
-break). Two follow-up fixes landed after the initial write-up: split
+break). Three follow-up fixes landed after the initial write-up: split
 `--color-accent` into a decorative-only token and a new `--color-link`
 text/interactive token to fix a pre-existing light-mode contrast
-failure, and — after an explicit one-item carve-out from the "never
-touch map code" hard stop — implemented the MapLibre dark-flavor
-basemap swap plus a dark-mode-only lightened route-line color. The
-contrast recheck that carve-out required also surfaced two more
-pre-existing (not newly introduced) gaps: the route line's *light*-mode
-color and several POI marker fill colors both fall short of WCAG's 3:1
-for graphical objects on one or both basemap styles — neither fixed
-here, both logged in "Left over" as decisions rather than fixed
-silently. Cross-browser verification remains open: a live-Safari
-automation attempt was correctly aborted as inappropriate (it was
-driving the user's real browser session), and a safe real-Chrome
-throwaway-profile check, while completed, doesn't close the ask since
-Chrome shares Puppeteer's Blink engine.
+failure; after an explicit one-item carve-out from the "never touch map
+code" hard stop, implemented the MapLibre dark-flavor basemap swap plus
+a dark-mode-only lightened route-line color; and, once the user reported
+the swap only applied on a page reload rather than a live toggle click,
+wired up a `bulliexplorer:themechange` `CustomEvent` (dispatched from
+the nav toggle in base.html) that `post.html` listens for and reacts to
+with `map.setStyle()` + `transformStyle` to carry the route layers
+across the swap without a reload — verified with repeated-toggle and
+early-click Puppeteer checks. The contrast recheck the map carve-out
+required also surfaced two more pre-existing (not newly introduced)
+gaps: the route line's *light*-mode color and several POI marker fill
+colors both fall short of WCAG's 3:1 for graphical objects on one or
+both basemap styles — neither fixed here, both logged in "Left over"
+as decisions rather than fixed silently. Cross-browser verification
+remains open: a live-Safari automation attempt was correctly aborted as
+inappropriate (it was driving the user's real browser session), and a
+safe real-Chrome throwaway-profile check, while completed, doesn't
+close the ask since Chrome shares Puppeteer's Blink engine.
 
 **Recommended next steps**
 
