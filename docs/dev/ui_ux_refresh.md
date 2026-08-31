@@ -1,8 +1,10 @@
 # BulliExplorer — UI/UX Refresh for 2026
 
-> Concept doc for bucket #2 from `buckets.md`. Not started yet — this is
-> the plan, written before any code changes, the same way `maps_gis.md`
-> was written before bucket #1's implementation. Nothing below is shipped.
+> Concept doc for bucket #2 from `buckets.md`. All blocking decisions in
+> §9 are signed off; implementation (Phase 1) has not started yet — this
+> is the plan, written before any code changes, the same way
+> `maps_gis.md` was written before bucket #1's implementation. Nothing
+> below is shipped.
 
 ---
 
@@ -172,9 +174,8 @@ Rationale:
   available; a semantic `<details>`/`<nav>`-based mobile menu (or a tiny
   Alpine toggle) doesn't have that dependency.
 
-This is a **decision requiring sign-off before implementation begins**
-(see §9) — flagged as a recommendation here, not treated as already
-decided.
+This was a **decision requiring sign-off before implementation begins**
+— confirmed per §9: retire Bootstrap now.
 
 ### 5.2 Tokens (CSS custom properties)
 
@@ -491,17 +492,22 @@ regresses."
 
 ## 9. Decisions needing sign-off before implementation
 
-- **Retiring Bootstrap/Clean Blog vs. keeping it and layering overrides**
-  (this doc recommends retiring it — §5.1).
-- Overall visual direction / design thesis (§3) — confirm or redirect.
-- Whether a logo/wordmark accompanies this refresh, or text wordmark
-  stays as-is.
-- Homepage curation model confirmed as "latest-post hero + list," not a
-  manual/featured-flag model.
+- ~~Retiring Bootstrap/Clean Blog vs. keeping it and layering overrides~~
+  — **confirmed: retire it now** (§5.1). Rejected the "wait for more
+  content first" alternative on the record: the cost driver is template/
+  override count, not post count, so deferring wouldn't have made this
+  cheaper — proceeding with Phase 1 as planned.
+- ~~Overall visual direction / design thesis (§3)~~ — **confirmed**:
+  "field journal meets modern editorial adventure storytelling."
+- Logo/wordmark — **confirmed: text wordmark stays**, no logo designed
+  for this refresh.
+- Homepage curation model — **confirmed: "latest-post hero + list,"** not
+  a manual/featured-flag model.
 - Willingness to produce/gather actual gallery-worthy photo sets for
-  Phase 4 — if none exist yet for either current post, Phase 4 ships the
-  reusable partials/schema and is used starting with the *next* post,
-  not retrofitted with placeholder images onto existing content.
+  Phase 4 — **not yet resolved, and correctly not blocking**: ships as
+  reusable schema/partials in Phase 4 regardless, used starting with the
+  *next* post rather than retrofitted onto `sunday-gravel-loop` or
+  `kinzig-valley-loop` with placeholder images.
 
 ## 10. Explicitly out of scope / deferred
 
