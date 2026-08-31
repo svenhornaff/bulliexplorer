@@ -5,49 +5,41 @@
 
 {% block page_header %}
 <header class="masthead" style="background-image: url('/static/img/home-bg.jpg')">
-    <div class="container position-relative px-4 px-lg-5">
-        <div class="row gx-4 gx-lg-5 justify-content-center">
-            <div class="col-md-10 col-lg-8 col-xl-7">
-                <div class="site-heading">
-                    <h1>BulliExplorer</h1>
-                    <span class="subheading">Gravel rides, campsites &amp; routes — one van, endless roads.</span>
-                </div>
-            </div>
+    <div class="container">
+        <div class="site-heading">
+            <h1>BulliExplorer</h1>
+            <span class="subheading">Gravel rides, campsites &amp; routes — one van, endless roads.</span>
         </div>
     </div>
 </header>
 {% endblock %}
 
 {% block content %}
-<div class="container px-4 px-lg-5">
-    <div class="row gx-4 gx-lg-5 justify-content-center">
-        <div class="col-md-10 col-lg-8 col-xl-7">
+<div class="container">
 
-            {% if posts %}
-                {% for post in posts %}
-                <!-- Post preview -->
-                <div class="post-preview">
-                    <a href="/posts/{{ post.slug }}">
-                        <h2 class="post-title">{{ post.title }}</h2>
-                        {% if post.summary %}
-                        <h3 class="post-subtitle">{{ post.summary }}</h3>
-                        {% endif %}
-                    </a>
-                    <p class="post-meta">
-                        Posted by Sven
-                        on <time datetime="{{ post.published_date }}">{{ post.published_date.strftime('%B %-d, %Y') }}</time>
-                    </p>
-                </div>
-                {% if not loop.last %}
-                <!-- Divider -->
-                <hr class="my-4" />
+    {% if posts %}
+        {% for post in posts %}
+        <!-- Post preview -->
+        <div class="post-preview">
+            <a href="/posts/{{ post.slug }}">
+                <h2 class="post-title">{{ post.title }}</h2>
+                {% if post.summary %}
+                <h3 class="post-subtitle">{{ post.summary }}</h3>
                 {% endif %}
-                {% endfor %}
-            {% else %}
-                <p class="text-muted fst-italic">No posts yet — check back soon.</p>
-            {% endif %}
-
+            </a>
+            <p class="post-meta">
+                Posted by Sven
+                on <time datetime="{{ post.published_date }}">{{ post.published_date.strftime('%B %-d, %Y') }}</time>
+            </p>
         </div>
-    </div>
+        {% if not loop.last %}
+        <!-- Divider -->
+        <hr class="post-divider" />
+        {% endif %}
+        {% endfor %}
+    {% else %}
+        <p class="text-muted fst-italic">No posts yet — check back soon.</p>
+    {% endif %}
+
 </div>
 {% endblock %}

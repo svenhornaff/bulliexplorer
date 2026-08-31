@@ -1,0 +1,363 @@
+/* BulliExplorer — Phase 1 design system.
+   Replaces Clean Blog / Bootstrap entirely: plain CSS custom properties
+   (tokens) + flexbox/grid layout. No build step, no framework — matches
+   `docs/dev/ui_ux_refresh.md` §5.2.
+
+   Dark mode (§5.4/Phase 2) is not implemented yet — this file only
+   defines the light-theme token values today; a `[data-theme="dark"]`
+   block is added in Phase 2.                                              */
+
+/* ── Self-hosted fonts (replaces the Google Fonts CDN <link> tags) ────── */
+@font-face {
+  font-family: "Lora";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/static/fonts/lora-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Lora";
+  font-style: italic;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/static/fonts/lora-italic.woff2") format("woff2");
+}
+
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+:root {
+  /* Color — light, default (dark theme added in Phase 2) */
+  --color-bg: #fdfcfb;
+  --color-surface: #ffffff;
+  --color-surface-2: #f4f1ec; /* route-stats-style panels */
+  --color-text: #1f1c18;
+  --color-text-muted: #5c564d;
+  --color-accent: #e87722; /* kept — proven, matches the route line color */
+  --color-border: #e4ddd2;
+
+  /* Typography */
+  --font-serif: "Lora", Georgia, serif; /* headings, pull-quotes */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; /* body, UI chrome */
+  --measure: 68ch; /* prose max line length */
+
+  /* Layout */
+  --content-max-width: 46rem;
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2.5rem;
+
+  /* Motion */
+  --transition-fast: 120ms ease;
+}
+
+/* ── Reset / base ───────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-serif);
+  line-height: 1.2;
+  margin: 0 0 var(--space-2);
+}
+
+h1 {
+  font-size: 2.25rem;
+}
+
+h2 {
+  font-size: 1.5rem;
+}
+
+h3 {
+  font-size: 1.15rem;
+}
+
+p {
+  margin: 0 0 var(--space-2);
+}
+
+.container {
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: 0 var(--space-2);
+}
+
+.icon {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+}
+
+/* ── Navigation ─────────────────────────────────────────────────────────── */
+.site-nav {
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.site-nav .container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.site-nav .brand {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.site-nav .nav-links {
+  display: flex;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.site-nav .nav-links a {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.site-nav .nav-links a:hover {
+  color: var(--color-accent);
+}
+
+/* Mobile nav toggle — semantic <details>/<summary>, no JS required.
+   Hidden on wider viewports where the links are always visible inline. */
+.nav-toggle {
+  display: none;
+}
+
+.nav-toggle summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text);
+  font-size: 0.95rem;
+}
+
+.nav-toggle summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-toggle[open] .nav-links {
+  display: flex;
+}
+
+@media (max-width: 640px) {
+  .site-nav .nav-links {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    gap: 0;
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border);
+    padding: var(--space-2);
+  }
+
+  .site-nav .nav-links li {
+    padding: var(--space-1) 0;
+  }
+
+  .nav-toggle {
+    display: block;
+    position: relative;
+  }
+}
+
+/* ── Masthead / page header ────────────────────────────────────────────── */
+.masthead {
+  background-color: #343a40;
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+  padding: var(--space-4) 0;
+  text-align: center;
+}
+
+.masthead h1 {
+  color: #fff;
+  margin-bottom: var(--space-1);
+}
+
+.masthead .subheading {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 1.15rem;
+  opacity: 0.9;
+}
+
+.masthead .meta {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+/* ── Post list ──────────────────────────────────────────────────────────── */
+.post-preview {
+  margin-bottom: var(--space-3);
+}
+
+.post-preview .post-title {
+  margin-bottom: 0.25rem;
+}
+
+.post-preview a {
+  text-decoration: none;
+  color: var(--color-text);
+}
+
+.post-preview a:hover .post-title {
+  color: var(--color-accent);
+}
+
+.post-preview .post-subtitle {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: 1rem;
+  color: var(--color-text-muted);
+}
+
+.post-preview .post-meta {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.post-divider {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: var(--space-3) 0;
+}
+
+.text-muted {
+  color: var(--color-text-muted);
+}
+
+.fst-italic {
+  font-style: italic;
+}
+
+/* ── Post body / article ───────────────────────────────────────────────── */
+article {
+  max-width: var(--measure);
+  margin: var(--space-4) auto;
+  padding: 0 var(--space-2);
+}
+
+article blockquote {
+  border-left: 3px solid var(--color-accent);
+  margin: var(--space-2) 0;
+  padding-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ── Route / map styles (unchanged behaviour, retokenized) ─────────────── */
+.route-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: var(--space-3);
+  padding: 0.75rem 1rem;
+  background: var(--color-surface-2);
+  border-radius: 6px;
+  border-left: 3px solid var(--color-accent);
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.route-stats .stat-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.route-stats .stat-item .icon {
+  color: var(--color-accent);
+}
+
+#post-map {
+  height: 420px;
+  border-radius: 8px;
+  margin-bottom: var(--space-4);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+}
+
+/* ── Tags ───────────────────────────────────────────────────────────────── */
+.tag-badge {
+  display: inline-block;
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  border-radius: 4px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.8rem;
+  margin: 0 0.35rem 0.35rem 0;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+.site-footer {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-3) 0;
+  margin-top: var(--space-4);
+}
+
+.site-footer .container {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  font-style: italic;
+}

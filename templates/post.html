@@ -12,97 +12,86 @@
 
 {% block page_header %}
 <header class="masthead" style="background-image: url('{{ post.cover_image if post.cover_image else '/static/img/post-bg.jpg' }}')">
-    <div class="container position-relative px-4 px-lg-5">
-        <div class="row gx-4 gx-lg-5 justify-content-center">
-            <div class="col-md-10 col-lg-8 col-xl-7">
-                <div class="post-heading">
-                    <h1>{{ post.title }}</h1>
-                    {% if post.summary %}
-                    <h2 class="subheading">{{ post.summary }}</h2>
-                    {% endif %}
-                    <span class="meta">
-                        Posted by Sven
-                        on <time datetime="{{ post.published_date }}">{{ post.published_date.strftime('%B %-d, %Y') }}</time>
-                    </span>
-                </div>
-            </div>
+    <div class="container">
+        <div class="post-heading">
+            <h1>{{ post.title }}</h1>
+            {% if post.summary %}
+            <h2 class="subheading">{{ post.summary }}</h2>
+            {% endif %}
+            <span class="meta">
+                Posted by Sven
+                on <time datetime="{{ post.published_date }}">{{ post.published_date.strftime('%B %-d, %Y') }}</time>
+            </span>
         </div>
     </div>
 </header>
 {% endblock %}
 
 {% block content %}
-<article class="mb-4">
-    <div class="container px-4 px-lg-5">
-        <div class="row gx-4 gx-lg-5 justify-content-center">
-            <div class="col-md-10 col-lg-8 col-xl-7">
+{% import "partials/icons.html" as icons %}
+<article>
 
-                {{ post.body_html | safe }}
+    {{ post.body_html | safe }}
 
-                {# ── Route block ─────────────────────────────────────────────
-                   Guarded explicitly — never assumed to render harmlessly
-                   when absent.  Stats always show when route data is present;
-                   the map only renders when a tiles URL is also configured.  #}
-                {% if route %}
-                <div class="route-stats" aria-label="Ride statistics">
-                    {% if route.distance_km %}
-                    <span class="stat-item">
-                        <i class="fas fa-road" aria-hidden="true"></i>
-                        {{ "%.1f"|format(route.distance_km) }}&thinsp;km
-                    </span>
-                    {% endif %}
+    {# ── Route block ─────────────────────────────────────────────
+       Guarded explicitly — never assumed to render harmlessly
+       when absent.  Stats always show when route data is present;
+       the map only renders when a tiles URL is also configured.  #}
+    {% if route %}
+    <div class="route-stats" aria-label="Ride statistics">
+        {% if route.distance_km %}
+        <span class="stat-item">
+            {{ icons.icon_road() }}
+            {{ "%.1f"|format(route.distance_km) }}&thinsp;km
+        </span>
+        {% endif %}
 
-                    {% if route.elevation_gain_m %}
-                    <span class="stat-item">
-                        <i class="fas fa-arrow-up" aria-hidden="true"></i>
-                        {{ route.elevation_gain_m | int }}&thinsp;m
-                    </span>
-                    {% endif %}
+        {% if route.elevation_gain_m %}
+        <span class="stat-item">
+            {{ icons.icon_arrow_up() }}
+            {{ route.elevation_gain_m | int }}&thinsp;m
+        </span>
+        {% endif %}
 
-                    {% if route.elevation_loss_m %}
-                    <span class="stat-item">
-                        <i class="fas fa-arrow-down" aria-hidden="true"></i>
-                        {{ route.elevation_loss_m | int }}&thinsp;m
-                    </span>
-                    {% endif %}
+        {% if route.elevation_loss_m %}
+        <span class="stat-item">
+            {{ icons.icon_arrow_down() }}
+            {{ route.elevation_loss_m | int }}&thinsp;m
+        </span>
+        {% endif %}
 
-                    {% if route.duration_minutes %}
-                    {% set dur_h = (route.duration_minutes / 60) | int %}
-                    {% set dur_m = (route.duration_minutes % 60) | int %}
-                    <span class="stat-item">
-                        <i class="fas fa-clock" aria-hidden="true"></i>
-                        {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{ "%02d"|format(dur_m) }}min
-                    </span>
-                    {% endif %}
+        {% if route.duration_minutes %}
+        {% set dur_h = (route.duration_minutes / 60) | int %}
+        {% set dur_m = (route.duration_minutes % 60) | int %}
+        <span class="stat-item">
+            {{ icons.icon_clock() }}
+            {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{ "%02d"|format(dur_m) }}min
+        </span>
+        {% endif %}
 
-                    {% if route.name %}
-                    <span class="stat-item text-muted" style="margin-left:auto;font-size:0.8rem;">
-                        {{ route.name }}
-                    </span>
-                    {% endif %}
-                </div>
-
-                {% if route_geojson and tiles_url %}
-                <div id="post-map" role="img" aria-label="Interactive map of {{ route.name }}"></div>
-                {% endif %}
-                {% endif %}
-                {# ── End route block ──────────────────────────────────────── #}
-
-                {% if post.tags %}
-                <div class="mt-4">
-                    {% for tag in post.tags.split(',') %}
-                    <span class="badge bg-secondary me-1">{{ tag.strip() }}</span>
-                    {% endfor %}
-                </div>
-                {% endif %}
-
-                <div class="mt-4">
-                    <a href="/" class="text-muted">&larr; Back to all posts</a>
-                </div>
-
-            </div>
-        </div>
+        {% if route.name %}
+        <span class="stat-item text-muted" style="margin-left:auto;font-size:0.8rem;">
+            {{ route.name }}
+        </span>
+        {% endif %}
     </div>
+
+    {% if route_geojson and tiles_url %}
+    <div id="post-map" role="img" aria-label="Interactive map of {{ route.name }}"></div>
+    {% endif %}
+    {% endif %}
+    {# ── End route block ──────────────────────────────────────── #}
+
+    {% if post.tags %}
+    <div>
+        {% for tag in post.tags.split(',') %}
+        <span class="tag-badge">{{ tag.strip() }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <p><a href="/" class="text-muted">&larr; Back to all posts</a></p>
+
 </article>
 {% endblock %}
 

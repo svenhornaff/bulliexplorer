@@ -1,0 +1,48 @@
+{# Inline SVG icon macros — replaces the Font Awesome CDN script (Phase 1).
+   Hand-authored, minimal stroke icons, 24x24 viewBox, `currentColor` so they
+   inherit text color and work in both light/dark themes without extra CSS.
+   Each macro accepts an optional `cls` for sizing/spacing hooks.            #}
+
+{% macro icon_road(cls="icon") %}
+<svg class="{{ cls }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <path d="M9 3 5 21" />
+  <path d="M15 3l4 18" />
+  <path d="M12 3v3" />
+  <path d="M12 10.5v3" />
+  <path d="M12 17v3" />
+</svg>
+{% endmacro %}
+
+{% macro icon_arrow_up(cls="icon") %}
+<svg class="{{ cls }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <path d="M12 19V5" />
+  <path d="M5 12l7-7 7 7" />
+</svg>
+{% endmacro %}
+
+{% macro icon_arrow_down(cls="icon") %}
+<svg class="{{ cls }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <path d="M12 5v14" />
+  <path d="M19 12l-7 7-7-7" />
+</svg>
+{% endmacro %}
+
+{% macro icon_clock(cls="icon") %}
+<svg class="{{ cls }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <circle cx="12" cy="12" r="9" />
+  <path d="M12 7v5l3.5 2" />
+</svg>
+{% endmacro %}
+
+{% macro icon_menu(cls="icon") %}
+<svg class="{{ cls }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+  <path d="M4 6h16" />
+  <path d="M4 12h16" />
+  <path d="M4 18h16" />
+</svg>
+{% endmacro %}
