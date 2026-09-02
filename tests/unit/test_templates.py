@@ -49,6 +49,20 @@ class _FakePost:
     is_draft = False
 
 
+class _FakeOlderPost:
+    """Second post — used for the homepage's 2-post "more rides" grid case."""
+
+    id = 2
+    slug = "older-post"
+    title = "An Older Ride"
+    summary = "The one before this one."
+    published_date = datetime.date(2025, 7, 1)
+    cover_image = None
+    tags = "gravel"
+    body_html = "<p>Older placeholder body.</p>"
+    is_draft = False
+
+
 class _FakeRoute:
     id = 1
     post_id = 1
@@ -93,8 +107,36 @@ def _session(*call_results):
 
 
 async def _empty_session():
-    """Post-list session: no posts."""
+    """Post-list session: no posts (0-post homepage case).
+
+    No second execute() call — post_list only queries a latest-post route
+    when there is at least one post.
+    """
     yield _session(_result(scalars_list=[]))
+
+
+async def _one_post_session():
+    """Post-list session: 1 post, no route (1-post homepage case: hero only)."""
+    yield _session(
+        _result(scalars_list=[_FakePost()]),  # posts query
+        _result(scalar=None),  # latest-post route query
+    )
+
+
+async def _one_post_with_route_session():
+    """Post-list session: 1 post that has a route (hero shows stat chips)."""
+    yield _session(
+        _result(scalars_list=[_FakePost()]),  # posts query
+        _result(scalar=_FakeRoute()),  # latest-post route query
+    )
+
+
+async def _two_posts_session():
+    """Post-list session: 2 posts, latest has no route (2-post homepage case)."""
+    yield _session(
+        _result(scalars_list=[_FakePost(), _FakeOlderPost()]),  # posts query, newest first
+        _result(scalar=None),  # latest-post route query
+    )
 
 
 async def _404_session():
@@ -150,6 +192,30 @@ async def mock_client():
 @pytest.fixture
 async def client_with_post():
     transport = ASGITransport(app=_app(_post_session))
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def client_with_one_post():
+    """Homepage with exactly 1 post, no route — hero only, no "more rides"."""
+    transport = ASGITransport(app=_app(_one_post_session))
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def client_with_one_post_and_route():
+    """Homepage with 1 post that has a route — hero shows stat chips."""
+    transport = ASGITransport(app=_app(_one_post_with_route_session))
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def client_with_two_posts():
+    """Homepage with 2 posts — hero + "more rides" grid with 1 entry."""
+    transport = ASGITransport(app=_app(_two_posts_session))
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
@@ -213,16 +279,79 @@ async def test_post_list_has_nav(mock_client):
 
 
 @pytest.mark.unit
-async def test_post_list_has_masthead(mock_client):
+async def test_post_list_has_site_intro(mock_client):
+    """Phase 3 replaces the image masthead with a static site-proposition line."""
     resp = await mock_client.get("/posts/")
-    assert "masthead" in resp.text
+    assert "site-intro" in resp.text
     assert "site-heading" in resp.text
+    assert "site-tagline" in resp.text
 
 
 @pytest.mark.unit
 async def test_post_list_empty_state(mock_client):
+    """0-post homepage case: empty-state copy, no hero, no crash."""
     resp = await mock_client.get("/posts/")
+    assert resp.status_code == 200
     assert "No posts yet" in resp.text
+    assert "post-hero" not in resp.text
+    assert "post-grid-heading" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Homepage hero (latest post) — 1-post and 2-post cases (Phase 3, §6.1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_home_one_post_shows_hero(client_with_one_post):
+    """1-post case: hero renders with the post's title."""
+    resp = await client_with_one_post.get("/posts/")
+    assert resp.status_code == 200
+    assert "post-hero" in resp.text
+    assert "A Gravel Day in the Black Forest" in resp.text
+
+
+@pytest.mark.unit
+async def test_home_one_post_has_no_more_rides_section(client_with_one_post):
+    """1-post case: no dangling "more rides" heading over an empty list."""
+    resp = await client_with_one_post.get("/posts/")
+    assert "post-grid-heading" not in resp.text
+    assert "post-grid" not in resp.text
+
+
+@pytest.mark.unit
+async def test_home_one_post_no_route_hides_stat_chips(client_with_one_post):
+    """Latest post without a Route: stat chips are simply absent, not empty/broken."""
+    resp = await client_with_one_post.get("/posts/")
+    assert "route-stats" not in resp.text
+
+
+@pytest.mark.unit
+async def test_home_one_post_with_route_shows_stat_chips(client_with_one_post_and_route):
+    """Latest post with a Route: stat chips render in the hero."""
+    resp = await client_with_one_post_and_route.get("/posts/")
+    assert resp.status_code == 200
+    assert "route-stats" in resp.text
+    assert "68.0" in resp.text  # distance_km formatted
+    assert "1420" in resp.text  # elevation_gain_m
+
+
+@pytest.mark.unit
+async def test_home_two_posts_shows_hero_and_grid(client_with_two_posts):
+    """2-post case: latest post is the hero, remaining post appears in the grid."""
+    resp = await client_with_two_posts.get("/posts/")
+    assert resp.status_code == 200
+    assert "post-hero" in resp.text
+    assert "A Gravel Day in the Black Forest" in resp.text  # hero (newest)
+    assert "post-grid-heading" in resp.text
+    assert "An Older Ride" in resp.text  # grid (older)
+
+
+@pytest.mark.unit
+async def test_home_two_posts_older_post_not_in_hero(client_with_two_posts):
+    """The older post's title must only appear once, inside the grid, not the hero."""
+    resp = await client_with_two_posts.get("/posts/")
+    assert resp.text.count("An Older Ride") == 1
 
 
 @pytest.mark.unit

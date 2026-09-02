@@ -607,27 +607,76 @@ close the ask since Chrome shares Puppeteer's Blink engine.
 
 **Scope**
 
-- [ ] New `home.html` per §6.1: static site-proposition line, a larger
+- [x] New `home.html` per §6.1: static site-proposition line, a larger
   "latest post" treatment (cover image, summary, route stat chips if the
   latest post has a `Route`), remaining posts below in a simple
   grid/list.
 
 **Done when**
 
-- [ ] Rendered correctly with 0 posts (empty-state copy, no crash), 1
+- [x] Rendered correctly with 0 posts (empty-state copy, no crash), 1
   post (hero only, empty list section handled gracefully — no dangling
   "more posts" heading over nothing), and 2 posts (today's real content)
   — each checked as its own case, not inferred from the 2-post case
   working.
-- [ ] The latest post's route stat chips appear when it has a `Route` and
+- [x] The latest post's route stat chips appear when it has a `Route` and
   are simply absent (not a broken/empty chip) when it doesn't.
 
 **Testing**
 
-- Extend the existing homepage integration test (or add one) asserting
-  the 0/1/2-post render cases from "Done when" don't 500 and contain the
-  expected post title(s) — this is exactly the kind of case `AGENTS.md`
-  requires a test for since it's new template behavior.
+- Extended `tests/unit/test_templates.py` with 0/1/2-post homepage cases
+  (`client_with_one_post`, `client_with_one_post_and_route`,
+  `client_with_two_posts` fixtures) asserting 200s, hero markup, the
+  latest post's title, the "more rides" grid's presence/absence, and
+  route stat-chip presence/absence — exactly the case `AGENTS.md`
+  requires a test for since it's new template behavior. Also manually
+  verified against the two real posts in `content/posts/` (`make dev` +
+  `curl`): `sunday-gravel-loop` (newer, no `Route` row) renders as the
+  hero with no stat chips; `kinzig-valley-loop` (older, has a `Route`)
+  renders in the "more rides" grid — confirming the newest-first/route-
+  optional logic against real data, not just fixtures.
+
+**Left over**
+
+None.
+
+**Summary**
+
+Built the Phase 3 editorial homepage. `app/routes/posts.py`'s
+`post_list` now runs one additional optional query — `select(Route)
+where Route.post_id == posts[0].id` — for the latest post only (same
+"never an inner join" convention `post_detail` already uses, applied to
+one row instead of joining across the whole list), and passes
+`latest_route` to the template alongside `posts`. `home.html` was
+rewritten: the old image-background `.masthead` is gone, replaced by a
+text-only `.site-intro` block (site name + a one-sentence proposition
+line); the newest post renders as a `.post-hero` — cover image (guarded
+on `cover_image` being set), title, summary, and a `.route-stats` chip
+row reusing the same Jinja markup/icons as `post.html`, guarded on
+`latest_route` being present; any remaining posts render below in a
+`.post-grid` under a "More rides" heading, and that whole section is
+omitted (not rendered empty) when there's only one post. `static/
+theme.css` gained `.site-intro`, `.post-hero*`, `.post-grid*` rules,
+reusing existing tokens/spacing scale — no new tokens needed. Verified
+the 0/1/2-post cases both with new unit tests (mocked DB) and by hand
+against the two real posts via `make dev`.
+
+**Recommended next steps**
+
+- Phase 4 (post-body block vocabulary) touches `route-map` placement and
+  the POI-marker palette; it can build on this phase's `.route-stats`
+  reuse pattern (same markup/partial-shaped block used in two templates
+  now) — worth actually extracting to a shared macro/partial at that
+  point rather than duplicating a third time, since Phase 2's
+  "Recommended next steps" already flagged this as a nice-to-have, not
+  required now.
+- The two pre-existing contrast gaps flagged in Phase 2's "Left over"
+  (route-line light-mode color, POI-marker fill-color palette) are still
+  open decisions, unaffected by this phase — still worth resolving
+  before Phase 4 goes deeper into map-adjacent content.
+- Cross-browser (second rendering engine) verification is also still
+  open from Phase 2 — unrelated to this phase's work, not newly
+  introduced here.
 
 ### Phase 4 — Post body block vocabulary
 

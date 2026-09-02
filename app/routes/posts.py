@@ -28,7 +28,14 @@ async def post_list(
     request: Request,
     db: AsyncSession = Depends(get_db_session),  # noqa: B008
 ):
-    """List all published (non-draft) posts, newest first."""
+    """List all published (non-draft) posts, newest first.
+
+    The homepage (Phase 3, docs/dev/ui_ux_refresh.md §6.1) gives the latest
+    post a larger hero treatment including its route stat chips, if it has
+    one. The route is fetched with a second, separate optional query — same
+    "never an inner join" convention as ``post_detail`` — only for the
+    latest post, not joined across the whole list.
+    """
     result = await db.execute(
         select(Post)
         .where(Post.is_draft == False)  # noqa: E712 — SQLAlchemy requires == not `is`
@@ -36,11 +43,16 @@ async def post_list(
     )
     posts = result.scalars().all()
 
+    latest_route: Route | None = None
+    if posts:
+        route_result = await db.execute(select(Route).where(Route.post_id == posts[0].id))
+        latest_route = route_result.scalar_one_or_none()
+
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
         "home.html",
-        {"posts": posts, "year": datetime.now().year},
+        {"posts": posts, "latest_route": latest_route, "year": datetime.now().year},
     )
 
 

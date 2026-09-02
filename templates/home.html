@@ -1,42 +1,92 @@
 {% extends "base.html" %} {% block title %}BulliExplorer — Gravel & Adventure
 Blog{% endblock %} {% block meta_description %}Gravel rides, campsites and
 routes — one van, endless roads.{% endblock %} {% block page_header %}
-<header
-    class="masthead"
-    style="background-image: url(&quot;/static/img/home-bg.jpg&quot;)"
->
+<header class="site-intro">
     <div class="container">
         <div class="site-heading">
             <h1>BulliExplorer</h1>
-            <span class="subheading"
-                >Gravel rides, campsites &amp; routes — one van, endless
-                roads.</span
-            >
+            <p class="site-tagline">
+                Gravel rides, campsites &amp; routes — one van, endless
+                roads. A field journal for the ones we've actually ridden.
+            </p>
         </div>
     </div>
 </header>
-{% endblock %} {% block content %}
+{% endblock %} {% block content %} {% import "partials/icons.html" as icons
+%}
 <div class="container">
-    {% if posts %} {% for post in posts %}
-    <!-- Post preview -->
-    <div class="post-preview">
-        <a href="/posts/{{ post.slug }}">
-            <h2 class="post-title">{{ post.title }}</h2>
-            {% if post.summary %}
-            <h3 class="post-subtitle">{{ post.summary }}</h3>
+    {% if posts %} {% set latest = posts[0] %}
+    <!-- Latest post — hero treatment -->
+    <article class="post-hero">
+        <a class="post-hero-link" href="/posts/{{ latest.slug }}">
+            {% if latest.cover_image %}
+            <img
+                class="post-hero-cover"
+                src="{{ latest.cover_image }}"
+                alt=""
+                width="1200"
+                height="600"
+                fetchpriority="high"
+            />
+            {% endif %}
+            <h2 class="post-hero-title">{{ latest.title }}</h2>
+            {% if latest.summary %}
+            <p class="post-hero-summary">{{ latest.summary }}</p>
             {% endif %}
         </a>
         <p class="post-meta">
             Posted by Sven on
-            <time datetime="{{ post.published_date }}"
-                >{{ post.published_date.strftime('%B %-d, %Y') }}</time
+            <time datetime="{{ latest.published_date }}"
+                >{{ latest.published_date.strftime('%B %-d, %Y') }}</time
             >
         </p>
+        {% if latest_route %}
+        <div class="route-stats" aria-label="Ride statistics">
+            {% if latest_route.distance_km %}
+            <span class="stat-item">
+                {{ icons.icon_road() }} {{ "%.1f"|format(latest_route.distance_km) }}&thinsp;km
+            </span>
+            {% endif %} {% if latest_route.elevation_gain_m %}
+            <span class="stat-item">
+                {{ icons.icon_arrow_up() }} {{ latest_route.elevation_gain_m | int }}&thinsp;m
+            </span>
+            {% endif %} {% if latest_route.elevation_loss_m %}
+            <span class="stat-item">
+                {{ icons.icon_arrow_down() }} {{ latest_route.elevation_loss_m | int }}&thinsp;m
+            </span>
+            {% endif %} {% if latest_route.duration_minutes %} {% set dur_h =
+            (latest_route.duration_minutes / 60) | int %} {% set dur_m =
+            (latest_route.duration_minutes % 60) | int %}
+            <span class="stat-item">
+                {{ icons.icon_clock() }} {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{
+                "%02d"|format(dur_m) }}min
+            </span>
+            {% endif %}
+        </div>
+        {% endif %}
+    </article>
+
+    {% if posts[1:] %}
+    <h2 class="post-grid-heading">More rides</h2>
+    <div class="post-grid">
+        {% for post in posts[1:] %}
+        <div class="post-preview">
+            <a href="/posts/{{ post.slug }}">
+                <h3 class="post-title">{{ post.title }}</h3>
+                {% if post.summary %}
+                <p class="post-subtitle">{{ post.summary }}</p>
+                {% endif %}
+            </a>
+            <p class="post-meta">
+                Posted by Sven on
+                <time datetime="{{ post.published_date }}"
+                    >{{ post.published_date.strftime('%B %-d, %Y') }}</time
+                >
+            </p>
+        </div>
+        {% endfor %}
     </div>
-    {% if not loop.last %}
-    <!-- Divider -->
-    <hr class="post-divider" />
-    {% endif %} {% endfor %} {% else %}
+    {% endif %} {% else %}
     <p class="text-muted fst-italic">No posts yet — check back soon.</p>
     {% endif %}
 </div>

@@ -277,7 +277,7 @@ p {
  }
 }
 
-/* ── Masthead / page header ────────────────────────────────────────────── */
+/* ── Masthead / page header (post.html only) ───────────────────────────── */
 .masthead {
  background-color: #343a40;
  background-size: cover;
@@ -304,6 +304,80 @@ p {
  margin-top: var(--space-2);
  font-size: 0.85rem;
  opacity: 0.85;
+}
+
+/* ── Site intro (home.html, Phase 3, §6.1) ─────────────────────────────────
+   Replaces the image-based masthead on the homepage with a short static
+   proposition line — no background image, no dark-on-image text. */
+.site-intro {
+ padding: var(--space-4) 0 var(--space-3);
+ text-align: center;
+ border-bottom: 1px solid var(--color-border);
+}
+
+.site-intro h1 {
+ margin-bottom: var(--space-1);
+}
+
+.site-intro .site-tagline {
+ font-family: var(--font-serif);
+ font-style: italic;
+ font-size: 1.15rem;
+ color: var(--color-text-muted);
+ max-width: 42rem;
+ margin: 0 auto;
+}
+
+/* ── Latest-post hero (home.html, Phase 3, §6.1) ───────────────────────── */
+.post-hero {
+ margin: var(--space-4) 0;
+ padding-bottom: var(--space-3);
+ border-bottom: 1px solid var(--color-border);
+}
+
+.post-hero-link {
+ text-decoration: none;
+ color: var(--color-text);
+ display: block;
+}
+
+.post-hero-cover {
+ width: 100%;
+ height: auto;
+ border-radius: 8px;
+ margin-bottom: var(--space-2);
+}
+
+.post-hero-title {
+ font-size: 2rem;
+ margin-bottom: var(--space-1);
+}
+
+.post-hero-link:hover .post-hero-title {
+ color: var(--color-link);
+}
+
+.post-hero-summary {
+ font-family: var(--font-sans);
+ font-size: 1.1rem;
+ color: var(--color-text-muted);
+ margin-bottom: 0;
+}
+
+.post-hero .route-stats {
+ margin-top: var(--space-2);
+ margin-bottom: 0;
+}
+
+/* ── "More rides" grid (home.html, Phase 3, §6.1) ──────────────────────── */
+.post-grid-heading {
+ margin-top: var(--space-4);
+}
+
+.post-grid {
+ display: grid;
+ grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+ gap: var(--space-3);
 }
 
 /* ── Post list ──────────────────────────────────────────────────────────── */
