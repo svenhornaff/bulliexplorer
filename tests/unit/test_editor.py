@@ -96,10 +96,11 @@ def test_config_yml_backend_github():
     assert backend["name"] == "github"
     assert backend["repo"] == "svenhornaff/bulliexplorer"
     assert backend["branch"] == "develop"
-    # PAT auth — no base_url needed, auth_type must be token to suppress
-    # the default OAuth button (which points at Netlify and returns 404).
+    # PAT auth — no base_url needed, auth_type must be absent (Sveltia CMS
+    # rejects any non-empty value; the "Sign In with Token" button is always
+    # present without configuration — see bcaa640).
     assert "base_url" not in backend
-    assert backend.get("auth_type") == "token"
+    assert "auth_type" not in backend
 
 
 @pytest.mark.unit

@@ -5,8 +5,15 @@
 render. #} {% if route_geojson and tiles_url %}
         <link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
     {% endif %} {% endblock %} {% block page_header %}
-    <header class="masthead"
-            style="background-image: url('{{ post.cover_image if post.cover_image else '/static/img/post-bg.jpg' }}')">
+    <header class="masthead {% if post.cover_image %}masthead--has-cover{% endif %}">
+        {% if post.cover_image %}
+            <img class="masthead-cover-img"
+                 src="{{ post.cover_image }}"
+                 alt=""
+                 width="1200"
+                 height="600"
+                 fetchpriority="high" />
+        {% endif %}
         <div class="container">
             <div class="post-heading">
                 <h1>{{ post.title }}</h1>

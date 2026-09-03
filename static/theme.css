@@ -280,11 +280,40 @@ p {
 /* ── Masthead / page header (post.html only) ───────────────────────────── */
 .masthead {
  background-color: #343a40;
- background-size: cover;
- background-position: center;
  color: #fff;
+ min-height: 18rem;
  padding: var(--space-4) 0;
+ position: relative;
+ overflow: hidden;
  text-align: center;
+ display: flex;
+ align-items: center;
+}
+
+/* Cover image — absolutely fills the header behind the text */
+.masthead-cover-img {
+ position: absolute;
+ inset: 0;
+ width: 100%;
+ height: 100%;
+ object-fit: cover;
+ object-position: center;
+ z-index: 0;
+}
+
+/* Dark overlay so white text stays legible over any photo */
+.masthead--has-cover::after {
+ content: "";
+ position: absolute;
+ inset: 0;
+ background: rgba(0, 0, 0, 0.45);
+ z-index: 1;
+}
+
+/* Text stack sits above both image and overlay */
+.masthead .container {
+ position: relative;
+ z-index: 2;
 }
 
 .masthead h1 {
