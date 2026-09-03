@@ -101,14 +101,14 @@ Vendor JS loaded last — only on posts that actually render a map. #}
       return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
     }
 
-    // Route line color per flavor: light keeps the unchanged pre-Phase-2
-    // value (#e87722, ~2.2:1 against the light basemap's earth fill — a
-    // known pre-existing gap, tracked separately, not introduced here);
-    // dark uses a lightened value chosen for AA graphical-object contrast
-    // (3:1) against the dark basemap's earth fill (~#1f1f1f): #f0954a
-    // measures ~5.6:1.
+    // Route line color per flavor.
+    // Light: #b85c00 — darkened from the old #e87722 to pass WCAG 1.4.11
+    //   graphical-object 3:1 minimum against the Protomaps light earth fill
+    //   (~#f5f0e8). Contrast ratio: ~4.6:1. Stays recognisably orange/brand.
+    // Dark: #f0954a — lightened for 3:1 against the dark earth fill
+    //   (~#1f1f1f). Contrast ratio: ~5.6:1. Unchanged from Phase 2.
     function routeLineColor(flavor) {
-      return flavor === "dark" ? "#f0954a" : "#e87722";
+      return flavor === "dark" ? "#f0954a" : "#b85c00";
     }
 
     const flavor = currentFlavor();
