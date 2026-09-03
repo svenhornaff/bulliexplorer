@@ -37,7 +37,7 @@ services:
       - "8000"
     volumes:
       - ./content/posts:/app/content/posts
-      - ./static/uploads:/app/static/uploads
+      - ./static:/app/static
 
   db:
     image: postgis/postgis:16-3.4
