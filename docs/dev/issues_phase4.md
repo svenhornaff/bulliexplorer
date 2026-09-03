@@ -247,3 +247,4 @@ accessibility pass starts from a cleaner baseline.
 | 7 | `Post.body_html` redundant column still populated | **P3** | `app/models/post.py`, `app/services/post_sync.py`, Alembic |
 | 8 | No real post uses galleries/callouts/`[[route-map]]` yet | **P3** | `content/posts/*.md` (content action) |
 | 9 | Phase 5 (hardening) not started | **P3** | — (phase work) |
+| 10 | `static/` not volume-mounted in prod — any change to CSS/JS/editor config requires a full container rebuild | **P2** | `docker-compose.prod.yml` |
