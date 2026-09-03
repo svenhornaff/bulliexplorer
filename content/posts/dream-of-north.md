@@ -8,7 +8,7 @@ tags:
   - 71°10′ N
   - Königswinter
   - 4,243 km
-draft: true
+draft: false
 route: null
 points_of_interest:
   - name: Lofotendream
