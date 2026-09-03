@@ -3,7 +3,7 @@ title: The Kinzig Valley Loop
 slug: kinzig-valley-loop
 date: 2025-08-24
 summary: 68 km through Black Forest singletrack, forest road, and one very steep hike-a-bike — with the van parked at the trailhead and a flask of coffee going cold in the side door.
-cover_image: ''
+cover_image: /static/uploads/kinzig_valley_oop.jpeg
 tags:
   - gravel
   - black-forest
@@ -45,6 +45,8 @@ points_of_interest:
     lat: 48.2873
     lng: 8.2226
     notes: Drinkable. Useful on the return leg if you misjudged your bottle capacity.
+galleries: []
+callouts: []
 ---
 
 There's a specific kind of quiet you only get in the Black Forest at seven in the morning. Fog in the valley, mist caught in the firs, and no sound except your tyres on wet gravel. I pulled out of the Zell am Harmersbach campsite at first light, panniers off, the van locked, and nothing but a frame bag and the vague intention of doing the Kinzig loop before lunch.
