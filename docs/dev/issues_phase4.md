@@ -5,7 +5,7 @@ root-cause, and a concrete fix. Ordered by criticality (P1 → P3).
 
 ---
 
-## P1 — Post masthead: background image never displays
+## ✅ P1 — Post masthead: background image never displays — FIXED (e1e2a14)
 
 **Criticality:** High — visible regression on every post page that has a
 `cover_image` set (e.g. `sunday-gravel-loop`). The header renders as a
@@ -50,7 +50,7 @@ plain dark-grey bar; the cover photo is completely absent.
 
 ---
 
-## P1 — Landing page (`home.html`): `home-bg.jpg` is orphaned / header has no background image
+## ✅ P1 — Landing page (`home.html`): `home-bg.jpg` is orphaned — FIXED (e1e2a14, deleted orphan)
 
 **Criticality:** High — the old Clean Blog homepage had a full-bleed
 masthead background image (`/static/img/home-bg.jpg`). Phase 3 deliberately
@@ -83,7 +83,7 @@ links to the file, but the orphaned asset is confusing.
 
 ---
 
-## P2 — No CSS formatter in the project toolchain
+## ✅ P2 — No CSS formatter in the project toolchain — FIXED (905f99a, djlint added)
 
 **Criticality:** Medium — `make lint` / `make ci` only runs `ruff` and
 `pyright`, both Python-only. `static/theme.css` is ~600 lines of hand-
@@ -119,7 +119,7 @@ add a CSS style convention to `AGENTS.md`.
 
 ---
 
-## P2 — Post masthead has no `min-height`; collapses to padding-only when cover image is absent
+## ✅ P2 — Post masthead has no `min-height` — FIXED (e1e2a14, 18rem set)
 
 **Criticality:** Medium — the `.masthead` class sets only
 `padding: var(--space-4) 0` (no `min-height`). When a post has no
@@ -140,7 +140,13 @@ issue above — it matters even after that fix for the no-image fallback case.
 
 ---
 
-## P2 — WCAG contrast gaps: route-line (light) and POI markers — open, undecided
+## ✅ P2 — WCAG contrast: route-line light-mode — PARTIAL FIX (c1539b5)
+
+**Route-line fixed:** `#e87722` → `#b85c00` (~4.6:1 on light basemap). POI marker palette still open.
+
+---
+
+## P2 — WCAG contrast gaps: POI marker colours — open
 
 **Criticality:** Medium — flagged as pre-existing in Phase 2's "Left over"
 and again in Phase 4's, but still unresolved after two full phases. Both
@@ -177,7 +183,7 @@ Phase 2.
 
 ---
 
-## P3 — `Post.body_html` column is now redundant but still populated
+## ✅ P3 — `Post.body_html` column dropped — FIXED (74eb967)
 
 **Criticality:** Low — `body_html` is still written on every sync by
 `post_sync.py` and stored in the DB, but `post.html` now renders
@@ -238,13 +244,16 @@ accessibility pass starts from a cleaner baseline.
 
 | # | Issue | Criticality | Files |
 | --- | ------- | ------------- | ------- |
-| 1 | Post masthead cover image not displayed (`background-image` + missing fallback) | **P1** | `templates/post.html`, `static/theme.css`, `static/img/post-bg.jpg` |
-| 2 | `home-bg.jpg` orphaned — never displayed on landing page | **P1** | `templates/home.html`, `static/img/home-bg.jpg` |
-| 3 | No CSS formatter in toolchain | **P2** | `Makefile`, `pyproject.toml`, `static/theme.css` |
-| 4 | `.masthead` collapses without cover image (no `min-height`) | **P2** | `static/theme.css` |
-| 5 | WCAG contrast gaps: route-line light-mode + POI markers (open since Phase 2) | **P2** | `templates/post.html`, `static/theme.css` |
-| 6 | Cross-browser verification (WebKit/Gecko) still open since Phase 2 | **P2** | — (manual action) |
-| 7 | `Post.body_html` redundant column still populated | **P3** | `app/models/post.py`, `app/services/post_sync.py`, Alembic |
-| 8 | No real post uses galleries/callouts/`[[route-map]]` yet | **P3** | `content/posts/*.md` (content action) |
-| 9 | Phase 5 (hardening) not started | **P3** | — (phase work) |
-| 10 | `static/` not volume-mounted in prod — any change to CSS/JS/editor config requires a full container rebuild | **P2** | `docker-compose.prod.yml` |
+| # | Issue | Criticality | Files | Status |
+| --- | ------- | ------------- | ------- | ------ |
+| 1 | Post masthead cover image not displayed | **P1** | `templates/post.html`, `static/theme.css` | ✅ Fixed e1e2a14 |
+| 2 | `home-bg.jpg` orphaned | **P1** | `static/img/home-bg.jpg` | ✅ Fixed e1e2a14 |
+| 3 | No CSS formatter | **P2** | `Makefile`, `pyproject.toml` | ✅ Fixed 905f99a |
+| 4 | `.masthead` no `min-height` | **P2** | `static/theme.css` | ✅ Fixed e1e2a14 |
+| 5 | WCAG route-line light-mode contrast | **P2** | `templates/post.html` | ✅ Fixed c1539b5 |
+| 5b | WCAG POI marker colours | **P2** | `templates/post.html` | 🔲 Open |
+| 6 | Cross-browser verification (WebKit/Gecko) | **P2** | — (manual) | 🔲 Open |
+| 7 | `Post.body_html` redundant column | **P3** | `app/models/post.py`, Alembic | ✅ Fixed 74eb967 |
+| 8 | No real post uses galleries/callouts | **P3** | `content/posts/*.md` | 🔲 Open (content action) |
+| 9 | Phase 5 (hardening) not started | **P3** | — | 🔲 Open |
+| 10 | `static/` not volume-mounted in prod | **P2** | `docker-compose.prod.yml` | ✅ Fixed ced0665 |
