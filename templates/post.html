@@ -25,50 +25,30 @@ render. #} {% if route_geojson and tiles_url %}
   </div>
 </header>
 {% endblock %} {% block content %} {% import "partials/icons.html" as icons %}
+{% import "partials/blocks.html" as blocks %}
 <article>
-  {{ post.body_html | safe }} {# ── Route block
-  ───────────────────────────────────────────── Guarded explicitly — never
-  assumed to render harmlessly when absent. Stats always show when route data is
-  present; the map only renders when a tiles URL is also configured. #} {% if
-  route %}
-  <div class="route-stats" aria-label="Ride statistics">
-    {% if route.distance_km %}
-    <span class="stat-item">
-      {{ icons.icon_road() }} {{ "%.1f"|format(route.distance_km) }}&thinsp;km
-    </span>
-    {% endif %} {% if route.elevation_gain_m %}
-    <span class="stat-item">
-      {{ icons.icon_arrow_up() }} {{ route.elevation_gain_m | int }}&thinsp;m
-    </span>
-    {% endif %} {% if route.elevation_loss_m %}
-    <span class="stat-item">
-      {{ icons.icon_arrow_down() }} {{ route.elevation_loss_m | int }}&thinsp;m
-    </span>
-    {% endif %} {% if route.duration_minutes %} {% set dur_h =
-    (route.duration_minutes / 60) | int %} {% set dur_m =
-    (route.duration_minutes % 60) | int %}
-    <span class="stat-item">
-      {{ icons.icon_clock() }} {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{
-      "%02d"|format(dur_m) }}min
-    </span>
-    {% endif %} {% if route.name %}
-    <span
-      class="stat-item text-muted"
-      style="margin-left: auto; font-size: 0.8rem"
-    >
-      {{ route.name }}
-    </span>
-    {% endif %}
-  </div>
-
-  {% if route_geojson and tiles_url %}
-  <div
-    id="post-map"
-    role="img"
-    aria-label="Interactive map of {{ route.name }}"
-  ></div>
-  {% endif %} {% endif %} {# ── End route block
-  ──────────────────────────────────────── #} {% if post.tags %}
+  {# ── Body blocks (Phase 4, docs/dev/ui_ux_refresh.md §5.3)
+  ───────────────────────────────────────────── post.body_blocks is the
+  sync-time render plan built from body_markdown plus the
+  [[route-map]]/[[gallery:id]]/[[callout:id]] markers. The route-map block
+  renders inline here since it needs this template's
+  route/route_geojson/tiles_url context; gallery/callout dispatch to
+  templates/partials/blocks.html. ns.saw_route_map tracks whether any block in
+  the plan was route-map, so the stats+map can still render as a render-time
+  fallback below when the post has a route but body_blocks doesn't contain one —
+  covers posts with no [[route-map]] marker (the common case) *and* any Post row
+  that never went through build_body_blocks() at all (a legacy row right after
+  the migration backfill, or one inserted directly, e.g. in a test) — so this
+  can never regress into silently dropping a post's map. #} {% set ns =
+  namespace(saw_route_map=false) %} {% for block in post.body_blocks %} {% if
+  block.type == "prose" %} {{ block.html | safe }} {% elif block.type ==
+  "gallery" %} {{ blocks.render_gallery(block.images) }} {% elif block.type ==
+  "callout" %} {{ blocks.render_callout(block) }} {% elif block.type ==
+  "route-map" %} {% set ns.saw_route_map = true %} {% if route %} {% include
+  "partials/route_stats.html" %} {% endif %} {% endif %} {% endfor %} {% if
+  route and not ns.saw_route_map %} {% include "partials/route_stats.html" %} {%
+  endif %} {# ── End body blocks ──────────────────────────────────────── #} {%
+  if post.tags %}
   <div>
     {% for tag in post.tags.split(',') %}
     <span class="tag-badge">{{ tag.strip() }}</span>

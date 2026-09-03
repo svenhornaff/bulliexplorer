@@ -31,6 +31,7 @@ from app.models.post import Post
 from app.models.post_schema import PostFrontmatter
 from app.models.route import Route
 from app.services.geo_sync import sync_pois, sync_route
+from app.services.post_blocks import build_body_blocks
 from app.utils.log_factory import get_logger
 
 logger = get_logger(__name__)
@@ -89,6 +90,18 @@ async def sync_posts(
         await session.flush()
         await sync_route(session, post.id, pp.frontmatter.route, content_dir)
         await sync_pois(session, post.id, pp.frontmatter.points_of_interest)
+
+        # Body-block render plan (Phase 4). The "route present, no explicit
+        # [[route-map]] marker" fallback is handled at render time in
+        # post.html, not here — see build_body_blocks()'s docstring.
+        body_blocks = build_body_blocks(
+            pp.body_markdown,
+            pp.frontmatter.galleries,
+            pp.frontmatter.callouts,
+        )
+        if post.body_blocks != body_blocks:
+            post.body_blocks = body_blocks
+
         counts["upserted"] += 1
 
     # ── 3. Delete DB rows whose slug is no longer in the file set ────────────

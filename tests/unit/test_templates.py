@@ -46,6 +46,7 @@ class _FakePost:
     cover_image = None
     tags = "gravel,adventure"
     body_html = "<p>Placeholder body.</p>"
+    body_blocks = [{"type": "prose", "html": "<p>Placeholder body.</p>"}]
     is_draft = False
 
 
@@ -60,6 +61,7 @@ class _FakeOlderPost:
     cover_image = None
     tags = "gravel"
     body_html = "<p>Older placeholder body.</p>"
+    body_blocks = [{"type": "prose", "html": "<p>Older placeholder body.</p>"}]
     is_draft = False
 
 
@@ -73,6 +75,18 @@ class _FakeRoute:
     elevation_gain_m = 1420.0
     elevation_loss_m = 1380.0
     duration_minutes = 275.0  # 4h 35min
+
+
+class _FakePostWithRouteMapBlock(_FakePost):
+    """A post whose body_blocks already includes a route-map block — the
+    post_detail route/route_geojson context is what post.html actually
+    renders from, so this only needs to include the block in the plan.
+    """
+
+    body_blocks = [
+        {"type": "prose", "html": "<p>Placeholder body.</p>"},
+        {"type": "route-map"},
+    ]
 
 
 class _FakePOI:
@@ -156,7 +170,7 @@ async def _post_session():
 async def _post_with_route_session():
     """Post-detail session: post found with route (no POIs)."""
     yield _session(
-        _result(scalar=_FakePost()),
+        _result(scalar=_FakePostWithRouteMapBlock()),
         _result(scalar=_FakeRoute()),
         _result(scalars_list=[]),
     )
@@ -165,7 +179,7 @@ async def _post_with_route_session():
 async def _post_with_route_and_pois_session():
     """Post-detail session: post found with route and one POI."""
     yield _session(
-        _result(scalar=_FakePost()),
+        _result(scalar=_FakePostWithRouteMapBlock()),
         _result(scalar=_FakeRoute()),
         _result(scalars_list=[_FakePOI()]),
     )

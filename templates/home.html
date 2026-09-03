@@ -6,14 +6,13 @@ routes — one van, endless roads.{% endblock %} {% block page_header %}
         <div class="site-heading">
             <h1>BulliExplorer</h1>
             <p class="site-tagline">
-                Gravel rides, campsites &amp; routes — one van, endless
-                roads. A field journal for the ones we've actually ridden.
+                Gravel rides, campsites &amp; routes — one van, endless roads. A
+                field journal for the ones we've actually ridden.
             </p>
         </div>
     </div>
 </header>
-{% endblock %} {% block content %} {% import "partials/icons.html" as icons
-%}
+{% endblock %} {% block content %} {% import "partials/icons.html" as icons %}
 <div class="container">
     {% if posts %} {% set latest = posts[0] %}
     <!-- Latest post — hero treatment -->
@@ -44,22 +43,25 @@ routes — one van, endless roads.{% endblock %} {% block page_header %}
         <div class="route-stats" aria-label="Ride statistics">
             {% if latest_route.distance_km %}
             <span class="stat-item">
-                {{ icons.icon_road() }} {{ "%.1f"|format(latest_route.distance_km) }}&thinsp;km
+                {{ icons.icon_road() }} {{
+                "%.1f"|format(latest_route.distance_km) }}&thinsp;km
             </span>
             {% endif %} {% if latest_route.elevation_gain_m %}
             <span class="stat-item">
-                {{ icons.icon_arrow_up() }} {{ latest_route.elevation_gain_m | int }}&thinsp;m
+                {{ icons.icon_arrow_up() }} {{ latest_route.elevation_gain_m |
+                int }}&thinsp;m
             </span>
             {% endif %} {% if latest_route.elevation_loss_m %}
             <span class="stat-item">
-                {{ icons.icon_arrow_down() }} {{ latest_route.elevation_loss_m | int }}&thinsp;m
+                {{ icons.icon_arrow_down() }} {{ latest_route.elevation_loss_m |
+                int }}&thinsp;m
             </span>
             {% endif %} {% if latest_route.duration_minutes %} {% set dur_h =
             (latest_route.duration_minutes / 60) | int %} {% set dur_m =
             (latest_route.duration_minutes % 60) | int %}
             <span class="stat-item">
-                {{ icons.icon_clock() }} {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{
-                "%02d"|format(dur_m) }}min
+                {{ icons.icon_clock() }} {% if dur_h %}{{ dur_h }}h&thinsp;{%
+                endif %}{{ "%02d"|format(dur_m) }}min
             </span>
             {% endif %}
         </div>

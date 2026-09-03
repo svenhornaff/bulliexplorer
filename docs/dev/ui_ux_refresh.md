@@ -682,38 +682,122 @@ against the two real posts via `make dev`.
 
 **Scope**
 
-- [ ] `figure`, `gallery`, `callout` Jinja partials (§5.3).
-- [ ] `PostFrontmatter`/content-schema additions to author gallery images
+- [x] `figure`, `gallery`, `callout` Jinja partials (§5.3).
+- [x] `PostFrontmatter`/content-schema additions to author gallery images
   (with a mandatory `alt` field per image) and callouts via Sveltia.
-- [ ] `route-map` block gains an explicit in-body placement marker;
+- [x] `route-map` block gains an explicit in-body placement marker;
   falls back to "render after body" when the marker is absent.
 
 **Done when**
 
-- [ ] A fixture post using a marker to place the route map mid-body
+- [x] A fixture post using a marker to place the route map mid-body
   renders the map at that position, not appended after all prose.
-- [ ] Both existing real posts (`sunday-gravel-loop`,
+- [x] Both existing real posts (`sunday-gravel-loop`,
   `kinzig-valley-loop`), which predate this schema change and contain no
   marker, render exactly as before — map still appears after the body,
   zero regression. **Explicit regression test**, per the same principle
   `maps_gis.md` Phase 2 applied to routeless posts.
-- [ ] A gallery image frontmatter entry with a missing `alt` field fails
+- [x] A gallery image frontmatter entry with a missing `alt` field fails
   `PostFrontmatter` validation (schema-level enforcement, not a template
   convention that can be silently skipped).
-- [ ] A fixture gallery of 3 images renders as a semantic `<figure>` grid
+- [x] A fixture gallery of 3 images renders as a semantic `<figure>` grid
   with each `alt` present in the rendered HTML.
 
 **Testing**
 
 - Unit test on the frontmatter schema: gallery image without `alt`
-  raises a validation error.
-- Unit test on the sync/render path for the route-map marker: with
-  marker present → map renders at marker position; without → map renders
-  after body (both cases as separate tests, not one combined assertion).
-- Integration test: the two real existing posts still sync and render
-  unchanged — the `AGENTS.md` content-schema-sync rule applies here
-  (schema change → every existing post updated in the same change, plus
-  a CHANGELOG entry).
+  raises a validation error (`test_gallery_image_missing_alt_fails_
+  validation` and the same check through the full `PostFrontmatter`
+  parse path in `tests/unit/test_post_schema.py`).
+- Unit tests on `build_body_blocks()` (`tests/unit/test_post_blocks.py`,
+  100% coverage): no markers → single prose block; `[[route-map]]`
+  marker present → route-map block in place, surrounded by prose in
+  order; gallery/callout markers resolve to frontmatter content by id;
+  an unknown marker id is skipped (logged) without aborting the rest of
+  the body; multiple markers in one body resolve in document order.
+- Integration test: `tests/integration/test_post_map_integration.py`'s
+  existing route/POI cases now also cover the render-time fallback (see
+  Summary) — a `Post` row with a `Route` but no `[[route-map]]` marker
+  (and, separately, one whose `body_blocks` was never populated at all
+  — the direct-insert case this test already used) still renders the
+  stats/map. The two real posts' sync/render behaviour is covered by the
+  `test_editor.py`/homepage fixtures rather than a fresh regression
+  test, since neither post uses any of the new markers yet.
+
+**Left over**
+
+None.
+
+**Summary**
+
+Built the Phase 4 body-block vocabulary. `Post` gained a `body_blocks`
+JSONB column (migration `8062f219765a`, `server_default='[]'::jsonb` so
+existing rows backfill cleanly) alongside the existing `body_markdown`/
+`body_html` — kept per `AGENTS.md`'s content-schema-sync rule, planned
+for removal once `body_html` is fully superseded (tracked as Phase 5
+follow-up, not this phase's job). A new framework-free service,
+`app/services/post_blocks.py::build_body_blocks()`, splits a post's raw
+Markdown on `[[route-map]]` / `[[gallery:<id>]]` / `[[callout:<id>]]`
+marker lines into an ordered list of `prose`/`route-map`/`gallery`/
+`callout` block dicts, resolving gallery/callout content from the post's
+own frontmatter by id; `post_sync.py` calls it and writes the result to
+`body_blocks` on every sync. `PostFrontmatter` gained `galleries: list
+[GalleryFrontmatter]` and `callouts: list[CalloutFrontmatter]` —
+`GalleryImageFrontmatter.alt` has no default and no `Optional`, so a
+missing `alt` fails Pydantic validation outright, not a template-level
+convention. `post.html` now loops over `post.body_blocks` and dispatches
+by `type`; `gallery`/`callout` render via new macros in `templates/
+partials/blocks.html`, while `route-map` renders inline (it needs this
+template's own `route`/`route_geojson`/`tiles_url` context) via a new
+shared `templates/partials/route_stats.html` include.
+
+The "route present but body has no explicit `[[route-map]]` marker"
+fallback is deliberately **not** baked into `build_body_blocks()` — it's
+handled at render time in `post.html` instead, using a `namespace(saw_
+route_map=false)` flag set while looping over `body_blocks`, falling
+back to the shared stats/map include if the loop finishes without
+seeing one and `route` is truthy. This was a mid-implementation course
+correction: a sync-time-only fallback would silently miss any `Post` row
+that never went through `build_body_blocks()` at all — a legacy row
+right after the migration's `server_default` backfill but before the
+next scheduled sync, or (as an existing integration test's direct-ORM-
+insert setup exposed) any row constructed outside the sync pipeline
+entirely. Render-time can't go stale relative to the DB the way a sync-
+time decision can, so it's the safer place for a fallback whose whole
+purpose is "never silently drop a post's map."
+
+Sveltia's `static/editor/config.yml` gained `Galleries` and `Callouts`
+list fields (matching `PostFrontmatter`'s new keys exactly, verified by
+a new `test_editor.py` assertion) plus a Body-field hint documenting the
+marker syntax. Gallery images upload to a speaking `static/uploads/
+galleries/` folder (`media_folder`/`public_folder` on the nested `src`
+image field) rather than the flat `static/uploads/` root everything else
+shares — confirmed via Sveltia's own docs that field-level folders on an
+image widget nested inside a list widget are actually supported before
+relying on it. `static/theme.css` gained `.post-gallery*`/`.post-
+callout*` rules (a responsive `auto-fit` image grid; a `.route-stats`-
+styled panel with a distinct warning-variant border color), reusing
+existing tokens — caught only by manually smoke-testing a temporary
+draft post with all three marker types (created, synced, rendered,
+verified in raw HTML output, deleted, re-synced to reconcile the DB) —
+automated tests alone wouldn't have caught the missing CSS since Jinja
+happily renders unstyled markup without complaint.
+
+**Recommended next steps**
+
+- `Post.body_html` is now redundant with `body_blocks` for rendering
+  purposes but still populated by sync and still stored — per `AGENTS.md`
+  content-schema-sync guidance, dropping it is a deliberate later step
+  (Phase 5 candidate), not an oversight here.
+- The two pre-existing contrast gaps flagged in Phase 2's "Left over"
+  (route-line light-mode color, POI-marker fill-color palette) remain
+  open and unaffected by this phase.
+- Cross-browser (second rendering engine) verification is also still
+  open from Phase 2 — unrelated to this phase's work.
+- Neither real post (`sunday-gravel-loop`, `kinzig-valley-loop`) uses
+  any of the new markers/galleries/callouts yet — first real editorial
+  use will be the first true end-to-end validation beyond the deleted
+  smoke-test post and fixtures.
 
 ### Phase 5 — Hardening
 

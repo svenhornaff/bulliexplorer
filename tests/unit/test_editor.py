@@ -160,6 +160,48 @@ def test_config_yml_field_names_match_frontmatter():
     assert "route" in fields
     assert "points_of_interest" in fields
 
+    # Body-block fields added in Phase 4 (ui_ux_refresh.md §5.3) — must
+    # match PostFrontmatter keys.
+    assert "galleries" in fields
+    assert "callouts" in fields
+
+
+@pytest.mark.unit
+def test_config_yml_gallery_image_has_mandatory_alt_field():
+    """Alt text is enforced at the Pydantic level (GalleryImageFrontmatter);
+    the CMS field must not be marked required: false, or authors could skip
+    it there without ever hitting that validation.
+    """
+    parsed = yaml.safe_load(CONFIG_YML.read_text())
+    fields = parsed["collections"][0]["fields"]
+    galleries_field = next(f for f in fields if f["name"] == "galleries")
+    images_field = next(f for f in galleries_field["fields"] if f["name"] == "images")
+    alt_field = next(f for f in images_field["fields"] if f["name"] == "alt")
+    assert alt_field.get("required") is not False
+
+
+@pytest.mark.unit
+def test_config_yml_gallery_images_use_named_upload_folder():
+    """Gallery images upload to their own named subfolder, not the flat
+    static/uploads/ root — keeps the upload dir navigable as galleries grow.
+    """
+    parsed = yaml.safe_load(CONFIG_YML.read_text())
+    fields = parsed["collections"][0]["fields"]
+    galleries_field = next(f for f in fields if f["name"] == "galleries")
+    images_field = next(f for f in galleries_field["fields"] if f["name"] == "images")
+    src_field = next(f for f in images_field["fields"] if f["name"] == "src")
+    assert src_field["media_folder"] == "/static/uploads/galleries"
+    assert src_field["public_folder"] == "/static/uploads/galleries"
+
+
+@pytest.mark.unit
+def test_config_yml_callout_variant_defaults_to_tip():
+    parsed = yaml.safe_load(CONFIG_YML.read_text())
+    fields = parsed["collections"][0]["fields"]
+    callouts_field = next(f for f in fields if f["name"] == "callouts")
+    variant_field = next(f for f in callouts_field["fields"] if f["name"] == "variant")
+    assert variant_field.get("default") == "tip"
+
 
 @pytest.mark.unit
 def test_config_yml_draft_defaults_to_true():

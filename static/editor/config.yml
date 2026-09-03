@@ -14,7 +14,7 @@ backend:
   name: github
   repo: svenhornaff/bulliexplorer
   branch: develop
-  auth_type: token  # Use GitHub PAT — no OAuth app or Cloudflare Worker needed
+  auth_type: token # Use GitHub PAT — no OAuth app or Cloudflare Worker needed
 
 # Images uploaded via the editor land in static/uploads/ (bind-mounted
 # on the server — no container restart needed after an upload).
@@ -40,7 +40,7 @@ collections:
         name: "slug"
         widget: "string"
         hint: "URL path segment — e.g. 'kinzig-valley-loop'. Lowercase, hyphens only."
-        pattern: ['^[a-z0-9-]+$', "Lowercase letters, digits and hyphens only"]
+        pattern: ["^[a-z0-9-]+$", "Lowercase letters, digits and hyphens only"]
 
       - label: "Published date"
         name: "date"
@@ -76,7 +76,14 @@ collections:
       - label: "Body"
         name: "body"
         widget: "markdown"
-        hint: "Post body in Markdown. Images can be uploaded via the toolbar."
+        hint: >-
+          Post body in Markdown. Images can be uploaded via the toolbar.
+          To place a gallery, callout, or the route map at a specific spot in
+          the text, put one of these markers on its own line:
+          [[gallery:<id>]], [[callout:<id>]], [[route-map]] — the <id> must
+          match a "Galleries"/"Callouts" entry's ID below. If [[route-map]]
+          is omitted and this post has a route, the map still renders after
+          the body automatically.
 
       # ── Geo fields (Phase 3 — maps_gis.md) ────────────────────────────────
       # Both fields are optional — posts without a route or POIs are unaffected.
@@ -93,7 +100,12 @@ collections:
             widget: "file"
             accept: ".gpx,application/gpx+xml"
             hint: "Uploaded to /static/uploads/. Sync reads it from there automatically."
-          - { label: "Description", name: "description", widget: "text", required: false }
+          - {
+              label: "Description",
+              name: "description",
+              widget: "text",
+              required: false,
+            }
 
       - label: "Points of interest"
         name: "points_of_interest"
@@ -119,6 +131,86 @@ collections:
             widget: "string"
             required: false
             hint: "Geocoded automatically on sync. Leave blank if you prefer to set coordinates manually."
-          - { label: "Latitude (manual override)", name: "lat", widget: "number", value_type: "float", required: false }
-          - { label: "Longitude (manual override)", name: "lng", widget: "number", value_type: "float", required: false }
+          - {
+              label: "Latitude (manual override)",
+              name: "lat",
+              widget: "number",
+              value_type: "float",
+              required: false,
+            }
+          - {
+              label: "Longitude (manual override)",
+              name: "lng",
+              widget: "number",
+              value_type: "float",
+              required: false,
+            }
           - { label: "Notes", name: "notes", widget: "text", required: false }
+
+      # ── Body-block content (Phase 4 — ui_ux_refresh.md §5.3) ────────────
+      # Both are optional and have no effect unless referenced by a
+      # [[gallery:<id>]] / [[callout:<id>]] marker in the Body field above.
+      # Defining one here without using its marker is simply unused, not an
+      # error — it just won't render anywhere.
+
+      - label: "Galleries"
+        name: "galleries"
+        widget: "list"
+        required: false
+        hint: >-
+          Named image galleries you can place in the body with a
+          [[gallery:<id>]] marker. The ID here must match the marker exactly.
+        fields:
+          - label: "ID"
+            name: "id"
+            widget: "string"
+            hint: "Short identifier used in the body marker, e.g. 'coffee-stop'."
+            pattern:
+              ["^[a-z0-9-]+$", "Lowercase letters, digits and hyphens only"]
+          - label: "Images"
+            name: "images"
+            widget: "list"
+            fields:
+              - label: "Image"
+                name: "src"
+                widget: "image"
+                media_folder: "/static/uploads/galleries"
+                public_folder: "/static/uploads/galleries"
+              - label: "Alt text"
+                name: "alt"
+                widget: "string"
+                hint: "Required — describes the image for screen readers. Not decorative filler."
+              - {
+                  label: "Caption",
+                  name: "caption",
+                  widget: "string",
+                  required: false,
+                }
+
+      - label: "Callouts"
+        name: "callouts"
+        widget: "list"
+        required: false
+        hint: >-
+          Named tip/warning asides you can place in the body with a
+          [[callout:<id>]] marker. The ID here must match the marker exactly.
+        fields:
+          - label: "ID"
+            name: "id"
+            widget: "string"
+            hint: "Short identifier used in the body marker, e.g. 'tip-1'."
+            pattern:
+              ["^[a-z0-9-]+$", "Lowercase letters, digits and hyphens only"]
+          - label: "Variant"
+            name: "variant"
+            widget: "select"
+            default: "tip"
+            options:
+              - { label: "Tip", value: "tip" }
+              - { label: "Warning", value: "warning" }
+              - { label: "Note", value: "note" }
+          - { label: "Title", name: "title", widget: "string", required: false }
+          - label: "Body"
+            name: "body"
+            widget: "text"
+            hint: "Short callout text — a sentence or two, not a full section."

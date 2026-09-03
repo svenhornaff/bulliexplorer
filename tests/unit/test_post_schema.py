@@ -11,9 +11,17 @@ from __future__ import annotations
 
 from datetime import date
 
+import pydantic
 import pytest
 
-from app.models.post_schema import PoiFrontmatter, PostFrontmatter, RouteFrontmatter
+from app.models.post_schema import (
+    CalloutFrontmatter,
+    GalleryFrontmatter,
+    GalleryImageFrontmatter,
+    PoiFrontmatter,
+    PostFrontmatter,
+    RouteFrontmatter,
+)
 
 # ---------------------------------------------------------------------------
 # PostFrontmatter — backward-compatible tests
@@ -153,6 +161,85 @@ def test_post_with_both_route_and_pois():
     )
     assert fm.route is not None
     assert len(fm.points_of_interest) == 1
+
+
+# ---------------------------------------------------------------------------
+# PostFrontmatter — Phase 4 body-block fields (galleries, callouts)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_post_with_galleries_and_callouts_parses():
+    fm = PostFrontmatter.model_validate(
+        {
+            "title": "Blocks Post",
+            "slug": "blocks-post",
+            "date": "2025-10-01",
+            "galleries": [
+                {
+                    "id": "coffee-stop",
+                    "images": [
+                        {"src": "/a.jpg", "alt": "A rider", "caption": "Nice"},
+                        {"src": "/b.jpg", "alt": "Espresso"},
+                    ],
+                }
+            ],
+            "callouts": [{"id": "tip-1", "variant": "warning", "title": "Watch out", "body": "Loose gravel."}],
+        }
+    )
+    assert len(fm.galleries) == 1
+    assert fm.galleries[0].id == "coffee-stop"
+    assert len(fm.galleries[0].images) == 2
+    assert fm.galleries[0].images[1].caption is None
+    assert len(fm.callouts) == 1
+    assert fm.callouts[0].variant == "warning"
+
+
+@pytest.mark.unit
+def test_post_without_galleries_or_callouts_defaults_empty():
+    fm = PostFrontmatter.model_validate({"title": "Plain", "slug": "plain", "date": "2025-01-01"})
+    assert fm.galleries == []
+    assert fm.callouts == []
+
+
+@pytest.mark.unit
+def test_gallery_image_missing_alt_fails_validation():
+    """alt is mandatory per image — enforced at the schema level, not left
+    as a template convention that can be silently skipped (Phase 4,
+    ui_ux_refresh.md §5.3 "Done when").
+    """
+    with pytest.raises(pydantic.ValidationError):
+        GalleryImageFrontmatter.model_validate({"src": "/a.jpg"})
+
+
+@pytest.mark.unit
+def test_gallery_image_missing_alt_fails_validation_via_post_frontmatter():
+    """Same enforcement reached through the full PostFrontmatter parse path,
+    not just the leaf model directly.
+    """
+    with pytest.raises(pydantic.ValidationError):
+        PostFrontmatter.model_validate(
+            {
+                "title": "Bad Gallery Post",
+                "slug": "bad-gallery-post",
+                "date": "2025-10-01",
+                "galleries": [{"id": "g1", "images": [{"src": "/a.jpg"}]}],
+            }
+        )
+
+
+@pytest.mark.unit
+def test_callout_defaults():
+    callout = CalloutFrontmatter(id="c1", body="A note.")
+    assert callout.variant == "tip"
+    assert callout.title is None
+
+
+@pytest.mark.unit
+def test_gallery_frontmatter_direct():
+    gallery = GalleryFrontmatter(id="g1", images=[GalleryImageFrontmatter(src="/a.jpg", alt="a")])
+    assert gallery.id == "g1"
+    assert len(gallery.images) == 1
 
 
 @pytest.mark.unit

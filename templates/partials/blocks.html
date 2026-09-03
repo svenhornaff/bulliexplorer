@@ -1,0 +1,23 @@
+{# Body-block partials (Phase 4, docs/dev/ui_ux_refresh.md §5.3) — the fixed
+vocabulary of author-placeable blocks: gallery, callout. route-map stays inline
+in post.html since it already shares that template's route/tiles_url context;
+these two are self-contained on their own block dict. #} {% macro
+render_gallery(images) %}
+<div class="post-gallery">
+    {% for image in images %}
+    <figure class="post-gallery-item">
+        <img src="{{ image.src }}" alt="{{ image.alt }}" loading="lazy" />
+        {% if image.caption %}
+        <figcaption>{{ image.caption }}</figcaption>
+        {% endif %}
+    </figure>
+    {% endfor %}
+</div>
+{% endmacro %} {% macro render_callout(block) %}
+<aside class="post-callout post-callout--{{ block.variant }}" role="note">
+    {% if block.title %}
+    <p class="post-callout-title">{{ block.title }}</p>
+    {% endif %}
+    <p class="post-callout-body">{{ block.body }}</p>
+</aside>
+{% endmacro %}

@@ -25,6 +25,35 @@ class RouteFrontmatter(BaseModel):
     description: str | None = None
 
 
+class GalleryImageFrontmatter(BaseModel):
+    """One image within a gallery block.
+
+    ``alt`` is mandatory — enforced here at the schema level (Phase 4,
+    docs/dev/ui_ux_refresh.md §5.3) rather than left as a template
+    convention that can be silently skipped.
+    """
+
+    src: str
+    alt: str
+    caption: str | None = None
+
+
+class GalleryFrontmatter(BaseModel):
+    """A named gallery block, placed in the body via ``[[gallery:<id>]]``."""
+
+    id: str
+    images: list[GalleryImageFrontmatter]
+
+
+class CalloutFrontmatter(BaseModel):
+    """A named callout (tip/warning aside), placed via ``[[callout:<id>]]``."""
+
+    id: str
+    variant: str = "tip"
+    title: str | None = None
+    body: str
+
+
 class PoiFrontmatter(BaseModel):
     """One point of interest listed in the post's frontmatter.
 
@@ -56,3 +85,10 @@ class PostFrontmatter(BaseModel):
     # Optional geo fields — maps are never mandatory.
     route: RouteFrontmatter | None = None
     points_of_interest: list[PoiFrontmatter] = Field(default_factory=list)
+
+    # Optional body-block content (Phase 4, docs/dev/ui_ux_refresh.md §5.3).
+    # Placed in the body via [[gallery:<id>]] / [[callout:<id>]] markers;
+    # an entry defined here but never referenced by a marker is simply
+    # unused, not an error.
+    galleries: list[GalleryFrontmatter] = Field(default_factory=list)
+    callouts: list[CalloutFrontmatter] = Field(default_factory=list)
