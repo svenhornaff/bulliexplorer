@@ -1,15 +1,11 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8" />
-        <meta
-            name="viewport"
-            content="width=device-width, initial-scale=1, shrink-to-fit=no"
-        />
-        <meta
-            name="description"
-            content="{% block meta_description %}Gravel rides, campsites and routes — one van, endless roads.{% endblock %}"
-        />
+        <meta name="viewport"
+              content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description"
+              content="{% block meta_description %}Gravel rides, campsites and routes — one van, endless roads.{% endblock %}" />
         <title>{% block title %}BulliExplorer{% endblock %}</title>
         <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
         <!-- Design system: self-hosted fonts + CSS custom-property tokens.
@@ -43,26 +39,20 @@
     </head>
     <body>
         {% import "partials/icons.html" as icons %}
-
         <!-- Navigation — semantic <details>/<summary>, no JS dependency -->
         <nav class="site-nav" id="mainNav">
             <div class="container">
                 <a class="brand" href="/">BulliExplorer</a>
                 <div class="nav-right">
-                    <button
-                        type="button"
-                        id="theme-toggle"
-                        class="theme-toggle"
-                        aria-label="Toggle dark mode"
-                        aria-pressed="false"
-                    >
-                        {{ icons.icon_sun(cls="icon theme-toggle-sun") }} {{
-                        icons.icon_moon(cls="icon theme-toggle-moon") }}
+                    <button type="button"
+                            id="theme-toggle"
+                            class="theme-toggle"
+                            aria-label="Toggle dark mode"
+                            aria-pressed="false">
+                        {{ icons.icon_sun(cls="icon theme-toggle-sun") }} {{ icons.icon_moon(cls="icon theme-toggle-moon") }}
                     </button>
                     <details class="nav-toggle">
-                        <summary aria-label="Toggle navigation">
-                            {{ icons.icon_menu() }} Menu
-                        </summary>
+                        <summary aria-label="Toggle navigation">{{ icons.icon_menu() }} Menu</summary>
                         <ul class="nav-links">
                             <li><a href="/">Home</a></li>
                         </ul>
@@ -70,18 +60,14 @@
                 </div>
             </div>
         </nav>
-
         <!-- Page Header -->
         {% block page_header %}{% endblock %}
-
         <!-- Main Content -->
         {% block content %}{% endblock %}
-
         <!-- Footer -->
         <footer class="site-footer">
-            <div class="container">&copy; {{ year }} BulliExplorer</div>
+            <div class="container">© {{ year }} BulliExplorer</div>
         </footer>
-
         <!-- Dark-mode toggle: reflects/updates the pre-paint script's choice,
          persists it to localStorage so it overrides the OS preference on
          future visits (§5.4). Deferred to end-of-body — no-flash correctness
@@ -123,7 +109,6 @@
                 });
             })();
         </script>
-
         {% block scripts %}{% endblock %}
     </body>
 </html>

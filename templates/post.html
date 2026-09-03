@@ -1,33 +1,29 @@
 {% extends "base.html" %} {% block title %}{{ post.title }} — BulliExplorer{%
-endblock %} {% block meta_description %}{% if post.summary %}{{ post.summary
-}}{% else %}{{ post.title }} — BulliExplorer{% endif %}{% endblock %} {% block
-head %} {# Load MapLibre GL CSS only on posts that actually have a map to
+    endblock %} {% block meta_description %}{% if post.summary %}{{ post.summary
+    }}{% else %}{{ post.title }} — BulliExplorer{% endif %}{% endblock %} {% block
+        head %} {# Load MapLibre GL CSS only on posts that actually have a map to
 render. #} {% if route_geojson and tiles_url %}
-<link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
-{% endif %} {% endblock %} {% block page_header %}
-<header
-  class="masthead"
-  style="background-image: url('{{ post.cover_image if post.cover_image else '/static/img/post-bg.jpg' }}')"
->
-  <div class="container">
-    <div class="post-heading">
-      <h1>{{ post.title }}</h1>
-      {% if post.summary %}
-      <h2 class="subheading">{{ post.summary }}</h2>
-      {% endif %}
-      <span class="meta">
-        Posted by Sven on
-        <time datetime="{{ post.published_date }}"
-          >{{ post.published_date.strftime('%B %-d, %Y') }}</time
-        >
-      </span>
-    </div>
-  </div>
-</header>
+        <link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
+    {% endif %} {% endblock %} {% block page_header %}
+    <header class="masthead"
+            style="background-image: url('{{ post.cover_image if post.cover_image else '/static/img/post-bg.jpg' }}')">
+        <div class="container">
+            <div class="post-heading">
+                <h1>{{ post.title }}</h1>
+                {% if post.summary %}
+                    <h2 class="subheading">{{ post.summary }}</h2>
+                {% endif %}
+                <span class="meta">
+                    Posted by Sven on
+                    <time datetime="{{ post.published_date }}">{{ post.published_date.strftime("%B %-d, %Y") }}</time>
+                </span>
+            </div>
+        </div>
+    </header>
 {% endblock %} {% block content %} {% import "partials/icons.html" as icons %}
 {% import "partials/blocks.html" as blocks %}
 <article>
-  {# ── Body blocks (Phase 4, docs/dev/ui_ux_refresh.md §5.3)
+    {# ── Body blocks (Phase 4, docs/dev/ui_ux_refresh.md §5.3)
   ───────────────────────────────────────────── post.body_blocks is the
   sync-time render plan built from body_markdown plus the
   [[route-map]]/[[gallery:id]]/[[callout:id]] markers. The route-map block
@@ -39,31 +35,30 @@ render. #} {% if route_geojson and tiles_url %}
   covers posts with no [[route-map]] marker (the common case) *and* any Post row
   that never went through build_body_blocks() at all (a legacy row right after
   the migration backfill, or one inserted directly, e.g. in a test) — so this
-  can never regress into silently dropping a post's map. #} {% set ns =
-  namespace(saw_route_map=false) %} {% for block in post.body_blocks %} {% if
-  block.type == "prose" %} {{ block.html | safe }} {% elif block.type ==
-  "gallery" %} {{ blocks.render_gallery(block.images) }} {% elif block.type ==
-  "callout" %} {{ blocks.render_callout(block) }} {% elif block.type ==
-  "route-map" %} {% set ns.saw_route_map = true %} {% if route %} {% include
-  "partials/route_stats.html" %} {% endif %} {% endif %} {% endfor %} {% if
-  route and not ns.saw_route_map %} {% include "partials/route_stats.html" %} {%
-  endif %} {# ── End body blocks ──────────────────────────────────────── #} {%
-  if post.tags %}
-  <div>
-    {% for tag in post.tags.split(',') %}
-    <span class="tag-badge">{{ tag.strip() }}</span>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  <p><a href="/" class="text-muted">&larr; Back to all posts</a></p>
-</article>
-{% endblock %} {% block scripts %} {% if route_geojson and tiles_url %} {#
+  can never regress into silently dropping a post's map. #} {% set ns = 
+            namespace(saw_route_map=false) %} {% for block in post.body_blocks %} {% if
+            block.type == "prose" %} {{ block.html | safe }} {% elif block.type ==
+                "gallery" %} {{ blocks.render_gallery(block.images) }} {% elif block.type ==
+                "callout" %} {{ blocks.render_callout(block) }} {% elif block.type ==
+                "route-map" %} {% set ns.saw_route_map = true %} {% if route %} {% include
+                "partials/route_stats.html" %} {% endif %} {% endif %} {% endfor %} {% if
+                    route and not ns.saw_route_map %} {% include "partials/route_stats.html" %} {%
+                    endif %} {# ── End body blocks ──────────────────────────────────────── #} {%
+                    if post.tags %}
+                <div>
+                    {% for tag in post.tags.split(',') %}
+                        <span class="tag-badge">{{ tag.strip() }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            <p><a href="/" class="text-muted">← Back to all posts</a></p>
+        </article>
+        {% endblock %} {% block scripts %} {% if route_geojson and tiles_url %} {#
 Vendor JS loaded last — only on posts that actually render a map. #}
-<script src="/static/vendor/maplibre-gl.js"></script>
-<script src="/static/vendor/pmtiles.js"></script>
-<script src="/static/vendor/basemaps.js"></script>
-<script>
+        <script src="/static/vendor/maplibre-gl.js"></script>
+        <script src="/static/vendor/pmtiles.js"></script>
+        <script src="/static/vendor/basemaps.js"></script>
+        <script>
   (function () {
     "use strict";
 
@@ -260,4 +255,5 @@ Vendor JS loaded last — only on posts that actually render a map. #}
     });
   }());
 </script>
-{% endif %} {% endblock %}
+{% endif %}
+{% endblock %}

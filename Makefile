@@ -14,12 +14,14 @@ build-env: ## Create .venv + install all dependencies
 format: ## Format code (mutating)
 	uv run ruff format $(SRC)
 	uv run ruff check $(SRC) --fix
+	uv run djlint templates/ --reformat
 
 .PHONY: lint
 lint: ## Lint + types (report only)
 	uv run ruff format $(SRC) --check
 	uv run ruff check $(SRC)
 	uv run pyright $(SRC)
+	uv run djlint templates/ --check
 
 .PHONY: test
 test: ## Run tests (coverage floor via addopts)

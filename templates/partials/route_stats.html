@@ -5,39 +5,31 @@ fallback for posts without an explicit marker. Expects `route`, `route_geojson`,
 template's context. #}
 <div class="route-stats" aria-label="Ride statistics">
     {% if route.distance_km %}
-    <span class="stat-item">
-        {{ icons.icon_road() }} {{ "%.1f"|format(route.distance_km) }}&thinsp;km
-    </span>
-    {% endif %} {% if route.elevation_gain_m %}
-    <span class="stat-item">
-        {{ icons.icon_arrow_up() }} {{ route.elevation_gain_m | int }}&thinsp;m
-    </span>
-    {% endif %} {% if route.elevation_loss_m %}
-    <span class="stat-item">
-        {{ icons.icon_arrow_down() }} {{ route.elevation_loss_m | int
-        }}&thinsp;m
-    </span>
-    {% endif %} {% if route.duration_minutes %} {% set dur_h =
-    (route.duration_minutes / 60) | int %} {% set dur_m =
-    (route.duration_minutes % 60) | int %}
-    <span class="stat-item">
-        {{ icons.icon_clock() }} {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{
-        "%02d"|format(dur_m) }}min
-    </span>
-    {% endif %} {% if route.name %}
-    <span
-        class="stat-item text-muted"
-        style="margin-left: auto; font-size: 0.8rem"
-    >
-        {{ route.name }}
-    </span>
+        <span class="stat-item">{{ icons.icon_road() }} {{ "%.1f"|format(route.distance_km) }}&thinsp;km</span>
     {% endif %}
+    {% if route.elevation_gain_m %}
+        <span class="stat-item">{{ icons.icon_arrow_up() }} {{ route.elevation_gain_m | int }}&thinsp;m</span>
+    {% endif %}
+    {% if route.elevation_loss_m %}
+        <span class="stat-item">
+            {{ icons.icon_arrow_down() }} {{ route.elevation_loss_m | int
+            }}&thinsp;m
+        </span>
+    {% endif %} {% if route.duration_minutes %} {% set dur_h = 
+    (route.duration_minutes / 60) | int %} {% set dur_m = 
+        (route.duration_minutes % 60) | int %}
+    <span class="stat-item">
+        {{ icons.icon_clock() }} {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{ "%02d"|format(dur_m) }}min
+    </span>
+{% endif %}
+{% if route.name %}
+    <span class="stat-item text-muted"
+          style="margin-left: auto;
+                 font-size: 0.8rem">{{ route.name }}</span>
+{% endif %}
 </div>
-
 {% if route_geojson and tiles_url %}
-<div
-    id="post-map"
-    role="img"
-    aria-label="Interactive map of {{ route.name }}"
-></div>
+    <div id="post-map"
+         role="img"
+         aria-label="Interactive map of {{ route.name }}"></div>
 {% endif %}
