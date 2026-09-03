@@ -27,14 +27,11 @@ class Post(Base):
     title: Mapped[str] = mapped_column(String(255))
     summary: Mapped[str | None] = mapped_column(Text, default=None)
     body_markdown: Mapped[str] = mapped_column(Text)
-    body_html: Mapped[str] = mapped_column(Text, default="")
     # Ordered render plan for the post body (Phase 4, docs/dev/
     # ui_ux_refresh.md §5.3): a list of {"type": ..., ...} block dicts
     # ("prose", "gallery", "callout", "route-map") built at sync time from
-    # body_markdown + frontmatter markers, replacing the single body_html
-    # blob as the source templates render from. body_html is kept alongside
-    # for one migration cycle (see AGENTS.md content-schema-sync rule) and
-    # is planned for removal in Phase 5.
+    # body_markdown + frontmatter markers. body_html was removed in Phase 5
+    # once body_blocks fully superseded it.
     body_blocks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
 
     # Frontmatter metadata

@@ -90,15 +90,19 @@ def test_config_yml_is_valid_yaml():
 
 
 @pytest.mark.unit
+@pytest.mark.unit
 def test_config_yml_backend_github():
     parsed = yaml.safe_load(CONFIG_YML.read_text())
     backend = parsed["backend"]
     assert backend["name"] == "github"
     assert backend["repo"] == "svenhornaff/bulliexplorer"
     assert backend["branch"] == "develop"
-    # PAT auth — no base_url needed, auth_type must be absent (Sveltia CMS
-    # rejects any non-empty value; the "Sign In with Token" button is always
-    # present without configuration — see bcaa640).
+    # PAT auth via the "Sign In with Token" button — no base_url, and
+    # auth_type must be *absent* (not "token"). Sveltia's runtime validation
+    # rejects any non-empty auth_type: "The backend.auth_type option must
+    # be an empty string." This was the root cause of a real bug (see
+    # commit bcaa640) — this assertion exists specifically to stop a future
+    # change from reintroducing it.
     assert "base_url" not in backend
     assert "auth_type" not in backend
 

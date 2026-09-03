@@ -132,8 +132,10 @@ A paragraph with **bold** text.
     result = _parse_file(path)
 
     assert result is not None
-    assert "<h1>Heading</h1>" in result.body_html
-    assert "<strong>bold</strong>" in result.body_html
+    # body_html was removed in Phase 5 — rendering happens in post_blocks.py.
+    # Verify the raw Markdown is preserved so post_blocks can render it.
+    assert "# Heading" in result.body_markdown
+    assert "**bold**" in result.body_markdown
 
 
 @pytest.mark.unit

@@ -21,7 +21,6 @@ import re
 from pathlib import Path
 
 import yaml
-from markdown_it import MarkdownIt
 from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,8 +36,6 @@ from app.utils.log_factory import get_logger
 logger = get_logger(__name__)
 
 # Single shared Markdown renderer — stateless, safe to reuse.
-_md = MarkdownIt()
-
 # Regex that splits the leading YAML frontmatter block (--- ... ---) from
 # the rest of the file.  The frontmatter delimiters must be the very first
 # line; trailing whitespace on the closing --- is allowed.
@@ -126,12 +123,11 @@ async def sync_posts(
 class _ParsedPost:
     """Intermediate representation of a successfully parsed Markdown file."""
 
-    __slots__ = ("frontmatter", "body_markdown", "body_html")
+    __slots__ = ("frontmatter", "body_markdown")
 
-    def __init__(self, frontmatter: PostFrontmatter, body_markdown: str, body_html: str) -> None:
+    def __init__(self, frontmatter: PostFrontmatter, body_markdown: str) -> None:
         self.frontmatter = frontmatter
         self.body_markdown = body_markdown
-        self.body_html = body_html
 
 
 def _parse_file(path: Path) -> _ParsedPost | None:
@@ -169,9 +165,7 @@ def _parse_file(path: Path) -> _ParsedPost | None:
         logger.error("Frontmatter validation failed for %s: %s — skipping", path, exc)
         return None
 
-    body_html = _md.render(body_markdown)
-
-    return _ParsedPost(frontmatter=frontmatter, body_markdown=body_markdown, body_html=body_html)
+    return _ParsedPost(frontmatter=frontmatter, body_markdown=body_markdown)
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +194,6 @@ async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> Post:
             title=fm.title,
             summary=fm.summary,
             body_markdown=pp.body_markdown,
-            body_html=pp.body_html,
             published_date=fm.published_date,
             tags=tags_str,
             cover_image=fm.cover_image,
@@ -217,7 +210,6 @@ async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> Post:
             "title": fm.title,
             "summary": fm.summary,
             "body_markdown": pp.body_markdown,
-            "body_html": pp.body_html,
             "published_date": fm.published_date,
             "tags": tags_str,
             "cover_image": fm.cover_image,

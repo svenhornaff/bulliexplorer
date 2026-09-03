@@ -124,9 +124,9 @@ async def test_post_round_trips_into_db(tmp_path):
     assert post.published_date.isoformat() == "2025-06-01"
     assert post.tags == "gravel,test"
     assert post.is_draft is False
-    assert "<h1>Test Ride</h1>" in post.body_html
-    assert "<strong>bold</strong>" in post.body_html
+    # body_html removed in Phase 5 — verify raw Markdown is preserved instead.
     assert "# Test Ride" in post.body_markdown
+    assert "**bold**" in post.body_markdown
 
 
 @pytest.mark.integration

@@ -66,7 +66,6 @@ async def _insert_post(factory, slug: str = "kinzig-valley-loop") -> int:
             title="The Kinzig Valley Loop",
             summary="68 km through Black Forest singletrack.",
             body_markdown="# Ride\n\nSome text.",
-            body_html="<h1>Ride</h1><p>Some text.</p>",
             published_date=datetime.date(2025, 8, 24),
             is_draft=False,
         )

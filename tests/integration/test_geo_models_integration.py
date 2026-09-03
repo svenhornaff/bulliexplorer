@@ -50,7 +50,6 @@ async def _create_post(session, slug: str = "test-post") -> Post:
         slug=slug,
         title="Test Post",
         body_markdown="# Test",
-        body_html="<h1>Test</h1>",
         published_date=date(2025, 1, 1),
     )
     session.add(post)
