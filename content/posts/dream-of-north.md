@@ -24,10 +24,10 @@ galleries:
   - id: coffee-stop
     images:
       - src: /static/uploads/galleries/1000088777.jpg
-        alt: coffee
+        alt: Close-up of a cup of coffee steaming on a wooden table beside a loaded touring bike
         caption: ''
       - src: /static/uploads/galleries/15152.jpeg
-        alt: bike
+        alt: A gravel bike leaning against a fence on a wide Scandinavian coastal road
         caption: ''
 callouts:
   - id: tip-001
@@ -45,6 +45,8 @@ There are ideas that show up once, get politely filed away, and never come back.
 Mine started as a race entry. North Cape 4000. Number on the bike, clock running, Nordkapp at the end of it. I planned for it, trained for it, and somewhere along the way I noticed I was more interested in the map than in the result.
 
 **So I kept the map and threw away the clock.**
+
+[[callout:tip-001]]
 
 The route is drawn. It leaves my driveway in Königswinter and ends on a cliff at 71°10′ north. 4,243 kilometres on paper, about 4,040 of them actually pedalled — the rest is boats. 15,800 metres of climbing. Three countries, two ferries, one bike. Somewhere between 21 and 28 days, depending on what the wind and I agree on that morning.
 
@@ -70,6 +72,8 @@ This is the part that doesn't fit into a paragraph, so I'll let the numbers do i
 - **Km 3,230** — Lofoten. White sand, turquoise water, a ferry hop, and — if I'm honest with myself — more campervans than I'd like.
 - **Km 3,675** — Tromsø. Last real city. Last proper bike shop.
 - **Km 4,243** — Nordkapp.
+
+[[gallery:coffee-stop]]
 
 The last 500 km are the ones people warn you about: headwind, reindeer, tunnels, and long stretches where the next shop is a planning problem rather than a stop.
 

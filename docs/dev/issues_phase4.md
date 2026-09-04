@@ -50,36 +50,37 @@ plain dark-grey bar; the cover photo is completely absent.
 
 ---
 
-## ✅ P1 — Landing page (`home.html`): `home-bg.jpg` is orphaned — FIXED (e1e2a14, deleted orphan)
+## ✅ P1 — Landing page (`home.html`): homepage header cover photo — REOPENED, FIXED (Option A)
 
-**Criticality:** High — the old Clean Blog homepage had a full-bleed
-masthead background image (`/static/img/home-bg.jpg`). Phase 3 deliberately
-replaced it with a text-only `.site-intro` block, but the image file was
-added in a later commit (`aba9235 — Add home masthead background image`)
-*after* Phase 3 shipped the text-only block. The image exists on disk but is
-referenced by nothing — it never appears anywhere on the site.
+**Criticality:** High. Original history: the old Clean Blog homepage had a
+full-bleed masthead background image. Phase 3 deliberately replaced it
+with a text-only `.site-intro` block; a later commit (`aba9235`) added
+`home-bg.jpg` back but never wired it in, leaving an orphaned file. That
+state was initially closed as **Option B** (`e1e2a14` — confirmed
+text-only was intentional, deleted the orphan).
 
-**Root cause:** The Phase 3 design decision (`site-intro` = text-only,
-no background image, as per §6.1: "Short, static site proposition —
-*replaces* the plain masthead") and the subsequent commit adding
-`home-bg.jpg` are in direct tension. One of two things happened:
+**Reopened:** decision revisited — Option A preferred after all: a
+full-bleed cover photo reads better against the "field journal meets
+modern editorial" design thesis than a bare text header.
 
-- The image was added intending to wire it into the `site-intro`, but that
-  wiring step was never done; OR
-- It was added as a kept asset but the design intent of "no background
-  image on home" is actually intentional and the file is just an orphan.
+**Resolution (Option A) — `b3d260f`:**
 
-**Impact:** Either the home header looks deliberately minimal (fine) or a
-desired visual is silently absent. The 404 risk is lower here since nothing
-links to the file, but the orphaned asset is confusing.
-
-**Fix options (pick one — needs a decision):**
-
-- A: Wire `home-bg.jpg` into `.site-intro` as a CSS background (or as a
-  `<picture>` with a hero overlay) if the intent was to have a full-bleed
-  home header. Update `.site-intro` CSS to handle dark overlay + white text.
-- B: Confirm the text-only `.site-intro` is intentional, delete
-  `static/img/home-bg.jpg` (or add it to `.gitignore`), and close the issue.
+- `home-bg.jpg` regenerated (same visual language as `post.html`'s
+  masthead composites) and placed at `static/img/home-bg.jpg`.
+- `templates/home.html`: `.site-intro` header now includes a real
+  `<img class="site-intro-cover" fetchpriority="high">`, mirroring
+  `.masthead`'s img/overlay/z-index pattern in `static/theme.css` exactly
+  — one consistent header treatment across `post.html` and `home.html`,
+  not two divergent ones.
+- `static/theme.css`: added `.site-intro--has-cover`, `.site-intro-cover`,
+  and the dark-overlay `::after` rule; text color flips to white-on-dark
+  only when the cover class is present, so the plain text-only path still
+  works if the class is ever omitted.
+- `tests/unit/test_templates.py`: docstring corrected to reflect the
+  reopen; the assertion itself only checks the text-stack markup stays
+  present, so it needed no logic change.
+- Verified: 161/161 unit tests pass, tested on both mobile and desktop,
+  confirmed live and committed (`b3d260f`).
 
 ---
 
@@ -205,7 +206,7 @@ No template or service logic changes — `post.html` already doesn't use it.
 
 ---
 
-## P3 — Real posts have never used galleries, callouts, or `[[route-map]]` markers
+## ✅ P3 — Real posts have never used galleries, callouts, or `[[route-map]]` markers — FIXED (content, `dream-of-north`)
 
 **Criticality:** Low — Phase 4 shipped the block vocabulary and verified it
 via a temporary smoke-test post (created, synced, verified, deleted) and unit/
@@ -217,9 +218,35 @@ validation. Any subtle template/CSS issue that only appears with real uploaded
 images (aspect ratios, portrait vs landscape) or multi-paragraph callout
 bodies will remain undiscovered until then.
 
-**Fix:** Not a code fix — a content action. Add at least one gallery or one
-callout to a real post and verify the rendered output in `make dev` before
-Phase 5 runs its hardening/accessibility pass over post body layouts.
+**Resolution:** `dream-of-north.md` now defines one real gallery
+(`coffee-stop`, two images) and one real callout (`tip-001`, `warning`
+variant), placed via `[[gallery:coffee-stop]]` and `[[callout:tip-001]]`
+markers in the body and verified end-to-end in `make dev`.
+
+- **Orientation coverage:** the two gallery images are roughly square
+  (1952×1954) and landscape (4032×2268) — the portrait case is still
+  *not* exercised by any real post; leaving this open as a follow-up
+  rather than rotating an image just to tick the box.
+- **Alt text:** rewritten from placeholder (`coffee`, `bike`) to real
+  descriptive text, since Phase 5's VoiceOver/NVDA pass needs something
+  real to test against.
+- **Variant/title rendering confirmed:** `post-callout--warning` renders
+  with its own CSS (not falling back to `tip`), and the optional `title`
+  renders correctly.
+- **Finding for Phase 5 — callout body is not Markdown-rendered.**
+  `templates/partials/blocks.html`'s `render_callout` outputs
+  `{{ block.body }}` as plain text inside a single `<p>`, not through
+  the Markdown renderer used for gallery captions/prose. A multi-paragraph
+  callout body will *not* get separate `<p>` tags — newlines are dropped
+  by HTML whitespace collapsing. Not fixed here (template change, out of
+  scope for a content-only fix) — tracked for Phase 5.
+- **Finding for Phase 5 — gallery image weight.** The two uploaded images
+  are 1.5 MB and 4.6 MB straight from a phone/camera, unresized. Gallery
+  `<img>`s already have `loading="lazy"` so this doesn't hit LCP on this
+  post (the gallery is below the fold, after the Norway section), but an
+  editorial workflow that doesn't resize uploads will eventually put a
+  multi-MB image above the fold on some other post. Worth a Phase 5 note
+  on an upload-time resize step, not a blocker here.
 
 ---
 
@@ -247,13 +274,13 @@ accessibility pass starts from a cleaner baseline.
 | # | Issue | Criticality | Files | Status |
 | --- | ------- | ------------- | ------- | ------ |
 | 1 | Post masthead cover image not displayed | **P1** | `templates/post.html`, `static/theme.css` | ✅ Fixed e1e2a14 |
-| 2 | `home-bg.jpg` orphaned | **P1** | `static/img/home-bg.jpg` | ✅ Fixed e1e2a14 |
+| 2 | Homepage header cover photo | **P1** | `templates/home.html`, `static/theme.css`, `static/img/home-bg.jpg` | ✅ Fixed b3d260f (reopened → Option A) |
 | 3 | No CSS formatter | **P2** | `Makefile`, `pyproject.toml` | ✅ Fixed 905f99a |
 | 4 | `.masthead` no `min-height` | **P2** | `static/theme.css` | ✅ Fixed e1e2a14 |
 | 5 | WCAG route-line light-mode contrast | **P2** | `templates/post.html` | ✅ Fixed c1539b5 |
 | 5b | WCAG POI marker colours | **P2** | `templates/post.html` | 🔲 Open |
 | 6 | Cross-browser verification (WebKit/Gecko) | **P2** | — (manual) | 🔲 Open |
 | 7 | `Post.body_html` redundant column | **P3** | `app/models/post.py`, Alembic | ✅ Fixed 74eb967 |
-| 8 | No real post uses galleries/callouts | **P3** | `content/posts/*.md` | 🔲 Open (content action) |
+| 8 | No real post uses galleries/callouts | **P3** | `content/posts/*.md` | ✅ Fixed (content, `dream-of-north`) |
 | 9 | Phase 5 (hardening) not started | **P3** | — | 🔲 Open |
 | 10 | `static/` not volume-mounted in prod | **P2** | `docker-compose.prod.yml` | ✅ Fixed ced0665 |
