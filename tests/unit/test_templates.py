@@ -294,7 +294,10 @@ async def test_post_list_has_nav(mock_client):
 
 @pytest.mark.unit
 async def test_post_list_has_site_intro(mock_client):
-    """Phase 3 replaces the image masthead with a static site-proposition line."""
+    """Homepage header: site-proposition text stack (site-heading/-tagline).
+    Reopened per issue tracker to include a cover photo (site-intro-cover)
+    with a dark overlay — this test only asserts the text-stack markup
+    stays present, not the absence of a cover image."""
     resp = await mock_client.get("/posts/")
     assert "site-intro" in resp.text
     assert "site-heading" in resp.text

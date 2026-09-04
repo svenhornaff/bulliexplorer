@@ -1,7 +1,13 @@
 {% extends "base.html" %} {% block title %}BulliExplorer — Gravel & Adventure
 Blog{% endblock %} {% block meta_description %}Gravel rides, campsites and
 routes — one van, endless roads.{% endblock %} {% block page_header %}
-<header class="site-intro">
+<header class="site-intro site-intro--has-cover">
+    <img class="site-intro-cover"
+         src="/static/img/home-bg.jpg"
+         alt=""
+         width="1920"
+         height="900"
+         fetchpriority="high" />
     <div class="container">
         <div class="site-heading">
             <h1>BulliExplorer</h1>

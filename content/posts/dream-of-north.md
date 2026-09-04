@@ -38,7 +38,7 @@ callouts:
 
 # Dream of North
 
-### No race number, no tracker, no cut-off. Just 71°10′ N and whatever the road does in between.
+### No race number, no tracker, no cut-off. Just 71°10′ N and whatever the road does in between
 
 There are ideas that show up once, get politely filed away, and never come back. And then there are the other kind — the ones that sit in the back of your head for two years, quietly rearranging everything else around themselves.
 

@@ -336,16 +336,57 @@ p {
 }
 
 /* ── Site intro (home.html, Phase 3, §6.1) ─────────────────────────────────
-   Replaces the image-based masthead on the homepage with a short static
-   proposition line — no background image, no dark-on-image text. */
+   Reopened per issue tracker: full-bleed cover photo + dark overlay,
+   mirroring .masthead's img/overlay/z-index pattern below so the site
+   has one consistent header treatment, not two divergent ones. */
 .site-intro {
   padding: var(--space-4) 0 var(--space-3);
   text-align: center;
   border-bottom: 1px solid var(--color-border);
 }
 
+.site-intro--has-cover {
+  color: #fff;
+  min-height: 20rem;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  border-bottom: none;
+}
+
+/* Cover image — absolutely fills the header behind the text */
+.site-intro-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  z-index: 0;
+}
+
+/* Dark overlay so white text stays legible over any photo */
+.site-intro--has-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1;
+}
+
+/* Text stack sits above both image and overlay */
+.site-intro--has-cover .container {
+  position: relative;
+  z-index: 2;
+}
+
 .site-intro h1 {
   margin-bottom: var(--space-1);
+}
+
+.site-intro--has-cover h1 {
+  color: #fff;
 }
 
 .site-intro .site-tagline {
@@ -355,6 +396,11 @@ p {
   color: var(--color-text-muted);
   max-width: 42rem;
   margin: 0 auto;
+}
+
+.site-intro--has-cover .site-tagline {
+  color: #fff;
+  opacity: 0.9;
 }
 
 /* ── Latest-post hero (home.html, Phase 3, §6.1) ───────────────────────── */
