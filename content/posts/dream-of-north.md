@@ -20,8 +20,20 @@ points_of_interest:
     lat: 67.88878481924876
     lng: 13.022501773717549
     notes: ''
-galleries: []
-callouts: []
+galleries:
+  - id: coffee-stop
+    images:
+      - src: /static/uploads/galleries/1000088777.jpg
+        alt: coffee
+        caption: ''
+      - src: /static/uploads/galleries/15152.jpeg
+        alt: bike
+        caption: ''
+callouts:
+  - id: tip-001
+    variant: warning
+    title: Do not do it
+    body: Better do not do this ride - this is nuts and doing 150-200km a day makes it even more crazy -- but whatever it is, it is here and someone has to do it - TGIF 🎉
 ---
 
 # Dream of North
