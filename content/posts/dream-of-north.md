@@ -9,7 +9,10 @@ tags:
   - Königswinter
   - 4,243 km
 draft: false
-route: null
+route:
+  name: NC4200
+  gpx_file: /static/uploads/dream_of_north.gpx
+  description: ''
 points_of_interest:
   - name: Lofotendream
     category: viewpoint
