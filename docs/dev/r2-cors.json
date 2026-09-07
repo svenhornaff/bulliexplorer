@@ -5,5 +5,12 @@
     "AllowedHeaders": ["Range", "Accept-Encoding"],
     "ExposeHeaders": ["Content-Range", "Content-Length", "ETag"],
     "MaxAgeSeconds": 3600
+  },
+  {
+    "AllowedOrigins": ["https://bulliexplorer.com", "http://localhost:8000"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3000
   }
 ]

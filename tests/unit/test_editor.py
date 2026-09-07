@@ -9,6 +9,7 @@ Verifies:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -23,6 +24,7 @@ from app.main import create_app
 BASE_DIR = Path(__file__).resolve().parents[2]
 INDEX_HTML = BASE_DIR / "static" / "editor" / "index.html"
 CONFIG_YML = BASE_DIR / "static" / "editor" / "config.yml"
+R2_CORS_JSON = BASE_DIR / "docs" / "dev" / "r2-cors.json"
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +107,46 @@ def test_config_yml_backend_github():
     # change from reintroducing it.
     assert "base_url" not in backend
     assert "auth_type" not in backend
+
+
+@pytest.mark.unit
+def test_config_yml_r2_media_library_block():
+    """Phase 1 (media_storage_r2.md): config.yml carries the Sveltia R2 media
+    library block — commented out until the dedicated R2 token's Access Key ID
+    is pasted in, active afterwards. Either way, its shape must be correct so
+    activation stays a one-line uncomment + paste instead of a rewrite.
+
+    The block is verified against Sveltia's fixed `cloudflare_r2` provider
+    schema (access_key_id/bucket/account_id/public_url/prefix, flat — no
+    `config:` nesting), confirmed in the Sveltia CMS source
+    (services/integrations/media-libraries/cloud/s3/cloudflare-r2.js).
+    """
+    content = CONFIG_YML.read_text()
+    parsed = yaml.safe_load(content)
+
+    if isinstance(parsed, dict) and "media_libraries" in parsed:
+        r2 = parsed["media_libraries"]["cloudflare_r2"]
+    else:
+        # Block still commented out — extract and parse the commented region so
+        # its YAML is validated anyway; a syntax error here would otherwise only
+        # surface the moment someone uncomments it.
+        lines = content.splitlines()
+        start = next(i for i, line in enumerate(lines) if line.strip() == "# media_libraries:")
+        block: list[str] = []
+        for line in lines[start:]:
+            if not line.startswith("#"):
+                break
+            block.append(line[2:] if line.startswith("# ") else line[1:])
+        commented = yaml.safe_load("\n".join(block))
+        assert commented is not None, "commented R2 block must parse as valid YAML"
+        r2 = commented["media_libraries"]["cloudflare_r2"]
+
+    assert r2["bucket"] == "bulliexplorer"
+    assert r2["prefix"] == "media/", "uploads must stay under media/, off the tiles prefix"
+    assert re.fullmatch(r"[0-9a-f]{32}", r2["account_id"]), "account_id must be set"
+    assert r2["public_url"].startswith("https://pub-"), "public_url must be the R2 dev URL"
+    assert r2["public_url"].endswith(".r2.dev")
+    assert r2["access_key_id"], "access_key_id placeholder (or real key) must be present"
 
 
 @pytest.mark.unit
