@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     # app it's supposed to monitor.  Sentry is initialised only when non-empty.
     sentry_dsn: str = ""
 
+    # R2 media library for Sveltia CMS (media_storage_r2.md Phase 1).
+    # Empty by default — same non-required pattern as sentry_dsn, not the
+    # "no default for secrets" rule: an unconfigured media library must
+    # degrade gracefully (git-based uploads keep working), not crash the
+    # app. Sourced from .env on the server only — never written to any
+    # git-tracked file, since static/editor/config.yml is served as a
+    # public static asset. See app/routes/internal.py's dynamic
+    # /editor/config.yml route for where these actually get used.
+    r2_access_key_id: str = ""
+    r2_account_id: str = ""
+    r2_public_url: str = ""
+
     # --- Auth ----------------------------------------------------------------
     secret_key: str  # no default — missing config crashes on startup
 

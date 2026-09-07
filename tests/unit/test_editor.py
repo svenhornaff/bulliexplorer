@@ -110,43 +110,61 @@ def test_config_yml_backend_github():
 
 
 @pytest.mark.unit
-def test_config_yml_r2_media_library_block():
-    """Phase 1 (media_storage_r2.md): config.yml carries the Sveltia R2 media
-    library block — commented out until the dedicated R2 token's Access Key ID
-    is pasted in, active afterwards. Either way, its shape must be correct so
-    activation stays a one-line uncomment + paste instead of a rewrite.
+async def test_editor_config_route_r2_unset(monkeypatch):
+    """Phase 1 (media_storage_r2.md): with no R2_* env vars set, the dynamic
+    /editor/config.yml route serves the static template byte-for-byte — no
+    media_libraries block, Sveltia falls back to git-based uploads."""
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("RESYNC_TOKEN", "test-resync-token")
+    monkeypatch.delenv("R2_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("R2_ACCOUNT_ID", raising=False)
 
-    The block is verified against Sveltia's fixed `cloudflare_r2` provider
-    schema (access_key_id/bucket/account_id/public_url/prefix, flat — no
-    `config:` nesting), confirmed in the Sveltia CMS source
-    (services/integrations/media-libraries/cloud/s3/cloudflare-r2.js).
-    """
-    content = CONFIG_YML.read_text()
-    parsed = yaml.safe_load(content)
+    from app.core.config import get_settings
 
-    if isinstance(parsed, dict) and "media_libraries" in parsed:
-        r2 = parsed["media_libraries"]["cloudflare_r2"]
-    else:
-        # Block still commented out — extract and parse the commented region so
-        # its YAML is validated anyway; a syntax error here would otherwise only
-        # surface the moment someone uncomments it.
-        lines = content.splitlines()
-        start = next(i for i, line in enumerate(lines) if line.strip() == "# media_libraries:")
-        block: list[str] = []
-        for line in lines[start:]:
-            if not line.startswith("#"):
-                break
-            block.append(line[2:] if line.startswith("# ") else line[1:])
-        commented = yaml.safe_load("\n".join(block))
-        assert commented is not None, "commented R2 block must parse as valid YAML"
-        r2 = commented["media_libraries"]["cloudflare_r2"]
+    get_settings.cache_clear()
+    application = create_app()
+    application.dependency_overrides[get_db_session] = _empty_db
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/editor/config.yml")
+    get_settings.cache_clear()
 
+    assert resp.status_code == 200
+    assert resp.text == CONFIG_YML.read_text()
+    parsed = yaml.safe_load(resp.text)
+    assert "media_libraries" not in parsed, (
+        "no media_libraries key should be present when R2 is unconfigured"
+    )
+
+
+@pytest.mark.unit
+async def test_editor_config_route_r2_set(monkeypatch):
+    """With R2_* env vars set, the media_libraries block is injected at
+    request time — the Access Key ID/Account ID never touch a git-tracked
+    file, only Settings sourced from .env on the server."""
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("RESYNC_TOKEN", "test-resync-token")
+    monkeypatch.setenv("R2_ACCESS_KEY_ID", "a" * 64)
+    monkeypatch.setenv("R2_ACCOUNT_ID", "d3ed4c9bdbdb6a47372d99e1f55e8013")
+    monkeypatch.setenv("R2_PUBLIC_URL", "https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev")
+
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    application = create_app()
+    application.dependency_overrides[get_db_session] = _empty_db
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.get("/editor/config.yml")
+    get_settings.cache_clear()
+
+    parsed = yaml.safe_load(resp.text)
+    r2 = parsed["media_libraries"]["cloudflare_r2"]
     assert r2["bucket"] == "bulliexplorer"
-    assert r2["prefix"] == "media/", "uploads must stay under media/, off the tiles prefix"
-    assert re.fullmatch(r"[0-9a-f]{32}", r2["account_id"]), "account_id must be set"
-    assert r2["public_url"].startswith("https://pub-"), "public_url must be the R2 dev URL"
-    assert r2["public_url"].endswith(".r2.dev")
-    assert r2["access_key_id"], "access_key_id placeholder (or real key) must be present"
+    assert r2["prefix"] == "media/"
+    assert r2["access_key_id"] == "a" * 64
+    assert re.fullmatch(r"[0-9a-f]{32}", r2["account_id"])
+    assert r2["public_url"].startswith("https://pub-")
 
 
 @pytest.mark.unit

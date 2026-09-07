@@ -1,6 +1,6 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
+  <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BulliExplorer — Editor</title>
@@ -11,8 +11,16 @@
         your GitHub fine-grained PAT (Contents: Read+Write on this repo).
         No OAuth app or Cloudflare Worker needed for single-user instances.
     -->
+    <!--
+        Config is fetched from a server-rendered route, not this static
+        directory's config.yml directly — the dynamic route injects the R2
+        media library block from server-side .env at request time (see
+        app/routes/internal.py). Sveltia's own same-directory default would
+        otherwise load the static template, which never contains real R2
+        credentials by design.
+    -->
+    <link rel="cms-config-url" href="/editor/config.yml" />
     <script src="https://cdn.jsdelivr.net/npm/@sveltia/cms/dist/sveltia-cms.js"></script>
-</head>
-<body>
-</body>
+  </head>
+  <body></body>
 </html>

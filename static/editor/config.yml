@@ -23,19 +23,20 @@ media_folder: "static/uploads"
 public_folder: "/static/uploads"
 
 # ── R2 media library (media_storage_r2.md Phase 1) ──────────────────────
-# Uploads route browser → Cloudflare R2 directly, off git. Create the
-# dedicated token first (Cloudflare dashboard → R2 → Manage R2 API Tokens:
-# Object Read & Write, scoped to the bulliexplorer bucket), then uncomment
-# this block and paste the token's Access Key ID below. The Secret Access
-# Key is entered in the editor UI on first use — never in this file.
+# Uploads route browser → Cloudflare R2 directly, off git.
 #
-# media_libraries:
-#   cloudflare_r2:
-#     access_key_id: <paste-access-key-id> # 64-hex Access Key ID, not the secret
-#     bucket: bulliexplorer
-#     account_id: d3ed4c9bdbdb6a47372d99e1f55e8013
-#     public_url: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev
-#     prefix: media/
+# The actual media_libraries block is injected server-side at request
+# time — see app/routes/internal.py's /editor/config.yml route — sourced
+# from R2_ACCESS_KEY_ID / R2_ACCOUNT_ID / R2_PUBLIC_URL in .env on the
+# server. Nothing credential-shaped lives in this file: it's a public
+# static asset served to any browser that asks, and anything written
+# here is permanently visible in git history the moment it's committed.
+#
+# To activate: set the three R2_* vars in the server's .env (Cloudflare
+# dashboard → R2 → Manage R2 API Tokens → Object Read & Write, scoped to
+# the bulliexplorer bucket, dedicated token — not the one used for the
+# manual PMTiles upload), then `make deploy`. Unset, this file serves
+# unchanged and Sveltia falls back to git-based uploads.
 
 collections:
   - name: "posts"

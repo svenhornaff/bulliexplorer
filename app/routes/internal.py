@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
 
 from app.core.config import get_settings
@@ -24,6 +25,10 @@ logger = get_logger(__name__)
 # Two routers: one for the editor redirect (no prefix), one for /internal/*.
 router = APIRouter()
 _internal = APIRouter(prefix="/internal")
+
+_EDITOR_CONFIG_TEMPLATE = (
+    Path(__file__).resolve().parents[2] / "static" / "editor" / "config.yml"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +47,44 @@ async def editor_redirect() -> RedirectResponse:
     needing a Caddy rewrite rule.
     """
     return RedirectResponse(url="/static/editor/index.html", status_code=302)
+
+
+@router.get("/editor/config.yml", response_class=PlainTextResponse)
+async def editor_config() -> str:
+    """Serve Sveltia's config.yml with the R2 media library block injected
+    from server-side Settings — never from a git-tracked file.
+
+    static/editor/config.yml (this file's on-disk template) stays free of
+    any real credential values — it's a public static asset, permanently
+    visible in git history the moment anything is written into it. The R2
+    access_key_id/account_id are read from .env on the server (via
+    Settings, never committed) and appended here at request time. If
+    they're unset, the response is byte-identical to the static template —
+    Sveltia falls back to git-based media uploads, exactly as it does
+    today.
+
+    index.html points Sveltia at this URL explicitly
+    (<link rel="cms-config-url" href="/editor/config.yml">) rather than
+    relying on Sveltia's same-directory default, since this route
+    intentionally lives outside /static/ to avoid any routing precedence
+    question against the StaticFiles mount.
+    """
+    settings = get_settings()
+    base = _EDITOR_CONFIG_TEMPLATE.read_text()
+
+    if settings.r2_access_key_id and settings.r2_account_id:
+        r2_block = f"""
+media_libraries:
+  cloudflare_r2:
+    access_key_id: {settings.r2_access_key_id}
+    bucket: bulliexplorer
+    account_id: {settings.r2_account_id}
+    public_url: {settings.r2_public_url}
+    prefix: media/
+"""
+        base += r2_block
+
+    return base
 
 
 # ---------------------------------------------------------------------------
