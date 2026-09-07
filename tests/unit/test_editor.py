@@ -116,8 +116,12 @@ async def test_editor_config_route_r2_unset(monkeypatch):
     media_libraries block, Sveltia falls back to git-based uploads."""
     monkeypatch.setenv("SECRET_KEY", "test-secret-key")
     monkeypatch.setenv("RESYNC_TOKEN", "test-resync-token")
-    monkeypatch.delenv("R2_ACCESS_KEY_ID", raising=False)
-    monkeypatch.delenv("R2_ACCOUNT_ID", raising=False)
+    # setenv (not delenv) — pydantic-settings only lets an env var beat
+    # the .env file's value when the env var is actually *set*; deleting it
+    # from os.environ falls through to whatever a real .env has on disk.
+    monkeypatch.setenv("R2_ACCESS_KEY_ID", "")
+    monkeypatch.setenv("R2_ACCOUNT_ID", "")
+    monkeypatch.setenv("R2_PUBLIC_URL", "")
 
     from app.core.config import get_settings
 
