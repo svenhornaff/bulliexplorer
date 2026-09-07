@@ -8,6 +8,16 @@ One bucket serves two consumers with different CORS needs:
 - Rule 2 — Sveltia CMS uploads (media_storage_r2.md Phase 1): browser→R2
   PUT with AWS SigV4 headers from the editor's own origins only.
 
+Rule order matters to R2: it applies the *first* rule whose AllowedOrigins
+matches the request's Origin header, without falling through to check
+headers on later rules. The specific-origin upload rule must come before
+the wildcard tiles rule — otherwise an authenticated SigV4 request from
+the editor's own origin matches the wildcard rule first, whose
+AllowedHeaders (Range/Accept-Encoding only) rejects the SigV4 headers,
+and the browser reports a blanket CORS failure. Tests below select rules
+by content (AllowedOrigins), not list position, so a reorder can't
+silently break either guard.
+
 Rule 1 predates rule 2 and must never regress as a side effect of upload
 changes — these tests exist so an edit to the media rule can't quietly
 break the live map.
@@ -33,10 +43,29 @@ def test_cors_policy_is_two_rules(rules: list[dict]) -> None:
     assert len(rules) == 2
 
 
+def _find_rule(rules: list[dict], *, wildcard_origin: bool) -> dict:
+    """Select a rule by its AllowedOrigins shape, not list position — the
+    two rules' relative order matters to R2 (see module docstring) but
+    must not matter to these tests."""
+    matches = [r for r in rules if (r["AllowedOrigins"] == ["*"]) == wildcard_origin]
+    assert len(matches) == 1, f"expected exactly one rule with wildcard_origin={wildcard_origin}"
+    return matches[0]
+
+
+@pytest.mark.unit
+def test_upload_rule_precedes_tiles_rule(rules: list[dict]) -> None:
+    """The specific-origin upload rule must be listed before the wildcard
+    tiles rule — R2 applies the first rule matching Origin only, so the
+    reverse order breaks SigV4 uploads from the editor's own origin."""
+    assert rules[0]["AllowedOrigins"] != ["*"]
+    assert rules[1]["AllowedOrigins"] == ["*"]
+
+
 @pytest.mark.unit
 def test_tiles_rule_unchanged(rules: list[dict]) -> None:
-    """Rule 1 keeps the exact shape the PMTiles setup shipped with."""
-    tiles = rules[0]
+    """The wildcard tiles rule keeps the exact shape the PMTiles setup
+    shipped with."""
+    tiles = _find_rule(rules, wildcard_origin=True)
     # pi-lens-ignore: cors-wildcard
     assert tiles["AllowedOrigins"] == ["*"]
     assert set(tiles["AllowedMethods"]) == {"GET", "HEAD"}
@@ -50,9 +79,9 @@ def test_tiles_rule_unchanged(rules: list[dict]) -> None:
 
 @pytest.mark.unit
 def test_upload_rule_matches_sveltia_requirements(rules: list[dict]) -> None:
-    """Rule 2 covers Sveltia's documented upload needs, from the editor's
-    origins only (production site + local dev server)."""
-    uploads = rules[1]
+    """The specific-origin rule covers Sveltia's documented upload needs,
+    from the editor's origins only (production site + local dev server)."""
+    uploads = _find_rule(rules, wildcard_origin=False)
     assert set(uploads["AllowedMethods"]) == {"GET", "PUT", "HEAD"}
     assert uploads["AllowedHeaders"] == ["*"], "SigV4 sends varied headers; docs prescribe *"
     assert "ETag" in uploads["ExposeHeaders"]
