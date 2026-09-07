@@ -74,7 +74,7 @@ def test_index_html_loads_sveltia_cdn():
 @pytest.mark.unit
 def test_index_html_is_valid_html():
     content = INDEX_HTML.read_text()
-    assert "<!DOCTYPE html>" in content
+    assert "<!doctype html>" in content.lower()
     assert "<html" in content
     assert "<script" in content
 
@@ -132,9 +132,7 @@ async def test_editor_config_route_r2_unset(monkeypatch):
     assert resp.status_code == 200
     assert resp.text == CONFIG_YML.read_text()
     parsed = yaml.safe_load(resp.text)
-    assert "media_libraries" not in parsed, (
-        "no media_libraries key should be present when R2 is unconfigured"
-    )
+    assert "media_libraries" not in parsed, "no media_libraries key should be present when R2 is unconfigured"
 
 
 @pytest.mark.unit

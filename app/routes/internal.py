@@ -26,9 +26,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 _internal = APIRouter(prefix="/internal")
 
-_EDITOR_CONFIG_TEMPLATE = (
-    Path(__file__).resolve().parents[2] / "static" / "editor" / "config.yml"
-)
+_EDITOR_CONFIG_TEMPLATE = Path(__file__).resolve().parents[2] / "static" / "editor" / "config.yml"
 
 
 # ---------------------------------------------------------------------------

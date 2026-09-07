@@ -101,6 +101,31 @@ confused for touching the other.
 
 ### Phase 1 — R2 media library wired into Sveltia
 
+**⚠️ Redesigned mid-implementation — read this before the checklist below.**
+The first working version of this phase put the `media_libraries` block
+(including a real `account_id` and a placeholder for `access_key_id`)
+directly into `static/editor/config.yml`, commented out until the token
+existed. That was flagged, correctly, as the wrong shape regardless of
+whether Sveltia treats the Access Key ID as sensitive: **anything written
+into a git-tracked file is permanently visible in that file's history**,
+forever, in every clone — a static file being "served to the public
+anyway" doesn't change that a *committed* credential-shaped value can
+never actually be un-committed. Commenting it out doesn't help; the value
+still exists in the commit that added it.
+
+**The actual fix: `config.yml` is no longer a static file for this
+purpose.** `GET /editor/config.yml` is now a dynamic FastAPI route
+(`app/routes/internal.py`) that reads the static template from disk and
+injects the `media_libraries` block only if `R2_ACCESS_KEY_ID`/
+`R2_ACCOUNT_ID`/`R2_PUBLIC_URL` are set in **Settings — sourced from
+`.env` on the server, never from a git-tracked file.** Unset, the
+response is byte-identical to the template and Sveltia falls back to
+git-based uploads, same as before this phase existed.
+`static/editor/index.html` points Sveltia at this route explicitly
+(`<link rel="cms-config-url" href="/editor/config.yml">`) instead of
+relying on its same-directory default, so there's no ambiguity about
+which config actually loads.
+
 **Scope**
 
 - [ ] Create a **dedicated** Account API token (Object Read & Write, scoped
@@ -108,12 +133,38 @@ confused for touching the other.
   the token used for the manual PMTiles upload, so each credential's
   blast radius and rotation stay independent (same least-privilege
   pattern used everywhere else in this project).
-- [x] Add the `media_libraries` block to `static/editor/config.yml` —
-  landed fully formed but **commented out**, pending the token above:
-  activation is uncomment + paste the Access Key ID, not a rewrite. The
-  schema was verified against the Sveltia CMS source, not just the
-  still-in-development official docs (see the ✅ note above). Shape is
-  guarded by `tests/unit/test_editor.py::test_config_yml_r2_media_library_block`.
+- [x] **`static/editor/config.yml` stays permanently credential-free.**
+  No `media_libraries` block, no account ID, no placeholder — just a
+  comment explaining where the real mechanism lives. Guarded by
+  `tests/unit/test_editor.py::test_editor_config_route_r2_unset`, which
+  asserts the *parsed* response has no `media_libraries` key when R2 is
+  unconfigured (checked structurally, not by substring match — the
+  template's own explanatory comment mentions "media_libraries" by name,
+  which an earlier draft of this test wrongly flagged as a false
+  positive).
+- [x] **New dynamic route**: `GET /editor/config.yml` in
+  `app/routes/internal.py`, injecting the block from `Settings` at
+  request time. Guarded by
+  `tests/unit/test_editor.py::test_editor_config_route_r2_set`, which
+  confirms the injected block has the correct flat `cloudflare_r2`
+  schema (verified against the Sveltia CMS source, not just the
+  still-in-development official docs) when the three env vars are set.
+- [x] **New `Settings` fields**: `r2_access_key_id`, `r2_account_id`,
+  `r2_public_url` — all default to `""`, deliberately *not* following
+  the "no default for secrets" rule from `AGENTS.md`. Same reasoning as
+  `sentry_dsn`: a missing media-library config must degrade gracefully
+  (git uploads keep working), not crash the app.
+- [x] `.env.example` and `docker-compose.prod.yml` updated with the
+  three new vars — passed through explicitly in the compose file's
+  `environment:` block, same pattern already established for
+  `TILES_URL`, gotten right on the first attempt this time rather than
+  repeating that earlier gap.
+- [x] **Found and fixed in the same pass, unrelated to R2 but the same
+  root concern**: `.env.example` had a real, working Sentry DSN
+  hardcoded instead of a placeholder — every other line in that file is
+  a template value, this one had slipped through. Cleared it. Low
+  severity (worst case is spam events in the Sentry project, not a
+  breach) but the same class of mistake this phase exists to prevent.
 - [x] **Update `docs/dev/r2-cors.json`** — reshaped into **two rules**
   rather than replacing the single existing one. The PMTiles rule is
   preserved verbatim (public GET/HEAD, `Range`/`Accept-Encoding`,
@@ -150,9 +201,12 @@ confused for touching the other.
 **Left over**
 
 - **Token creation** — needs the Cloudflare dashboard; nothing in the
-  repo can do it. The config.yml block stays commented until it exists.
-- **`config.yml` activation** (uncomment + paste Access Key ID) —
-  blocked on the token above.
+  repo can do it. The three `R2_*` env vars stay unset on the server
+  until it exists.
+- **Setting `R2_ACCESS_KEY_ID`/`R2_ACCOUNT_ID`/`R2_PUBLIC_URL` in the
+  server's `.env`, then `make deploy`** — blocked on the token above.
+  This is now the entire activation step; there is no file to edit or
+  uncomment.
 - **Re-applying `r2-cors.json` to the bucket** — manual Cloudflare-side
   step; can be done any time with existing tiles credentials, but must
   land before the first upload test.
@@ -163,33 +217,40 @@ confused for touching the other.
 
 **Summary**
 
+- Redesigned the credential-delivery mechanism mid-phase after review:
+  `config.yml` moved from a static file (briefly holding a commented-out
+  block with a real account ID) to a dynamic FastAPI route sourcing the
+  R2 block from `Settings`/`.env` at request time. The static template
+  is now permanently credential-free by construction, not by discipline.
 - `docs/dev/r2-cors.json` was reshaped into two rules: the existing
   PMTiles rule preserved verbatim, plus a Sveltia upload rule
   (GET/PUT/HEAD, `AllowedHeaders: ["*"]`, `ETag` exposure) restricted
   to the editor's own origins (`bulliexplorer.com` + local dev). The
   originally drafted single-rule replacement would have broken live
   map tiles on the same bucket.
-- `static/editor/config.yml` gained the verified
-  `media_libraries.cloudflare_r2` block, commented out pending the
-  dedicated token — including the real account ID and the existing
-  `pub-…r2.dev` public URL, so activation is a paste-only step.
-- Two new test guards landed: `tests/unit/test_r2_cors.py` (tiles rule
-  cannot silently regress; upload rule matches Sveltia's documented
-  requirements) and `test_config_yml_r2_media_library_block` in
-  `tests/unit/test_editor.py` (the R2 block parses as valid YAML with
-  the required flat-schema keys in both its commented and active
-  states).
+- Test suite replaced `test_config_yml_r2_media_library_block` (which
+  parsed the static file directly — made obsolete by the redesign) with
+  two tests hitting the live route: R2 unset → byte-identical to the
+  template, R2 set → correctly shaped injection. Plus
+  `tests/unit/test_r2_cors.py` guarding the tiles rule against
+  regression.
+- One unrelated, incidental fix: `test_index_html_is_valid_html` had an
+  exact-case `<!DOCTYPE html>` assertion that broke when `djlint`'s
+  formatter normalized the file to lowercase `<!doctype html>` as a side
+  effect of an earlier, unrelated reformatting pass. Made the assertion
+  case-insensitive — HTML doctype casing is meaningless per spec.
 - Sveltia's own docs are marked still-in-development, so the R2
   integration was additionally verified in the Sveltia CMS source —
-  which corrected the doc's earlier claim that the library key is
+  which corrected an earlier assumption that the library key is
   arbitrary: it must be exactly `cloudflare_r2`.
 
 **Recommended next steps**
 
 - Create the dedicated token (Object Read & Write, scoped to
-  `bulliexplorer`), activate the config block, re-apply the CORS
-  policy, then run the three "Done when" checks in the browser —
-  everything left in Phase 1 is Cloudflare/dashboard work.
+  `bulliexplorer`), set the three `R2_*` vars in the server's `.env`,
+  `make deploy`, re-apply the CORS policy, then run the three
+  "Done when" checks in the browser — everything left in Phase 1 is
+  Cloudflare/dashboard/server-config work, zero remaining code.
 - Sveltia hotlinks R2 assets: frontmatter will get **full URLs**
   (`{public_url}/media/filename`) — exactly the shape Phase 2's
   `geo_sync.py` HTTPS-fetch fix anticipates. No plan change needed.
