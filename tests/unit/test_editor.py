@@ -72,6 +72,28 @@ def test_index_html_loads_sveltia_cdn():
 
 
 @pytest.mark.unit
+def test_index_html_cms_config_url_has_explicit_type():
+    """Regression guard: <link rel="cms-config-url"> must carry an explicit
+    type="application/yaml" attribute.
+
+    Root cause of a real bug (see commit 74fcfb7): Sveltia's fetchCmsConfig()
+    reads `type` directly off the HTMLLinkElement, not the HTTP response's
+    Content-Type header. A <link> with no type attribute reads back as ""
+    (empty string, not undefined) in the DOM — fetchFile()'s
+    `type = 'application/yaml'` default parameter only fires for undefined,
+    so the empty string silently passes through and
+    SUPPORTED_TYPES.includes("") is false. This fails before the config file
+    is ever fetched — unrelated to its actual content, our dynamic
+    /editor/config.yml route, or CORS, all of which can look completely
+    correct while this one missing attribute breaks the editor outright.
+    """
+    content = INDEX_HTML.read_text()
+    match = re.search(r'<link\s+rel="cms-config-url"[^>]*>', content)
+    assert match, "index.html must have a cms-config-url <link> tag"
+    assert 'type="application/yaml"' in match.group(0)
+
+
+@pytest.mark.unit
 def test_index_html_is_valid_html():
     content = INDEX_HTML.read_text()
     assert "<!doctype html>" in content.lower()
