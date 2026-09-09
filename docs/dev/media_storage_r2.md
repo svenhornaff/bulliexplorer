@@ -278,7 +278,7 @@ which config actually loads.
 
 **Scope**
 
-- **Before touching any frontmatter** — `app/services/geo_sync.py`'s
+- [x] **Before touching any frontmatter** — `app/services/geo_sync.py`'s
   `_resolve_gpx_path` (line 324) currently only resolves *filesystem*
   paths. It has no branch for an `https://` URL at all. Pointing
   `route.gpx_file` at an R2 URL without fixing this first means the
@@ -303,7 +303,19 @@ which config actually loads.
   any real post — this is exactly the kind of thing that must be proven
   working on a throwaway fixture first, not discovered via a real post's
   map going blank.
-- Upload every currently-committed upload to R2 under `media/`, same
+
+  Implemented as `httpx.AsyncClient`-based (not the doc's original sync
+  `httpx.get` sketch) — matches the existing dependency-injection
+  convention already used by `sync_pois`/`_geocode` in the same module
+  (optional `http_client` kwarg, default-create-and-close when `None`),
+  so it's mockable in tests without a real network call and doesn't
+  block the event loop. New `_fetch_gpx_over_http` helper; `_parse_gpx`
+  and `sync_route` both gained an `http_client: httpx.AsyncClient | None
+  = None` kwarg. Guarded by 5 new tests in `tests/unit/test_geo_sync.py`
+  (mocked https/http fetch, network error, non-2xx, and the
+  no-client-given default path) plus the 8 pre-existing `_parse_gpx`
+  tests converted to `async`/`await` for the now-async signature.
+- [x] Upload every currently-committed upload to R2 under `media/`, same
   pattern as the PMTiles upload:
 
   ```bash
@@ -312,25 +324,71 @@ which config actually loads.
   # kinzig-valley-loop.gpx, dream_of_north.gpx, galleries/*.jpg
   ```
 
-- Update every affected post's frontmatter (`cover_image`,
+  Done via a one-off `boto3` script in `.scratch/` (gitignored, deleted
+  after use per `AGENTS.md` rule 1) using the existing `S3_*` backup-cron
+  credentials — the `aws`/`wrangler` CLIs above aren't installed locally,
+  and installing a CLI for a single migration run isn't worth it when
+  `boto3` is already a project dependency.
+- [x] Update every affected post's frontmatter (`cover_image`,
   `route.gpx_file`, gallery entries) from `/static/uploads/...` to the
   new R2 public URL + `media/` path. Images are unaffected by the
   HTTPS-fetch gap above — they're rendered as plain `<img src>` URLs in
   templates, never read from local disk by app code.
-- Verify each post still renders correctly (images, GPX-derived map and
+- [x] Verify each post still renders correctly (images, GPX-derived map and
   stats) before removing anything from git.
-- `git rm` the migrated files from `static/uploads/`, commit.
+- [x] `git rm` the migrated files from `static/uploads/`, commit.
 
-**Done when**
+**Left over**
 
-- Every existing post (`sunday-gravel-loop`, `kinzig-valley-loop`,
-  `dream-of-north`) renders identically to before — cover image, gallery,
-  map, and stats all unchanged from a reader's perspective, just served
-  from a different URL.
-- `git log --stat` on the removal commit shows the binaries leaving the
-  working tree (their *history* remains, expected and fine — see note
-  below).
-- `curl -I` on each new R2 URL returns `200`.
+None.
+
+**Summary**
+
+- Fixed the real gap this phase's scope called out: `_parse_gpx` (and
+  its new `_fetch_gpx_over_http` helper) now fetches `http(s)://` GPX
+  URLs instead of only resolving local filesystem paths, using an
+  injectable `httpx.AsyncClient` for testability — consistent with the
+  module's existing `sync_pois`/`_geocode` pattern rather than the
+  doc's original blocking-`httpx.get` sketch. `sync_route` and
+  `_parse_gpx` both became `async`.
+- Also fixed, found while touching the file: an unguarded `float()`
+  conversion in `_geocode` on a malformed Nominatim response, and a
+  latent `NameError` in `_parse_gpx`'s "fewer than 2 track points" log
+  line (referenced a `path` variable that was never defined on the
+  URL branch).
+- Uploaded all 7 committed files (`kinzig_valley_oop.jpeg`,
+  `nc4200_cover.png`, `SCR-20260825-mtsh.jpeg`, `kinzig-valley-loop.gpx`,
+  `dream_of_north.gpx`, `galleries/1000088777.jpg`,
+  `galleries/15152.jpeg`) to R2 under `media/`, verified `200` on every
+  resulting `pub-<hash>.r2.dev/media/...` URL.
+- Migrated all three posts' frontmatter to the new R2 URLs and verified
+  by actually running the app against the real `content/posts/` and the
+  local DB: all three posts return `200`, both GPX-backed posts
+  (`dream-of-north`, `kinzig-valley-loop`) show the R2 GPX fetch
+  succeeding live in the startup logs and render map/stats data, and
+  `sunday-gravel-loop` (no route field) is unaffected. Only then were
+  the 7 files `git rm`'d from `static/uploads/`.
+
+**Recommended next steps**
+
+- Phase 3's `github_sync.py` simplification can proceed — nothing new
+  writes into `static/uploads/` (Phase 1) and the 7 pre-existing files
+  are now gone from the working tree (this phase), so the webhook's
+  fetch step has nothing left to fetch there. `galleries/.gitkeep` is
+  the only thing left in `static/uploads/` — kept deliberately, as the
+  git-based upload fallback directory when R2 isn't configured.
+- Phase 3 should double check `docker-compose.prod.yml`'s volume mount
+  note against issue #10's fix as planned, but there's no *new* wrinkle
+  from this phase to fold in beyond what's already documented there.
+- One schema implication worth flagging for whoever edits `geo_sync.py`
+  next: `sync_route`/`_parse_gpx` are no longer purely-local-filesystem
+  functions — a route sync now makes a real network call whenever
+  `gpx_file` is a URL. Currently only exercised at app startup and via
+  the webhook resync; nothing in this phase needed retry/backoff logic
+  beyond letting `httpx.HTTPError` propagate to "skip this route,
+  log a warning" (already `sync_route`'s existing behavior for a bad
+  GPX), and that seemed sufficient for R2's actual reliability — not
+  revisited further, but worth knowing if it ever needs to.
 
 ### Phase 3 — Simplify `github_sync.py`
 

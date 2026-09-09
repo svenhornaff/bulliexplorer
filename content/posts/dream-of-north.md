@@ -3,7 +3,7 @@ title: Dream of North
 slug: dream-of-north
 date: 2026-09-03
 summary: No race number, no tracker, no cut-off. Just 71°10′ N and whatever the road and nature might bring in between. A travel adventure from a different kind - true, I am nuts.
-cover_image: /static/uploads/nc4200_cover.png
+cover_image: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/nc4200_cover.png
 tags:
   - 71°10′ N
   - Königswinter
@@ -11,7 +11,7 @@ tags:
 draft: false
 route:
   name: NC4200
-  gpx_file: /static/uploads/dream_of_north.gpx
+  gpx_file: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/dream_of_north.gpx
   description: ''
 points_of_interest:
   - name: Lofotendream
@@ -23,10 +23,10 @@ points_of_interest:
 galleries:
   - id: coffee-stop
     images:
-      - src: /static/uploads/galleries/1000088777.jpg
+      - src: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/galleries/1000088777.jpg
         alt: Close-up of a cup of coffee steaming on a wooden table beside a loaded touring bike
         caption: ''
-      - src: /static/uploads/galleries/15152.jpeg
+      - src: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/galleries/15152.jpeg
         alt: A gravel bike leaning against a fence on a wide Scandinavian coastal road
         caption: ''
 callouts:

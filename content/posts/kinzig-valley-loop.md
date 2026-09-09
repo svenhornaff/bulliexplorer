@@ -3,7 +3,7 @@ title: The Kinzig Valley Loop
 slug: kinzig-valley-loop
 date: 2025-08-24
 summary: 68 km through Black Forest singletrack, forest road, and one very steep hike-a-bike — with the van parked at the trailhead and a flask of coffee going cold in the side door.
-cover_image: /static/uploads/kinzig_valley_oop.jpeg
+cover_image: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/kinzig_valley_oop.jpeg
 tags:
   - gravel
   - black-forest
@@ -12,7 +12,7 @@ tags:
 draft: false
 route:
   name: Kinzig Valley Loop
-  gpx_file: /static/uploads/kinzig-valley-loop.gpx
+  gpx_file: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/kinzig-valley-loop.gpx
   description: 68 km loop through the Black Forest via Hausach, Wolfach, Schiltach and the Schenkenzell ridge. One very steep hike-a-bike above Schiltach included.
 points_of_interest:
   - name: Zell am Harmersbach Campsite

@@ -3,7 +3,7 @@ title: Sunday Gravel
 slug: sunday-gravel-loop
 date: 2026-08-25
 summary: Eine entspannte Runde am Sonntag von KöWi nach Köln.
-cover_image: /static/uploads/SCR-20260825-mtsh.jpeg
+cover_image: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/SCR-20260825-mtsh.jpeg
 tags:
   - Gravel
   - Germany

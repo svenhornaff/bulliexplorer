@@ -64,6 +64,8 @@ async def sync_route(
     post_id: int,
     route_fm: RouteFrontmatter | None,
     content_dir: Path,
+    *,
+    http_client: httpx.AsyncClient | None = None,
 ) -> None:
     """Upsert or delete the Route row for a post.
 
@@ -79,7 +81,12 @@ async def sync_route(
         this ``post_id`` is deleted.
     content_dir:
         Directory used to resolve the ``gpx_file`` path when it is given
-        as a relative path.
+        as a relative path (ignored when ``gpx_file`` is an ``http(s)://``
+        URL — R2-hosted GPX files, per ``media_storage_r2.md`` Phase 2).
+    http_client:
+        Optional ``httpx.AsyncClient`` used to fetch ``gpx_file`` when it
+        is a URL.  When ``None`` a default client is created internally —
+        pass an explicit client in tests to inject a mock transport.
     """
     existing = await _get_existing_route(session, post_id)
 
@@ -91,7 +98,7 @@ async def sync_route(
         return
 
     # Parse the GPX file.
-    parsed = _parse_gpx(route_fm.gpx_file, content_dir)
+    parsed = await _parse_gpx(route_fm.gpx_file, content_dir, http_client=http_client)
     if parsed is None:
         # Bad/missing GPX — skip, don't delete an existing row either;
         # treat as a transient error rather than a deliberate removal.
@@ -263,7 +270,11 @@ async def _geocode(query: str, client: httpx.AsyncClient) -> tuple[float, float]
         logger.warning("Nominatim: no results for %r — POI skipped", query)
         return None
 
-    return float(results[0]["lat"]), float(results[0]["lon"])
+    try:
+        return float(results[0]["lat"]), float(results[0]["lon"])
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        logger.warning("Nominatim: malformed response for %r: %s — POI skipped", query, exc)
+        return None
 
 
 async def _resolve_poi_location_with_geocoding(
@@ -360,15 +371,65 @@ def _resolve_gpx_path(gpx_file: str, content_dir: Path) -> Path:
 _GpxStats = tuple[LineString, float, float, float, float | None]
 
 
-def _parse_gpx(gpx_file: str, content_dir: Path) -> _GpxStats | None:
+async def _fetch_gpx_over_http(url: str, http_client: httpx.AsyncClient | None) -> str | None:
+    """Fetch a GPX file's raw text over HTTP(S).
+
+    Parameters
+    ----------
+    url:
+        The ``http://``/``https://`` URL to fetch (an R2 public URL, per
+        ``media_storage_r2.md`` Phase 2).
+    http_client:
+        Optional ``httpx.AsyncClient`` to reuse. When ``None`` a default
+        client is created and closed internally — pass an explicit client
+        in tests to inject a mock transport.
+
+    Returns
+    -------
+    The response body as text on a successful ``200``, or ``None`` on any
+    network error or non-2xx status (logged, not raised).
+    """
+    client = http_client
+    close_client = False
+    if client is None:
+        client = httpx.AsyncClient()
+        close_client = True
+
+    try:
+        response = await client.get(url, timeout=10)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.error("Failed to fetch GPX %s: %s", url, exc)
+        return None
+    finally:
+        if close_client:
+            await client.aclose()
+
+    return response.text
+
+
+async def _parse_gpx(
+    gpx_file: str,
+    content_dir: Path,
+    *,
+    http_client: httpx.AsyncClient | None = None,
+) -> _GpxStats | None:
     """Parse a GPX file and return geometry + ride statistics.
 
     Parameters
     ----------
     gpx_file:
-        Path to the GPX file, resolved via :func:`_resolve_gpx_path`.
+        Path or URL to the GPX file. A value starting with ``http://`` or
+        ``https://`` (an R2-hosted upload, per ``media_storage_r2.md``
+        Phase 2) is fetched over HTTP; anything else is resolved via
+        :func:`_resolve_gpx_path` and read from local disk.
     content_dir:
-        Directory used to resolve relative paths.
+        Directory used to resolve relative paths. Ignored when
+        ``gpx_file`` is a URL.
+    http_client:
+        Optional ``httpx.AsyncClient`` used when ``gpx_file`` is a URL.
+        When ``None`` a default client is created internally — pass an
+        explicit client in tests to inject a mock transport.
 
     Returns
     -------
@@ -376,16 +437,27 @@ def _parse_gpx(gpx_file: str, content_dir: Path) -> _GpxStats | None:
     duration_minutes)`` on success, or ``None`` on any error.
     ``duration_minutes`` is ``None`` when the GPX has no timestamps.
     """
-    path = _resolve_gpx_path(gpx_file, content_dir)
-    if not path.exists():
-        logger.error("GPX file not found: %s", path)
-        return None
+    if gpx_file.startswith(("http://", "https://")):
+        gpx_text = await _fetch_gpx_over_http(gpx_file, http_client)
+        if gpx_text is None:
+            return None
+        source = gpx_file
+    else:
+        path = _resolve_gpx_path(gpx_file, content_dir)
+        if not path.exists():
+            logger.error("GPX file not found: %s", path)
+            return None
+        try:
+            gpx_text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.error("Failed to read GPX %s: %s", path, exc)
+            return None
+        source = path
 
     try:
-        with path.open(encoding="utf-8") as fh:
-            gpx = gpxpy.parse(fh)
+        gpx = gpxpy.parse(gpx_text)
     except Exception as exc:  # noqa: BLE001 — gpxpy raises many exception types
-        logger.error("Failed to parse GPX %s: %s", path, exc)
+        logger.error("Failed to parse GPX %s: %s", source, exc)
         return None
 
     # Collect all track points across all tracks and segments.
@@ -396,7 +468,7 @@ def _parse_gpx(gpx_file: str, content_dir: Path) -> _GpxStats | None:
                 coords.append((pt.longitude, pt.latitude))
 
     if len(coords) < 2:
-        logger.error("GPX %s has fewer than 2 track points — cannot form a LineString", path)
+        logger.error("GPX %s has fewer than 2 track points — cannot form a LineString", source)
         return None
 
     linestring = LineString(coords)

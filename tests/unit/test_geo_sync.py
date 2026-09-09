@@ -141,12 +141,12 @@ def test_resolve_poi_location_partial_lng_only():
 
 
 @pytest.mark.unit
-def test_parse_gpx_geometry(tmp_path):
+async def test_parse_gpx_geometry(tmp_path):
     """Parsed LineString contains the correct track points."""
     gpx_file = tmp_path / "test.gpx"
     gpx_file.write_text(_MINIMAL_GPX, encoding="utf-8")
 
-    result = _parse_gpx("test.gpx", tmp_path)
+    result = await _parse_gpx("test.gpx", tmp_path)
     assert result is not None
     linestring, _dist, _gain, _loss, _dur = result
 
@@ -157,12 +157,12 @@ def test_parse_gpx_geometry(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_gpx_distance(tmp_path):
+async def test_parse_gpx_distance(tmp_path):
     """Parsed distance_km is a positive float."""
     gpx_file = tmp_path / "test.gpx"
     gpx_file.write_text(_MINIMAL_GPX, encoding="utf-8")
 
-    result = _parse_gpx("test.gpx", tmp_path)
+    result = await _parse_gpx("test.gpx", tmp_path)
     assert result is not None
     _, distance_km, _, _, _ = result
 
@@ -172,12 +172,12 @@ def test_parse_gpx_distance(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_gpx_elevation_gain(tmp_path):
+async def test_parse_gpx_elevation_gain(tmp_path):
     """Parsed elevation gain matches the track's climb (200 m → 300 m = +100 m)."""
     gpx_file = tmp_path / "test.gpx"
     gpx_file.write_text(_MINIMAL_GPX, encoding="utf-8")
 
-    result = _parse_gpx("test.gpx", tmp_path)
+    result = await _parse_gpx("test.gpx", tmp_path)
     assert result is not None
     _, _, elevation_gain_m, elevation_loss_m, _ = result
 
@@ -186,12 +186,12 @@ def test_parse_gpx_elevation_gain(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_gpx_duration(tmp_path):
+async def test_parse_gpx_duration(tmp_path):
     """Duration is 60 minutes when timestamps span exactly 1 hour."""
     gpx_file = tmp_path / "test.gpx"
     gpx_file.write_text(_MINIMAL_GPX, encoding="utf-8")
 
-    result = _parse_gpx("test.gpx", tmp_path)
+    result = await _parse_gpx("test.gpx", tmp_path)
     assert result is not None
     _, _, _, _, duration_minutes = result
 
@@ -200,36 +200,36 @@ def test_parse_gpx_duration(tmp_path):
 
 
 @pytest.mark.unit
-def test_parse_gpx_no_timestamps_duration_none(tmp_path):
+async def test_parse_gpx_no_timestamps_duration_none(tmp_path):
     """When GPX has no timestamps, duration_minutes is None."""
     gpx_file = tmp_path / "no_ts.gpx"
     gpx_file.write_text(_NO_TIMESTAMP_GPX, encoding="utf-8")
 
-    result = _parse_gpx("no_ts.gpx", tmp_path)
+    result = await _parse_gpx("no_ts.gpx", tmp_path)
     assert result is not None
     _, _, _, _, duration_minutes = result
     assert duration_minutes is None
 
 
 @pytest.mark.unit
-def test_parse_gpx_file_not_found_returns_none(tmp_path):
+async def test_parse_gpx_file_not_found_returns_none(tmp_path):
     """A non-existent GPX file returns None (logged, not raised)."""
-    result = _parse_gpx("does-not-exist.gpx", tmp_path)
+    result = await _parse_gpx("does-not-exist.gpx", tmp_path)
     assert result is None
 
 
 @pytest.mark.unit
-def test_parse_gpx_invalid_xml_returns_none(tmp_path):
+async def test_parse_gpx_invalid_xml_returns_none(tmp_path):
     """A file that is not valid GPX/XML returns None."""
     bad = tmp_path / "bad.gpx"
     bad.write_text("this is not xml at all <unclosed", encoding="utf-8")
 
-    result = _parse_gpx("bad.gpx", tmp_path)
+    result = await _parse_gpx("bad.gpx", tmp_path)
     assert result is None
 
 
 @pytest.mark.unit
-def test_parse_gpx_single_point_returns_none(tmp_path):
+async def test_parse_gpx_single_point_returns_none(tmp_path):
     """A GPX with only one track point returns None (can't form a LineString)."""
     one_point = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -241,7 +241,104 @@ def test_parse_gpx_single_point_returns_none(tmp_path):
 """
     gpx_file = tmp_path / "one.gpx"
     gpx_file.write_text(one_point, encoding="utf-8")
-    result = _parse_gpx("one.gpx", tmp_path)
+    result = await _parse_gpx("one.gpx", tmp_path)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _parse_gpx — HTTP(S) fetch branch (media_storage_r2.md Phase 2)
+# ---------------------------------------------------------------------------
+
+
+class _GpxTextTransport(httpx.AsyncBaseTransport):
+    """Mock httpx transport that returns fixed GPX text on GET."""
+
+    def __init__(self, text: str, status_code: int = 200) -> None:
+        self._text = text
+        self._status_code = status_code
+        self.requests: list[httpx.Request] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(self._status_code, text=self._text)
+
+
+class _ConnectErrorTransport(httpx.AsyncBaseTransport):
+    """Mock httpx transport that raises a connection error."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Connection refused")
+
+
+@pytest.mark.unit
+async def test_parse_gpx_fetches_https_url(tmp_path):
+    """An ``https://`` gpx_file is fetched over HTTP, not read from disk.
+
+    Fixture route pointing at a mocked HTTPS URL, per
+    ``media_storage_r2.md`` Phase 2 — R2-hosted GPX files must resolve
+    correctly before any real post's frontmatter is migrated.
+    """
+    transport = _GpxTextTransport(_MINIMAL_GPX)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _parse_gpx(
+            "https://pub-example.r2.dev/media/route.gpx",
+            tmp_path,
+            http_client=client,
+        )
+
+    assert result is not None
+    linestring, _dist, _gain, _loss, _dur = result
+    coords = list(linestring.coords)
+    assert len(coords) == 2
+    assert len(transport.requests) == 1
+    assert str(transport.requests[0].url) == "https://pub-example.r2.dev/media/route.gpx"
+
+
+@pytest.mark.unit
+async def test_parse_gpx_http_url_also_fetched(tmp_path):
+    """A plain ``http://`` URL (local dev) is fetched too, not just https."""
+    transport = _GpxTextTransport(_MINIMAL_GPX)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _parse_gpx("http://localhost:8000/media/route.gpx", tmp_path, http_client=client)
+
+    assert result is not None
+
+
+@pytest.mark.unit
+async def test_parse_gpx_https_network_error_returns_none(tmp_path):
+    """A connection error while fetching returns None (logged, not raised)."""
+    async with httpx.AsyncClient(transport=_ConnectErrorTransport()) as client:
+        result = await _parse_gpx(
+            "https://pub-example.r2.dev/media/route.gpx",
+            tmp_path,
+            http_client=client,
+        )
+
+    assert result is None
+
+
+@pytest.mark.unit
+async def test_parse_gpx_https_404_returns_none(tmp_path):
+    """A non-2xx response (e.g. deleted/moved object) returns None."""
+    transport = _GpxTextTransport("Not Found", status_code=404)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _parse_gpx(
+            "https://pub-example.r2.dev/media/missing.gpx",
+            tmp_path,
+            http_client=client,
+        )
+
+    assert result is None
+
+
+@pytest.mark.unit
+async def test_parse_gpx_https_creates_default_client_when_none_given(tmp_path):
+    """When no http_client is passed, a default client is created and used.
+
+    Exercises the real network path is attempted (and fails fast against
+    an unroutable address) rather than skipping the URL branch entirely.
+    """
+    result = await _parse_gpx("https://127.0.0.1.invalid/media/route.gpx", tmp_path)
     assert result is None
 
 
