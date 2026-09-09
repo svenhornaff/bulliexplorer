@@ -50,13 +50,10 @@ def _dir_listing(filenames: list[str]) -> list[dict]:
 async def test_fetch_writes_post_file(tmp_path):
     """A .md file in content/posts on GitHub is written locally."""
     listing = _dir_listing(["my-post.md"])
-    empty_listing: list = []
 
     async def mock_get(url, **kwargs):
         if "content/posts" in url and "raw.githubusercontent" not in url:
             return _mock_response(200, listing)
-        if "static/uploads" in url and "raw.githubusercontent" not in url:
-            return _mock_response(200, empty_listing)
         # download_url fetch
         resp = MagicMock()
         resp.status_code = 200
@@ -76,6 +73,10 @@ async def test_fetch_writes_post_file(tmp_path):
     written = tmp_path / "content" / "posts" / "my-post.md"
     assert written.exists()
     assert written.read_bytes() == b"# My Post\n\nBody."
+    # static/uploads/ is no longer part of the sync (media_storage_r2.md
+    # Phase 3) — confirm the client never even requests it.
+    requested_urls = [call.args[0] for call in mock_client.get.await_args_list]
+    assert not any("static/uploads" in url for url in requested_urls)
 
 
 @pytest.mark.unit
@@ -96,7 +97,7 @@ async def test_fetch_deletes_orphaned_local_file(tmp_path):
             resp.content = b"new"
             resp.raise_for_status = MagicMock()
             return resp
-        return _mock_response(200, empty_listing)
+        return _mock_response(200, empty_listing)  # content/posts — now upserted
 
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(side_effect=mock_get)
@@ -133,7 +134,6 @@ async def test_fetch_404_directory_skipped_gracefully(tmp_path):
 async def test_fetch_skips_gitkeep(tmp_path):
     """.gitkeep files are never written locally."""
     listing = _dir_listing([".gitkeep"])
-    empty_listing: list = []
 
     async def mock_get(url, **kwargs):
         if "raw.githubusercontent" in url:
@@ -142,9 +142,7 @@ async def test_fetch_skips_gitkeep(tmp_path):
             resp.content = b""
             resp.raise_for_status = MagicMock()
             return resp
-        if "content/posts" in url:
-            return _mock_response(200, listing)
-        return _mock_response(200, empty_listing)
+        return _mock_response(200, listing)
 
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(side_effect=mock_get)
@@ -162,7 +160,6 @@ async def test_fetch_skips_gitkeep(tmp_path):
 async def test_fetch_creates_local_dir_if_missing(tmp_path):
     """Local directories are created if they don't exist yet."""
     listing = _dir_listing(["new-post.md"])
-    empty_listing: list = []
 
     async def mock_get(url, **kwargs):
         if "raw.githubusercontent" in url:
@@ -171,16 +168,14 @@ async def test_fetch_creates_local_dir_if_missing(tmp_path):
             resp.content = b"content"
             resp.raise_for_status = MagicMock()
             return resp
-        if "content/posts" in url:
-            return _mock_response(200, listing)
-        return _mock_response(200, empty_listing)
+        return _mock_response(200, listing)
 
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(side_effect=mock_get)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
 
-    # Neither content/posts nor static/uploads exist under tmp_path.
+    # content/posts doesn't exist yet under tmp_path.
     assert not (tmp_path / "content").exists()
 
     with patch("app.services.github_sync.httpx.AsyncClient", return_value=mock_client):

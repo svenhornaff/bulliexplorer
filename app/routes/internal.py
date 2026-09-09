@@ -190,9 +190,9 @@ async def github_webhook(
     1. Verify ``X-Hub-Signature-256`` against ``WEBHOOK_SECRET`` — reject
        with 401 before reading the payload if the signature is wrong.
     2. Parse the JSON payload; ignore any push that is not to ``develop``.
-    3. Fetch ``content/posts/`` and ``static/uploads/`` from the GitHub
-       Contents API using ``GITHUB_TOKEN``.
-    4. Write fetched files into the volume-mounted local directories.
+    3. Fetch ``content/posts/`` from the GitHub Contents API using
+       ``GITHUB_TOKEN``.
+    4. Write fetched files into the volume-mounted local directory.
     5. Run ``sync_posts()`` so the DB reflects the new/changed posts.
 
     Returns

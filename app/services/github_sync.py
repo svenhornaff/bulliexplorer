@@ -1,13 +1,19 @@
 """GitHub Contents-API sync service.
 
-Fetches ``content/posts/`` and ``static/uploads/`` from the GitHub repo at
-the current ``develop`` HEAD, then writes the files into the volume-mounted
-local directories so the app sees them without a container restart.
+Fetches ``content/posts/`` from the GitHub repo at the current ``develop``
+HEAD, then writes the files into the volume-mounted local directory so the
+app sees them without a container restart.
+
+``static/uploads/`` used to be fetched here too, back when media arrived
+via git. As of ``media_storage_r2.md`` Phase 1+2, new uploads go straight
+to R2 from the browser and the pre-existing committed files were migrated
+there, so nothing new ever lands in that directory via a webhook push —
+removed in Phase 3 rather than kept as a no-op fetch of an empty directory.
 
 Design rules (per AGENTS.md):
 - **Framework-free**: no FastAPI, Jinja2, or sqladmin imports.
 - All network calls use ``httpx.AsyncClient`` (already a dependency).
-- Writes only to paths inside the two volume-mounted directories — never
+- Writes only to paths inside the volume-mounted directory — never
   anywhere else.  Existing files that are no longer in GitHub are removed
   (source of truth is the repo).
 """
@@ -28,10 +34,7 @@ _BRANCH = "develop"
 
 # Directories to mirror from the repo into the local volume-mount.
 # Tuple of (repo_path, local_path).
-_SYNC_DIRS: tuple[tuple[str, ...], ...] = (
-    ("content/posts", "content/posts"),
-    ("static/uploads", "static/uploads"),
-)
+_SYNC_DIRS: tuple[tuple[str, ...], ...] = (("content/posts", "content/posts"),)
 
 
 async def fetch_and_write(
@@ -40,10 +43,10 @@ async def fetch_and_write(
 ) -> dict[str, int]:
     """Fetch repo content from GitHub and write it to the local filesystem.
 
-    Fetches ``content/posts/`` and ``static/uploads/`` from the ``develop``
-    branch using the GitHub Contents API, then writes each file into the
-    corresponding volume-mounted directory under ``base_dir``.  Files present
-    locally but deleted from the repo are removed.
+    Fetches ``content/posts/`` from the ``develop`` branch using the GitHub
+    Contents API, then writes each file into the corresponding
+    volume-mounted directory under ``base_dir``.  Files present locally but
+    deleted from the repo are removed.
 
     Parameters
     ----------
@@ -92,16 +95,16 @@ async def _sync_dir(
 ) -> dict[str, int]:
     """Recursively mirror one GitHub directory into a local directory.
 
-    Handles subdirectories (e.g. ``static/uploads/galleries/``) by recursing
-    into them.  Skips ``.gitkeep`` sentinels.  Removes local files/dirs that
-    are no longer present in the repo.
+    Generic helper — handles subdirectories by recursing into them, in case
+    ``content/posts/`` ever grows one. Skips ``.gitkeep`` sentinels. Removes
+    local files/dirs that are no longer present in the repo.
 
     Parameters
     ----------
     client:
         Authenticated ``httpx.AsyncClient``.
     repo_dir:
-        Path inside the repo, e.g. ``"static/uploads"``.
+        Path inside the repo, e.g. ``"content/posts"``.
     local_dir:
         Corresponding absolute local path to write into.
     counts:
@@ -176,11 +179,4 @@ async def _sync_dir(
             logger.info("Removed orphaned file: %s", existing)
         counts["deleted"] += 1
 
-    return counts
-
-    logger.info(
-        "GitHub sync complete — fetched=%d deleted=%d",
-        counts["fetched"],
-        counts["deleted"],
-    )
     return counts

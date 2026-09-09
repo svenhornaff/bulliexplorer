@@ -394,24 +394,72 @@ None.
 
 **Scope**
 
-- Remove the `static/uploads/` fetch step from the webhook sync — it
+- [x] Remove the `static/uploads/` fetch step from the webhook sync — it
   exists specifically because uploads used to arrive via git; once
   Phase 1+2 land, nothing new writes there and Phase 2 emptied out what
   did.
-- Update `docker-compose.prod.yml`: the `static/uploads/` case for the
+- [x] Update `docker-compose.prod.yml`: the `static/uploads/` case for the
   volume mount is now folded into the broader `static/` mount from issue
   #10's fix — confirm no dangling reference to the old narrower mount
   remains.
 
 **Done when**
 
-- `github_sync.py`'s test suite still passes with the simplified fetch
+- [x] `github_sync.py`'s test suite still passes with the simplified fetch
   logic — one less thing to fetch means one less thing that can fail
   (e.g. the earlier `IsADirectoryError` bug class shrinks in surface
   area, not just gets patched).
-- A new post created through Sveltia, with a new image, still publishes
+- [ ] A new post created through Sveltia, with a new image, still publishes
   correctly end-to-end via the webhook — proves the simplified sync still
   does its actual job, not just that it runs without erroring.
+
+**Left over**
+
+- The full live check (create a post through Sveltia's UI with an image,
+  confirm it publishes via a real GitHub webhook push) needs a browser
+  and a real webhook trigger on the deployed server — neither available
+  to the agent. What *was* verified instead: the full unit test suite
+  (5 tests, including a new explicit assertion that `static/uploads` is
+  never requested) passes, and an attempt to exercise `fetch_and_write`
+  against the *real* GitHub Contents API failed only because the local
+  `.env`'s `GITHUB_TOKEN` is a dev placeholder (`dev-github...`, not a
+  real PAT) — expected, since local dev edits `content/posts/` directly
+  on disk and never needs a working token; the production server has
+  the real one. This is the one "Done when" item this phase leaves
+  unchecked — needs a real post created via Sveltia + a real webhook
+  push against the deployed server to close out.
+
+**Summary**
+
+- Removed `("static/uploads", "static/uploads")` from `github_sync.py`'s
+  `_SYNC_DIRS`, so the webhook sync now only ever fetches
+  `content/posts/`. Updated the module and `fetch_and_write` docstrings,
+  and `app/routes/internal.py`'s `github_webhook` docstring, to match.
+- Removed dead unreachable code found while touching the file: a
+  `logger.info(...)` + `return counts` block sitting after an earlier
+  `return counts` in `_sync_dir` that could never execute.
+- `docker-compose.prod.yml` already used the broader `./static:/app/static`
+  mount (issue #10's fix predates this phase) — confirmed no dangling
+  narrower `static/uploads`-only mount exists anywhere; nothing to change
+  there.
+- Updated `tests/unit/test_github_sync.py`'s 5 tests to drop the
+  now-dead `static/uploads` mocking branches, and added an explicit
+  assertion that the client never requests a `static/uploads` URL.
+
+**Recommended next steps**
+
+- Phase 4's "full read-through of all three real posts" should happen
+  on the *deployed* site, not just local dev — that's also the natural
+  moment to close out this phase's one open item (create a real post
+  through Sveltia with a new image, confirm it lands correctly through
+  the real webhook), since both need the production `GITHUB_TOKEN` and
+  `WEBHOOK_SECRET` that aren't available locally.
+- No code-side surprises to fold into Phase 4's scope — the
+  `docker-compose.prod.yml` mount was already correct going in, and
+  removing the fetch step was a clean subtraction with no ripple effects
+  found elsewhere in the codebase (`app/main.py`'s startup sync only
+  ever touched `content/posts/` anyway, independent of the webhook
+  path).
 
 ### Phase 4 — Verification and close-out
 
