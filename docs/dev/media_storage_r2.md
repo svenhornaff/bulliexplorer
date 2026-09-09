@@ -270,14 +270,17 @@ direct `PUT` to the R2 endpoint, not any BulliExplorer route.
 - Confirmed, not just anticipated: Sveltia hotlinks R2 assets —
   frontmatter got **full URLs** (`{public_url}/media/filename`), exactly
   the shape Phase 2's `geo_sync.py` HTTPS-fetch fix was built for.
-- **Still open, not yet acted on in Phase 2 or 3**: remove
-  `media_folder`/`public_folder` from `config.yml` now that all three
-  posts' frontmatter points at R2 (Phase 2 done) — while they remain,
-  every upload widget still shows a git-vs-R2 provider picker and
-  drag-and-drop stays disabled. Nothing blocks doing this now; it just
-  hasn't been picked up as a discrete task yet. Worth doing before
-  calling the migration fully closed, since it's what makes an
-  accidental git upload actually impossible rather than just unlikely.
+- **Done**: removed `media_folder`/`public_folder` from `config.yml`,
+  and the gallery `Images.src` field's own field-level override (it had
+  its own independent git-backed folder, confirmed by reading Sveltia's
+  `getAssetLibraryFolderMap` — removing only the top-level pair would
+  have left that one field still offering/defaulting to git). Verified
+  safe against Sveltia's own source: `media_folder` is only required
+  when there's no cloud media library configured
+  (`parser/media.js::hasCloudMediaLibrary`), which no longer applies
+  here. Confirmed against the live `/editor/config.yml` route — R2 is
+  now the only media option anywhere in the config, no git fallback
+  path left for any field.
 
 **Done when**
 

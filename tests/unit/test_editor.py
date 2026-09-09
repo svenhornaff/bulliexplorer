@@ -192,10 +192,16 @@ async def test_editor_config_route_r2_set(monkeypatch):
 
 
 @pytest.mark.unit
-def test_config_yml_media_folder():
+def test_config_yml_no_git_media_folder():
+    """media_folder/public_folder must stay absent (media_storage_r2.md
+    Phase 1-2) — R2 is the only media library, deliberately, so there's no
+    git-vs-R2 picker and no way to accidentally upload back into git.
+    Sveltia only requires media_folder when there's no cloud media library
+    configured (its own parser/media.js), which is why this is safe.
+    """
     parsed = yaml.safe_load(CONFIG_YML.read_text())
-    assert parsed["media_folder"] == "static/uploads"
-    assert parsed["public_folder"] == "/static/uploads"
+    assert "media_folder" not in parsed
+    assert "public_folder" not in parsed
 
 
 @pytest.mark.unit
@@ -270,17 +276,20 @@ def test_config_yml_gallery_image_has_mandatory_alt_field():
 
 
 @pytest.mark.unit
-def test_config_yml_gallery_images_use_named_upload_folder():
-    """Gallery images upload to their own named subfolder, not the flat
-    static/uploads/ root — keeps the upload dir navigable as galleries grow.
+def test_config_yml_gallery_images_have_no_field_level_git_folder():
+    """Gallery images used to have their own field-level media_folder/
+    public_folder pointing at a git-backed subfolder — independent of the
+    top-level default, so it survived even after that was removed. Removed
+    in the same pass (media_storage_r2.md) so R2 is genuinely the only
+    option for every upload path, not just the top-level default.
     """
     parsed = yaml.safe_load(CONFIG_YML.read_text())
     fields = parsed["collections"][0]["fields"]
     galleries_field = next(f for f in fields if f["name"] == "galleries")
     images_field = next(f for f in galleries_field["fields"] if f["name"] == "images")
     src_field = next(f for f in images_field["fields"] if f["name"] == "src")
-    assert src_field["media_folder"] == "/static/uploads/galleries"
-    assert src_field["public_folder"] == "/static/uploads/galleries"
+    assert "media_folder" not in src_field
+    assert "public_folder" not in src_field
 
 
 @pytest.mark.unit

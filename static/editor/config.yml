@@ -17,13 +17,12 @@ backend:
   # No auth_type needed — PAT login is always available via the
   # "Sign In with Token" button on the Sveltia CMS login screen.
 
-# Images uploaded via the editor land in static/uploads/ (bind-mounted
-# on the server — no container restart needed after an upload).
-media_folder: "static/uploads"
-public_folder: "/static/uploads"
-
-# ── R2 media library (media_storage_r2.md Phase 1) ──────────────────────
-# Uploads route browser → Cloudflare R2 directly, off git.
+# Media (media_storage_r2.md Phase 1-2) — uploads route browser →
+# Cloudflare R2 directly, off git. No media_folder/public_folder here on
+# purpose: Sveltia only requires them when there's no cloud media
+# library configured (src/lib/services/config/parser/media.js), and R2
+# is now the *only* option below — deliberately, so there's no
+# git-vs-R2 picker and no way to accidentally upload back into git.
 #
 # The actual media_libraries block is injected server-side at request
 # time — see app/routes/internal.py's /editor/config.yml route — sourced
@@ -32,11 +31,10 @@ public_folder: "/static/uploads"
 # static asset served to any browser that asks, and anything written
 # here is permanently visible in git history the moment it's committed.
 #
-# To activate: set the three R2_* vars in the server's .env (Cloudflare
-# dashboard → R2 → Manage R2 API Tokens → Object Read & Write, scoped to
-# the bulliexplorer bucket, dedicated token — not the one used for the
-# manual PMTiles upload), then `make deploy`. Unset, this file serves
-# unchanged and Sveltia falls back to git-based uploads.
+# To activate on a fresh server: set the three R2_* vars in .env
+# (Cloudflare dashboard → R2 → Manage R2 API Tokens → Object Read &
+# Write, scoped to the bulliexplorer bucket, dedicated token — not the
+# one used for the manual PMTiles upload), then `make deploy`.
 
 collections:
   - name: "posts"
@@ -76,7 +74,7 @@ collections:
         name: "cover_image"
         widget: "image"
         required: false
-        hint: "Uploaded to /static/uploads/. Leave blank for the default dark header."
+        hint: "Uploaded to Cloudflare R2. Leave blank for the default dark header."
 
       - label: "Tags"
         name: "tags"
@@ -116,7 +114,7 @@ collections:
             name: "gpx_file"
             widget: "file"
             accept: ".gpx,application/gpx+xml"
-            hint: "Uploaded to /static/uploads/. Sync reads it from there automatically."
+            hint: "Uploaded to Cloudflare R2. Sync fetches it from there automatically."
           - {
               label: "Description",
               name: "description",
@@ -191,8 +189,6 @@ collections:
               - label: "Image"
                 name: "src"
                 widget: "image"
-                media_folder: "/static/uploads/galleries"
-                public_folder: "/static/uploads/galleries"
               - label: "Alt text"
                 name: "alt"
                 widget: "string"
