@@ -128,11 +128,12 @@ which config actually loads.
 
 **Scope**
 
-- [ ] Create a **dedicated** Account API token (Object Read & Write, scoped
+- [x] Create a **dedicated** Account API token (Object Read & Write, scoped
   to the `bulliexplorer` bucket) for Sveltia's media use — separate from
   the token used for the manual PMTiles upload, so each credential's
   blast radius and rotation stay independent (same least-privilege
-  pattern used everywhere else in this project).
+  pattern used everywhere else in this project). Confirmed distinct from
+  `S3_ACCESS_KEY` (the PMTiles/backup-cron token) in the live `.env`.
 - [x] **`static/editor/config.yml` stays permanently credential-free.**
   No `media_libraries` block, no account ID, no placeholder — just a
   comment explaining where the real mechanism lives. Guarded by
@@ -195,25 +196,45 @@ which config actually loads.
   a note for whenever CSP middleware does get built (it's in the
   original day-1 security baseline, still not implemented) — that's the
   moment this becomes a real requirement, not now.
-- [ ] Re-apply the updated CORS policy to the bucket (dashboard or
+- [x] Re-apply the updated CORS policy to the bucket (dashboard or
   `wrangler`, per `cloudflare_r2_setup.md`'s two-format note).
+
+**Corrected root cause, mid-implementation** — the first live attempt
+hit a real `403`/CORS failure on the R2 asset-browser's `ListObjectsV2`
+call. Initial hypothesis was an R2 API token permission gap ("Object
+Read & Write" not covering `ListBucket`) — checked against Cloudflare's
+own docs and **ruled out**; that permission group does cover it. The
+actual cause: R2 evaluates CORS rules top-to-bottom and stops at the
+first `Origin` match. The wildcard PMTiles rule (`AllowedOrigins: ["*"]`)
+sat *before* the specific-origin upload rule in `r2-cors.json`, so every
+SigV4-authenticated request from `bulliexplorer.com` matched the tiles
+rule first and got its narrower `AllowedHeaders` (no `Authorization`/
+`x-amz-*`) — never reaching the upload rule at all. Fixed by reordering:
+specific-origin rule first, wildcard fallback second. No permission
+change was ever needed.
 
 **Left over**
 
-- **Token creation** — needs the Cloudflare dashboard; nothing in the
-  repo can do it. The three `R2_*` env vars stay unset on the server
-  until it exists.
-- **Setting `R2_ACCESS_KEY_ID`/`R2_ACCOUNT_ID`/`R2_PUBLIC_URL` in the
-  server's `.env`, then `make deploy`** — blocked on the token above.
-  This is now the entire activation step; there is no file to edit or
-  uncomment.
-- **Re-applying `r2-cors.json` to the bucket** — manual Cloudflare-side
-  step; can be done any time with existing tiles credentials, but must
-  land before the first upload test.
-- **All three "Done when" checks** (in-browser secret prompt, test
-  upload under `media/`, direct `PUT` in the network tab) — blocked on
-  the three items above; they are browser/dashboard steps, not repo
-  work.
+None — all three "Done when" checks passed against the live site: a
+real test upload (`DSC_2655-01.jpeg`) landed in R2 under `media/`
+(confirmed via the R2 dashboard), and the browser Network tab showed a
+direct `PUT` to the R2 endpoint, not any BulliExplorer route.
+
+**Housekeeping still open, not blocking Phase 1's own scope:**
+
+- **Rotate the R2 Access Key ID/Account ID** — both were printed in
+  cleartext during live in-container verification and are visible in
+  this session's transcript. Access Key ID alone (without its paired
+  Secret Access Key, which was never typed anywhere in-session) can't
+  authenticate, so this isn't an active compromise, but a cheap,
+  easy-to-do rotation given it's already sitting in history somewhere
+  it doesn't need to.
+- **Orphan test object in R2**: `media/DSC_2655-01.jpeg` exists in the
+  bucket from the "Done when" verification upload, but no post's
+  frontmatter references it (that test post's `.md` file was never
+  actually saved through the CMS — see Phase 3's leftover note). Safe
+  to delete from the R2 dashboard whenever convenient; not urgent, not
+  costing anything meaningful at this size.
 
 **Summary**
 
@@ -246,33 +267,28 @@ which config actually loads.
 
 **Recommended next steps**
 
-- Create the dedicated token (Object Read & Write, scoped to
-  `bulliexplorer`), set the three `R2_*` vars in the server's `.env`,
-  `make deploy`, re-apply the CORS policy, then run the three
-  "Done when" checks in the browser — everything left in Phase 1 is
-  Cloudflare/dashboard/server-config work, zero remaining code.
-- Sveltia hotlinks R2 assets: frontmatter will get **full URLs**
-  (`{public_url}/media/filename`) — exactly the shape Phase 2's
-  `geo_sync.py` HTTPS-fetch fix anticipates. No plan change needed.
-- Phase 2 should additionally plan to **remove
-  `media_folder`/`public_folder`** from config.yml after frontmatter
-  migration: while they exist, every upload widget shows a provider
-  picker (git vs R2) and drag-and-drop is disabled — and removing them
-  is what makes accidental git uploads impossible. Note the editor's
-  previews of *existing* posts depend on `public_folder` until their
-  frontmatter is migrated to R2 URLs, so the removal must follow, not
-  lead, the migration.
+- Confirmed, not just anticipated: Sveltia hotlinks R2 assets —
+  frontmatter got **full URLs** (`{public_url}/media/filename`), exactly
+  the shape Phase 2's `geo_sync.py` HTTPS-fetch fix was built for.
+- **Still open, not yet acted on in Phase 2 or 3**: remove
+  `media_folder`/`public_folder` from `config.yml` now that all three
+  posts' frontmatter points at R2 (Phase 2 done) — while they remain,
+  every upload widget still shows a git-vs-R2 provider picker and
+  drag-and-drop stays disabled. Nothing blocks doing this now; it just
+  hasn't been picked up as a discrete task yet. Worth doing before
+  calling the migration fully closed, since it's what makes an
+  accidental git upload actually impossible rather than just unlikely.
 
 **Done when**
 
-- Opening the media library in `/editor/` prompts for the R2 secret key
-  once, then shows the asset browser without errors.
-- A test image uploaded through the editor lands in R2 under the `media/`
-  prefix — confirmed via the R2 dashboard, not just "the editor didn't
-  error."
-- The browser network tab shows the upload as a direct `PUT` to the R2
-  endpoint, not a request to any BulliExplorer server route — confirms
-  no backend proxy accidentally got involved.
+- [x] Opening the media library in `/editor/` prompts for the R2 secret
+  key once, then shows the asset browser without errors.
+- [x] A test image uploaded through the editor lands in R2 under the
+  `media/` prefix — confirmed via the R2 dashboard, not just "the editor
+  didn't error." (`DSC_2655-01.jpeg`, verified in the bucket listing.)
+- [x] The browser network tab shows the upload as a direct `PUT` to the
+  R2 endpoint, not a request to any BulliExplorer server route —
+  confirms no backend proxy accidentally got involved.
 
 ### Phase 2 — Migrate existing committed files
 
@@ -409,25 +425,38 @@ None.
   logic — one less thing to fetch means one less thing that can fail
   (e.g. the earlier `IsADirectoryError` bug class shrinks in surface
   area, not just gets patched).
-- [ ] A new post created through Sveltia, with a new image, still publishes
-  correctly end-to-end via the webhook — proves the simplified sync still
-  does its actual job, not just that it runs without erroring.
+- [ ] A new post created through Sveltia still publishes correctly
+  end-to-end via the webhook (the `.md` file, specifically — images no
+  longer touch this path at all post-Phase-1/2, so a new image isn't
+  actually part of what this check is proving) — confirms the
+  simplified sync still does its actual job, not just that it runs
+  without erroring.
 
 **Left over**
 
-- The full live check (create a post through Sveltia's UI with an image,
-  confirm it publishes via a real GitHub webhook push) needs a browser
-  and a real webhook trigger on the deployed server — neither available
-  to the agent. What *was* verified instead: the full unit test suite
-  (5 tests, including a new explicit assertion that `static/uploads` is
-  never requested) passes, and an attempt to exercise `fetch_and_write`
-  against the *real* GitHub Contents API failed only because the local
-  `.env`'s `GITHUB_TOKEN` is a dev placeholder (`dev-github...`, not a
-  real PAT) — expected, since local dev edits `content/posts/` directly
-  on disk and never needs a working token; the production server has
-  the real one. This is the one "Done when" item this phase leaves
-  unchecked — needs a real post created via Sveltia + a real webhook
-  push against the deployed server to close out.
+- The full live check (create a post through Sveltia's UI, confirm the
+  `.md` file publishes via a real GitHub webhook push) still needs a
+  browser and a real webhook trigger on the deployed server — neither
+  available to the agent. What *was* verified instead: the full unit
+  test suite (5 tests, including a new explicit assertion that
+  `static/uploads` is never requested) passes, and an attempt to
+  exercise `fetch_and_write` against the *real* GitHub Contents API
+  failed only because the local `.env`'s `GITHUB_TOKEN` is a dev
+  placeholder (`dev-github...`, not a real PAT) — expected, since local
+  dev edits `content/posts/` directly on disk and never needs a working
+  token; the production server has the real one.
+
+  **Checked explicitly, not assumed**: a real test upload was made
+  through the live Sveltia editor during Phase 1's verification
+  (`DSC_2655-01.jpeg`, landed in R2 — see Phase 1). That upload was
+  **not** followed by an actual "Save" in the CMS — confirmed via
+  `git log`, no commit exists anywhere past `095e877` from a Sveltia-
+  style auto-commit, and no post's frontmatter references that file.
+  So it doesn't satisfy this item; the orphaned R2 object is noted in
+  Phase 1's housekeeping instead. This is still the one "Done when"
+  item this phase leaves unchecked — needs a real post *saved* via
+  Sveltia + a real webhook push against the deployed server to close
+  out.
 
 **Summary**
 
