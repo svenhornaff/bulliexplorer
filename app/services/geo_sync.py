@@ -38,6 +38,67 @@ from app.models.route import Route
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+
+# Bounding box of the current PMTiles basemap extract (Europe, as of the
+# gis coverage-refactor fix documented in docs/dev/maps_gis.md). Update
+# this any time the tile file's actual coverage changes — see that doc
+# for how the current extract was generated and why this exists.
+_TILE_COVERAGE_BOUNDS = {
+    "min_lat": 34.0,
+    "max_lat": 72.0,
+    "min_lon": -25.0,
+    "max_lon": 45.0,
+}
+
+
+def _check_tile_coverage(linestring: LineString, post_id: int, route_name: str) -> None:
+    """Warn (don't block) if a route falls outside the basemap's coverage.
+
+    The route line and stats render correctly regardless — both are pure
+    geometry/GPX math with no geography assumption (confirmed in
+    maps_gis.md's table). Only the basemap tiles underneath would show a
+    gray void for the out-of-coverage portion. This surfaces that risk in
+    sync/deploy logs the moment a route is added, instead of a reader
+    finding a gray map days or weeks later.
+
+    Parameters
+    ----------
+    linestring:
+        The route's parsed geometry — ``.bounds`` gives
+        ``(min_lon, min_lat, max_lon, max_lat)`` for free.
+    post_id:
+        The post this route belongs to, for the log message.
+    route_name:
+        The route's display name, for the log message.
+    """
+    min_lon, min_lat, max_lon, max_lat = linestring.bounds
+    bounds = _TILE_COVERAGE_BOUNDS
+    if (
+        min_lat < bounds["min_lat"]
+        or max_lat > bounds["max_lat"]
+        or min_lon < bounds["min_lon"]
+        or max_lon > bounds["max_lon"]
+    ):
+        logger.warning(
+            "Route %r (post_id=%d) extends outside the PMTiles basemap's "
+            "coverage (lon %.4f..%.4f, lat %.4f..%.4f vs covered lon "
+            "%.1f..%.1f, lat %.1f..%.1f) — the route line and stats will "
+            "still render correctly, but the basemap tiles will show a "
+            "gray void for the out-of-coverage portion.",
+            route_name,
+            post_id,
+            min_lon,
+            max_lon,
+            min_lat,
+            max_lat,
+            bounds["min_lon"],
+            bounds["max_lon"],
+            bounds["min_lat"],
+            bounds["max_lat"],
+        )
+
+
+# ---------------------------------------------------------------------------
 # Nominatim constants and rate-limit state
 # ---------------------------------------------------------------------------
 
@@ -109,6 +170,7 @@ async def sync_route(
         return
 
     linestring, distance_km, elevation_gain_m, elevation_loss_m, duration_minutes = parsed
+    _check_tile_coverage(linestring, post_id, route_fm.name)
 
     if existing is None:
         route = Route(

@@ -10,16 +10,18 @@ Tests cover the pure helper functions:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from shapely.geometry import Point
+from shapely.geometry import LineString, Point
 
 import app.services.geo_sync as _geo_module
 from app.models.post_schema import PoiFrontmatter
 from app.services.geo_sync import (  # noqa: PLC2701
+    _check_tile_coverage,
     _geocode,
     _parse_gpx,
     _resolve_gpx_path,
@@ -68,6 +70,34 @@ _NO_TIMESTAMP_GPX = """\
 # ---------------------------------------------------------------------------
 # _resolve_gpx_path
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# _check_tile_coverage (docs/dev/maps_gis.md's GIS coverage refactor)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_check_tile_coverage_warns_outside_bounds(caplog):
+    """A route outside the PMTiles extract's coverage (e.g. North America)
+    triggers a warning — sync isn't blocked, but the gap is now visible in
+    logs immediately instead of a reader finding a gray map later.
+    """
+    outside = LineString([(-122.4, 37.8), (-122.3, 37.9)])  # San Francisco
+    with caplog.at_level(logging.WARNING):
+        _check_tile_coverage(outside, post_id=1, route_name="Test Route")
+    assert any("extends outside the PMTiles basemap" in r.message for r in caplog.records)
+
+
+@pytest.mark.unit
+def test_check_tile_coverage_silent_inside_bounds(caplog):
+    """A route safely inside the Europe extract's bounds produces no
+    warning — confirms the check doesn't cry wolf on content that's fine.
+    """
+    inside = LineString([(8.0, 48.0), (8.1, 48.1)])  # Black Forest
+    with caplog.at_level(logging.WARNING):
+        _check_tile_coverage(inside, post_id=1, route_name="Test Route")
+    assert not any("extends outside" in r.message for r in caplog.records)
 
 
 @pytest.mark.unit
