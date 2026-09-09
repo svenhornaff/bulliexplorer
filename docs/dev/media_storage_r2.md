@@ -465,17 +465,86 @@ None.
 
 **Scope**
 
-- Full read-through of all three real posts on the live site, mobile and
-  desktop, confirming nothing regressed.
-- Update `buckets.md` bucket #5 to done.
-- Update `issues_phase4.md` if this surfaces anything unexpected (matches
-  the project's established pattern of a running issues log for anything
-  found mid-implementation, not just planned work).
+- [ ] Full read-through of all three real posts on the live site, mobile
+  and desktop, confirming nothing regressed.
+- [x] Update `buckets.md` bucket #5.
+- [~] Update `issues_phase4.md` if this surfaces anything unexpected
+  (matches the project's established pattern of a running issues log for
+  anything found mid-implementation, not just planned work). **Not
+  done as written** — that file is titled/scoped to the UI/UX refresh's
+  own Phase 4 (`ui_ux_refresh.md`), not a generic project-wide issues
+  log; adding an unrelated media-storage bug there would be scope-mixing
+  under a misleading title. Documented the finding here instead (see
+  Summary). Flagging the cross-reference in this doc's own scope
+  section as likely just meaning "follow the same *pattern*", not
+  literally that file — worth a human call either way.
 
 **Done when**
 
-- `buckets.md` accurately reflects reality — same discipline as every
-  other bucket closed in this project.
+- [x] `buckets.md` accurately reflects reality — same discipline as every
+  other bucket closed in this project. (Reflects Phases 1-3 done and
+  verified in production, Phase 4's visual pass and one Phase 3 item
+  still open — not claiming full closure it hasn't earned.)
+
+**Left over**
+
+- The human visual read-through (mobile + desktop, live site) is
+  unavoidably a browser task — MapLibre rendering and responsive layout
+  aren't remotely verifiable. Everything checkable without a browser was
+  checked instead (below).
+- Phase 3's one open item (a real post created through Sveltia + a live
+  webhook push, confirmed correct) is still open — rolled forward from
+  Phase 3, not newly discovered here.
+
+**Summary**
+
+- Found and fixed a real, currently-live production bug while doing
+  this phase's verification: the webhook only ever syncs *data*
+  (`content/posts/`, previously also `static/uploads/`) — it never
+  redeploys the app's Python code. Phase 1's `make deploy` was the only
+  deploy run during this whole migration; Phases 2 and 3's code changes
+  sat undeployed on the server for about two days while the webhook had
+  already pushed Phase 2's R2-URL frontmatter to production. Result:
+  the *old* `_parse_gpx` (no HTTPS-fetch support) tried to resolve
+  `https://pub-...r2.dev/media/dream_of_north.gpx` as a local path,
+  logged `GPX file not found`, and silently dropped the route — both
+  `dream-of-north` and `kinzig-valley-loop` lost their live map/stats
+  in production without anyone noticing, confirmed from the container's
+  own logs (`docker compose logs app`), not inferred.
+- Fixed by running `make deploy` for real during this phase. Confirmed
+  from the post-deploy logs that both GPX fetches now succeed
+  (`HTTP/1.1 200 OK` against the R2 URLs) and `_SYNC_DIRS` inside the
+  running container no longer includes `static/uploads`.
+- Verified all three posts live on production (not local dev): all
+  return `200`, all cover/gallery images resolve to R2 with correct
+  `Content-Type`, both GPX-backed posts show non-zero distance/stats
+  again, and zero remaining `/static/uploads` references in any
+  rendered page.
+- Updated `buckets.md` bucket #5 to reflect the true state — Phases 1-3
+  done and production-verified, Phase 4's visual pass and Phase 3's
+  webhook-created-post check still open, image optimization still a
+  separately-tracked, larger, explicitly deferred gap.
+
+**Recommended next steps**
+
+- **Process fix, not just a one-off**: this migration's own "Done when"
+  checks nearly passed on stale production code because content and
+  code deploy through two entirely different paths (webhook vs.
+  `make deploy`) with no automatic link between them. Worth a real
+  decision, outside this doc's scope: either the webhook path should
+  trigger a deploy check, or `make ci`/the PR checklist should gain an
+  explicit "does this change require a `make deploy`" reminder
+  whenever a commit touches both `app/` and `content/`. Flagging, not
+  solving, here.
+- You (not me) still need to: do the mobile+desktop visual read-through
+  on the live site, and create one real post via Sveltia with an image
+  to confirm the full webhook path end-to-end — both are what's left
+  before bucket #5 can honestly move to fully ✅ done.
+- Resolve the `issues_phase4.md` cross-reference ambiguity noted above
+  — either this doc meant "follow that file's *pattern*" (in which case
+  no rename needed, just don't literally write into it) or a dedicated
+  `issues_media_storage.md` should exist. Either is fine; picking one
+  avoids the next agent guessing again.
 
 ---
 
