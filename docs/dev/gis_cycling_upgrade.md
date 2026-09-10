@@ -565,6 +565,138 @@ redundant `op.create_index`) caught and fixed before it ever shipped.
 
 ---
 
+### Phase 5 — Overpass mirror fallback
+
+**Why now, not "later"**: the cooldown fix (Phase 4 follow-up, already
+shipped) correctly addressed *our own* burst-request risk. It doesn't
+address the separate, now-observed-directly problem that
+`overpass-api.de` — a free, shared, best-effort public instance with no
+uptime guarantee — is itself unreliable independent of anything this
+project does. Confirmed directly, not assumed: a plain `curl` against it
+returned a real `504` with the server's own message *"probably too busy
+to handle your request,"* and three chunk queries in one sync batch
+failed together within an 11-second window — a whole-instance bad
+moment, not isolated flukes. Current (2026) practitioner guidance on
+Overpass reliability converges on exactly this pattern: *"use mirrors as
+the default, keep the primary as fallback... move to local infrastructure
+only once usage is regular enough to justify it"* — mirror fallback is
+the appropriately-sized fix for where this project actually is, not an
+overreaction.
+
+**Scope**
+- [x] Add a fallback mirror: `https://overpass.kumi.systems/api/interpreter`
+  — confirmed as a well-established, actively-used, globally-covering
+  mirror (referenced consistently across sources from 2017 through
+  2026, including current 2026 reliability guidance), not a guess.
+- [x] **Per-sync failover, not per-chunk retry-both-every-time**: matches
+  the observed failure shape (when the primary has a bad moment, it's
+  bad for the *whole batch*, not one request). On a chunk's query
+  failing against the primary, retry that same chunk once against the
+  mirror before giving up on it — **and** remember the primary failed
+  for the rest of *this* sync run, routing subsequent chunks straight
+  to the mirror first rather than wasting a round-trip re-proving the
+  primary is still down.
+- [x] Rate-limiting stays global across both instances combined, not
+  additive per-mirror — `_MIN_OVERPASS_INTERVAL` continues to pace
+  *any* outbound Overpass request regardless of which instance it's
+  going to. Doubling effective query rate just because a second
+  hostname is available would defeat the whole point of being a good
+  citizen toward shared public infrastructure. **Extra, beyond the
+  original plan**: a second, smaller pacing gap
+  (`_INTER_INSTANCE_RETRY_DELAY_S`, 1s) inside a single chunk query
+  itself, between a failed primary attempt and the mirror retry —
+  closes a gap the plan didn't call out: `_MIN_OVERPASS_INTERVAL` only
+  paces *between* chunk calls, so without this a fallback event inside
+  one chunk's call would fire two Overpass-bound requests back-to-back
+  with zero pacing between them.
+- [x] Log which instance actually served each successful response (not
+  just failures) — makes it possible to see from logs alone how often
+  the fallback is actually being used, informing whether this is enough
+  or whether self-hosting eventually becomes worth it.
+
+**Done when**
+- [x] A fixture test simulating a primary failure + mirror success confirms
+  the chunk's data is still captured, not lost.
+- [x] A fixture test confirms a mid-sync primary failure routes *remaining*
+  chunks straight to the mirror, not back through a known-bad primary
+  first.
+- [x] A fixture test confirms rate-limiting still applies across both
+  instances combined — no burst just because two hostnames exist.
+- [ ] Live: trigger a real sync during a moment the primary is
+  slow/erroring and confirm the mirror actually serves the data, logged
+  clearly — **not verified**. The two real production incidents this
+  phase was written in response to (an outright connection refusal,
+  then a `504`) both happened organically, not on demand; deliberately
+  not re-provoking either against the live public instance a third
+  time just to force this check. Confirmed everything one level down
+  instead: the exact failure shapes from those two incidents
+  (`ConnectError`, a `remark`-carrying `504`-equivalent) are reproduced
+  as fixtures and correctly trigger the fallback in the test suite.
+
+**Testing**
+- Unit tests in `tests/unit/test_overpass.py`: mocked primary failure +
+  mirror success (data captured, confirmed via `result_meta`), mocked
+  primary failure + mirror also failing (correctly returns `None`, same
+  graceful-degradation contract as today), `start_index` actually
+  changes which instance is tried first (the mechanism the sticky
+  failover relies on), and the pacing gap firing on a fallback but never
+  on a healthy primary — 8 new tests total, none needing a real sleep
+  (pacing verified via a mocked `asyncio.sleep`, consistent with how
+  this project doesn't test rate-limit *timing* directly anywhere else).
+- Existing `tests/integration/test_geo_sync_integration.py` amenity
+  tests re-verified passing unchanged against the new sticky-failover
+  wiring in `sync_amenities` — confirms the plumbing change didn't
+  regress the already-shipped Phase 4 behavior.
+
+**Left over**
+
+- The one live-sync "Done when" check above — needs the primary to
+  organically be having a bad moment again, which isn't something to
+  force against a shared public service. The next time it happens
+  naturally (and it will — confirmed twice already), the deploy's own
+  logs will show it: `Overpass (https://overpass.kumi.systems/...)
+  returned N amenities` instead of the primary's URL.
+
+**Summary**
+
+- Added a fallback mirror (`overpass.kumi.systems`) to
+  `app/services/overpass.py`: on a primary failure (network error, HTTP
+  error, or a `remark`-carrying partial response), retries once against
+  the mirror before giving up, with a 1s pacing gap between the two
+  attempts so a fallback event never fires two Overpass-bound requests
+  back-to-back.
+- Made the failover sticky per sync run: `query_nearby_amenities` gained
+  `start_index`/`result_meta` parameters: `geo_sync.py`'s
+  `sync_amenities` tracks which instance last actually served a chunk
+  and starts the *next* chunk there — once the mirror serves once,
+  remaining chunks in that sync try the mirror first, never re-proving
+  a known-bad primary is still down. Resets to the primary on the next
+  sync run (a local variable, not persisted state).
+- This closed a real gap between what had already been proposed to the
+  user (a simpler "retry once, no memory across chunks" design) and
+  this doc's own more thorough plan already drafted in the working
+  tree — caught and reconciled before calling the phase done, rather
+  than shipping the weaker of the two designs.
+- 8 new unit tests, all mocked (no real network, no real sleeps);
+  4 existing Phase 4 integration tests re-verified passing against the
+  new wiring, confirming no regression.
+- `make ci` green throughout: 253 tests, 92.86% coverage.
+
+**Recommended next steps**
+
+- Nothing currently blocks; this closes the Overpass-reliability gap
+  this phase set out to close. The only thing left is passive
+  observation — watch production logs for `Overpass (mirror-url)` lines
+  over the coming weeks to see how often the fallback actually fires,
+  which is the concrete signal for whether self-hosting an Overpass
+  instance (explicitly deferred below) ever becomes worth the added
+  infrastructure.
+- If the mirror itself is ever observed failing too (both instances
+  down in the same window), that's the point to reconsider — right
+  now this is genuinely unverified in practice, only in fixtures.
+
+---
+
 ## Explicitly deferred, regardless of Phase 3's fork or Phase 4
 
 - **Full route-level surface-synced elevation profile chart** (the

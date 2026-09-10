@@ -418,6 +418,14 @@ async def sync_amenities(
 
     try:
         all_results: list[AmenityResult] = []
+        # Sticky per-sync failover (docs/dev/gis_cycling_upgrade.md Phase
+        # 5): once a chunk actually gets served by the mirror, subsequent
+        # chunks in THIS sync try the mirror first too, rather than
+        # wasting a round-trip re-proving an already-known-bad primary is
+        # still down on every remaining chunk. Resets to the primary on
+        # the next sync_amenities() call (a local variable, not module
+        # state) — "for the rest of this sync run", not permanently.
+        preferred_start = 0
         for south, west, north, east in bboxes:
             loop = asyncio.get_running_loop()
             elapsed = loop.time() - _last_overpass_time
@@ -425,7 +433,13 @@ async def sync_amenities(
                 await asyncio.sleep(_MIN_OVERPASS_INTERVAL - elapsed)
             _last_overpass_time = loop.time()
 
-            chunk_results = await query_nearby_amenities(south, west, north, east, http_client=client)
+            result_meta: dict = {}
+            chunk_results = await query_nearby_amenities(
+                south, west, north, east, http_client=client, start_index=preferred_start, result_meta=result_meta
+            )
+            served_index = result_meta.get("served_index")
+            if served_index is not None:
+                preferred_start = served_index
             if chunk_results is None:
                 # One chunk failed — the overall answer is incomplete.
                 # Preserve whatever amenities already exist rather than
