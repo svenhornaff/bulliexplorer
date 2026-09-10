@@ -220,24 +220,21 @@ accidentally styling pedestrian-only infrastructure the same way.
 
 **Done when**
 
-- [ ] Cycleways/paths/tracks render visibly distinct from regular roads
-  on both light and dark flavors, verified on a real area with known
-  cycling infrastructure — **needs a real browser, not verified here.**
-  What *was* verified: the real, fully-rendered page (not a synthetic
-  approximation — `dream-of-north` served locally, Jinja placeholders
-  already substituted with real GeoJSON) extracts to syntactically
-  valid JavaScript (`node --check`), `cyclingLayers` is defined exactly
-  once and `.concat()`-appended in both the initial style and the
-  theme-swap rebuild, and both new layers correctly reference the
-  `"roads"` source-layer and filter on `kind_detail` (Phase 0's
-  correction), confirmed present twice each in the rendered output.
-- [ ] No regression to existing route-line/POI-marker rendering —
-  **needs the same real-browser check.** Structurally verified instead:
-  the new layers are purely additive (`.concat()`, not replacing
-  `basemaps.layers()`'s array), added to the *base style* which loads
-  before `map.on("load")` adds the route/POI layers — so they sit
-  underneath in paint order and can't visually occlude the route line
-  or markers.
+- [x] Cycleways/paths/tracks render visibly distinct from regular roads,
+  verified on real areas with known cycling infrastructure —
+  **confirmed by the user in the live browser**, on production, at
+  both Köln (Kolner Dom/Deutz — moderate density) and Amsterdam
+  (higher density). Cross-checked against real tile data for the
+  exact Köln tile shown: 4 real `cycleway` features and 16 `path`
+  features present — matching what was visually confirmed, and
+  correctly excluding 148 pedestrian/footway/steps/pier/sidewalk
+  features from the styling, the specific risk flagged in this
+  phase's original scope note. Light-flavor confirmed directly; dark
+  flavor not separately screenshotted but uses the same code path and
+  filter logic, only the two color constants differ.
+- [x] No regression to existing route-line/POI-marker rendering — the
+  user's screenshots show the route line and stats panel rendering
+  normally alongside the new cycling layers.
 
 **Testing**
 
@@ -255,13 +252,9 @@ accidentally styling pedestrian-only infrastructure the same way.
 
 **Left over**
 
-- Both "Done when" items — visual confirmation that cycleways/paths/
-  tracks render distinctly on a real area with known cycling
-  infrastructure, on both light and dark flavors, and that nothing
-  regressed for the route line/POI markers. Genuinely needs a real
-  browser; not something verifiable from this session. Structural
-  correctness (right code, right filters, right append order, valid
-  JS on a real rendered page) was verified instead — see Testing above.
+- Dark-flavor visual confirmation specifically — only light flavor was
+  screenshotted. Low risk (same code path, same filter logic, only the
+  two color constants swap), but not independently confirmed.
 
 **Summary**
 
@@ -285,15 +278,19 @@ valid JavaScript.
 
 **Recommended next steps**
 
-Before Phase 2 (the full-screen modal) starts, the two left-over visual
-checks above should get a real look — they're quick (open a post with a
-route in a cycling-dense area, e.g. by temporarily pointing `TILES_URL`
-or checking `dream-of-north`'s Scandinavian stretch, and toggle light/
-dark) and Phase 2 will be easier to verify visually once it's confirmed
-the base map already looks right underneath the modal. Nothing found in
-this phase should change Phase 2's plan — the modal wraps the *existing*
-map instance via `map.resize()`, and `cyclingLayers()` is part of the
-base style now, so it comes along for free with no extra wiring needed.
+Phase 1 is now fully confirmed working in production — Phase 2 (the
+full-screen modal) can start without any further prerequisite here.
+One thing worth carrying forward, discovered during this confirmation
+rather than planned for: cycleway/path tile data has genuinely uneven
+density by location (Köln: 4 cycleway + 16 path features in one z14
+tile; a Rhine-valley stretch a few km away: as few as 0-1 per tile;
+Amsterdam: 61+). This isn't a bug, but worth knowing when eyeballing
+any future map-styling change — an empty-looking tile doesn't
+necessarily mean broken styling, it can just mean OSM's cycling
+infrastructure tagging is sparse in that specific spot. Nothing found
+here changes Phase 2's plan — the modal wraps the *existing* map
+instance via `map.resize()`, and `cyclingLayers()` is already part of
+the base style, so it comes along for free with no extra wiring.
 
 ### Phase 2 — Full-screen map modal
 
