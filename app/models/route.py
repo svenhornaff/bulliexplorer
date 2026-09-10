@@ -6,8 +6,10 @@ Each route belongs to exactly one :class:`~app.models.post.Post`
 
 from __future__ import annotations
 
+import datetime
+
 from geoalchemy2 import Geometry
-from sqlalchemy import Float, ForeignKey, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -29,3 +31,12 @@ class Route(Base):
     elevation_gain_m: Mapped[float | None] = mapped_column(Float, default=None)
     elevation_loss_m: Mapped[float | None] = mapped_column(Float, default=None)
     duration_minutes: Mapped[float | None] = mapped_column(Float, default=None)
+
+    # Set on every *attempted* amenity sync (success or failure), never on
+    # the route sync itself — this is a per-route cooldown against
+    # re-querying Overpass's public instance too often, not a "data is
+    # fresh" marker. A resync within the cooldown window skips Overpass
+    # entirely and leaves existing NearbyAmenity rows untouched (see
+    # geo_sync.py's sync_amenities and docs/dev/gis_cycling_upgrade.md's
+    # Phase 4 follow-up).
+    amenities_synced_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), default=None)

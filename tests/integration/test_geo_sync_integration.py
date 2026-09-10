@@ -745,9 +745,23 @@ Body.
         async with factory() as session:
             await sync_posts(tmp_path, session, enable_amenity_discovery=True)
             await session.commit()
+
+        # The per-route cooldown (geo_sync.py's _AMENITY_SYNC_COOLDOWN) would
+        # otherwise skip this second sync entirely since it happens
+        # milliseconds after the first — clearing the timestamp simulates
+        # "long enough since last attempt" so this test still exercises the
+        # actual delete-and-replace path, not the cooldown skip.
+        async with factory() as session:
+            post = (await session.execute(select(Post).where(Post.slug == "resync-amenity-post"))).scalar_one()
+            route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+            route.amenities_synced_at = None
+            await session.commit()
+
         async with factory() as session:
             await sync_posts(tmp_path, session, enable_amenity_discovery=True)
             await session.commit()
+
+    assert mock_query.await_count == 2, "cooldown reset correctly — both syncs actually queried Overpass"
 
     async with factory() as session:
         post = (await session.execute(select(Post).where(Post.slug == "resync-amenity-post"))).scalar_one()
@@ -757,3 +771,55 @@ Body.
             (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))).scalars().all()
         )
         assert len(amenities) == 1, "Exactly one NearbyAmenity row after two syncs, not a duplicate"
+
+
+@pytest.mark.integration
+async def test_amenity_discovery_cooldown_skips_repeat_sync(tmp_path):
+    """Re-syncing the same route with amenity discovery on twice in quick
+    succession only queries Overpass once — the second call falls within
+    the per-route cooldown and is skipped entirely, leaving the first
+    sync's rows untouched. Guards against the exact production incident
+    this cooldown was added for: a burst of resyncs of the same route
+    tripping overpass-api.de's abuse protection.
+    """
+    _write_gpx(tmp_path, "route.gpx")
+    _write_md(
+        tmp_path,
+        "cooldown-amenity-post.md",
+        """\
+---
+title: Cooldown Amenity Post
+slug: cooldown-amenity-post
+date: 2025-06-01
+route:
+  name: Cooldown Amenity Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+    parsed = _parse_element(_OVERPASS_CAMPSITE)
+
+    with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
+        mock_query.return_value = [parsed]
+        async with factory() as session:
+            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+            await session.commit()
+        async with factory() as session:
+            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+            await session.commit()
+
+    assert mock_query.await_count == 1, "second sync within the cooldown window must not query Overpass again"
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "cooldown-amenity-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+
+        assert route.amenities_synced_at is not None
+        amenities = (
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))).scalars().all()
+        )
+        assert len(amenities) == 1, "the cooldown-skipped sync must leave the first sync's row untouched"

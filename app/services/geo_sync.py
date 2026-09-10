@@ -34,6 +34,7 @@ Overpass amenity discovery (Phase 4, ``docs/dev/gis_cycling_upgrade.md``):
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import math
 from pathlib import Path
@@ -151,6 +152,17 @@ _SINGLE_QUERY_MAX_SPAN_DEG: float = 1.0
 # keeps sync time and Overpass load bounded even for an outlier route like
 # "Dream of North" (~4,200 km / half of Scandinavia).
 _MAX_AMENITY_QUERIES: int = 30
+
+# Per-route cooldown against re-querying Overpass too often across separate
+# sync runs (distinct from _MIN_OVERPASS_INTERVAL, which paces requests
+# *within* one run). Without this, resyncing the same route a few times in
+# quick succession — an author saving a long route's frontmatter repeatedly
+# while drafting, or repeated webhook/manual resyncs — can fire dozens of
+# requests at the public overpass-api.de instance in a short window and trip
+# its abuse protection (observed in production: a burst of resyncs got the
+# server's IP outright connection-refused for a period). 15 minutes is
+# generous enough that no normal editing workflow hits it more than once.
+_AMENITY_SYNC_COOLDOWN = datetime.timedelta(minutes=15)
 
 _KM_PER_DEGREE_LAT: float = 111.0
 
@@ -376,6 +388,25 @@ async def sync_amenities(
         explicit client in tests to inject a mock transport.
     """
     global _last_overpass_time  # noqa: PLW0603 — module-level rate-limit timestamp
+
+    now = datetime.datetime.now(datetime.UTC)
+    if route.amenities_synced_at is not None:
+        elapsed_since_last = now - route.amenities_synced_at
+        if elapsed_since_last < _AMENITY_SYNC_COOLDOWN:
+            logger.info(
+                "Skipping Overpass amenity sync for route_id=%d — last attempt was %s ago "
+                "(cooldown %s) — leaving existing NearbyAmenity rows untouched",
+                route.id,
+                elapsed_since_last,
+                _AMENITY_SYNC_COOLDOWN,
+            )
+            return
+
+    # Set on every *attempted* sync, success or failure — a failed attempt
+    # still counts against the cooldown, since retrying a route that's
+    # already failing fast (e.g. Overpass mid-outage) is exactly the burst
+    # pattern this cooldown exists to prevent.
+    route.amenities_synced_at = now
 
     bboxes = _amenity_query_bboxes(linestring)
 
