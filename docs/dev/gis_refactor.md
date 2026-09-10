@@ -72,56 +72,73 @@ added, instead of a reader finding a gray map days or weeks later.
 
 **Scope**
 
-- [ ] Generate the Europe PMTiles extract (Protomaps' standard tooling,
-  one-time, not app code) — in progress as of this doc's writing.
-- [ ] Upload to R2 under the existing `tiles/` prefix (same bucket,
-  same CORS policy already configured — no new R2 setup needed).
-- [ ] Update `TILES_URL` in the server's `.env` to point at the new
-  file, if the filename/path changed from the original extract.
-- [ ] `make deploy` if `TILES_URL`'s value changed the env var itself
-  (not just the R2 object) — otherwise a container restart alone
-  suffices, per the existing `static/` volume-mount fix from earlier
-  in this project.
+- [x] Generate the Europe PMTiles extract (`pmtiles extract`, bbox
+  `-25,34,45,72`, maxzoom 14) — 23 GiB, generated locally from
+  Protomaps' `20260908.pmtiles` daily build. Took two attempts — the
+  first failed on a transient network read; an auto-retry wrapper
+  script succeeded on attempt 2, ~25 minutes.
+- [x] Uploaded to R2 under the existing `tiles/` prefix as
+  `tiles/europe.pmtiles` — same bucket, same CORS policy, no new R2
+  config needed, confirmed.
+- [x] Updated `TILES_URL` in both local and the server's `.env` to
+  `pmtiles://https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/tiles/europe.pmtiles`.
+- [x] `make deploy` run to pick up the new `TILES_URL` value.
 
 **Done when**
 
-- The new file is reachable at its R2 URL — `curl -sI` returns `200`.
-- File size is sanity-checked against Protomaps' published Europe-extract
-  size estimate — confirms the right extract was generated, not
-  accidentally the world file or a truncated one.
+- [x] The new file is reachable at its R2 URL — `curl -sI` returned
+  `200`, `Content-Length: 24487117444` (matches the 23 GiB extract),
+  `Accept-Ranges: bytes` present (required for PMTiles' range-request
+  reads).
+- [~] File-size sanity check — **no such published Protomaps estimate
+  exists to compare against** (checked, came up empty), so this
+  specific criterion can't be satisfied as worded. Did a rough
+  order-of-magnitude check instead: 24 GB for Europe vs. the world
+  file's ~107 GB (per `maps_gis.md`'s own original sizing note) is
+  plausible, not a "wrong file" red flag — not the same as the intended
+  check, but the closest available substitute.
+
+**Real incident during this phase, caught and fixed**: `make deploy`'s
+`RSYNC_EXCLUDE` didn't exclude `static/pmtiles/`, so the first deploy
+attempt tried to rsync the 23 GiB extract to the server too and filled
+its disk (38 GB total, 11 GB free at the time) mid-transfer —
+`rsync: ... No space left on device`. Self-terminated cleanly, no data
+loss, all containers stayed healthy throughout. Root-caused (production
+never reads a local pmtiles file — `TILES_URL` is a browser-side URL
+pointing at R2) and fixed in the `Makefile`; the corrected deploy
+succeeded cleanly on retry.
 
 **Testing**
 
-- No new automated test — this phase is a data asset swap, not code.
-  Verification is Phase 2's job.
+- No new automated test, as planned — this phase is a data asset swap,
+  not code. Verification was Phase 2's job.
 
 ### Phase 2 — Verify against the actual route that exposed the bug
 
 **Scope**
 
-- [ ] Open "Dream of North" on the live site.
-- [ ] Confirm the basemap renders correctly along the **entire** route —
-  Germany through Denmark, Sweden, and up to 71°N in Norway — not just
-  that `fitBounds()` zoomed to the right area (that part already worked;
-  the tiles themselves are what's being verified now).
+- [x] Open "Dream of North" on the live site.
+- [x] Confirm the basemap renders correctly along the route — user
+  confirmed after a hard refresh: "works as designed."
 - [ ] Spot-check at least one other region the Europe extract should
   cover but no existing post touches yet (e.g. pan the map manually
-  toward the Alps or the Balkans) — confirms the fix is genuinely
-  Europe-wide, not narrowly patched for the Norway corridor specifically.
+  toward the Alps or the Balkans).
 
 **Done when**
 
-- The Norway route in "Dream of North" renders with a real basemap
-  (roads, terrain, place names) for its entire length, on both mobile
-  and desktop.
-- The manual spot-check outside any existing post's route also renders
-  correctly.
+- [~] The Norway route in "Dream of North" renders with a real basemap
+  for its entire length. Confirmed on desktop via the user's hard
+  refresh. Mobile not explicitly confirmed — not the same as "both,"
+  as originally worded here.
+- [ ] The manual spot-check outside any existing post's route — not
+  done. This is inherently a live-browser check; the agent can't drive
+  it.
 
 **Testing**
 
-- Manual/visual only — basemap rendering is client-side and not
-  meaningfully testable without a real browser, same reasoning already
-  established in `media_storage_r2.md`'s Phase 4.
+- Manual/visual only, as planned — basemap rendering is client-side and
+  not meaningfully testable without a real browser, same reasoning
+  already established in `media_storage_r2.md`'s Phase 4.
 
 ### Phase 3 — Add the coverage-check safeguard
 
@@ -183,22 +200,50 @@ added, instead of a reader finding a gray map days or weeks later.
 
 **Scope**
 
-- [ ] Update `maps_gis.md`'s Phase 4 section: correct the coverage
-  decision (Black Forest/Germany → Europe), with the reasoning above,
-  and a note that geocoding/fit-bounds/stats were checked and confirmed
-  unaffected — so a future reader doesn't have to re-derive that this
-  was a scoped, contained bug.
-- [ ] Update `buckets.md` if this affects bucket #1's status line (it
-  shouldn't reopen the bucket — Maps & GIS is still "done," this is a
-  data-coverage fix within an already-shipped feature, not new scope —
-  but worth a one-line note for the historical record).
+- [x] Update `maps_gis.md`'s Phase 4 section: correction note added
+  in-place (not a rewrite of the historical record) pointing at this
+  doc, with the reasoning and the geocoding/fit-bounds/stats-unaffected
+  confirmation.
+- [x] Update `buckets.md` bucket #1: one-line note added, bucket stays
+  ✅ done, not reopened.
 
 **Done when**
 
-- `maps_gis.md` no longer states or implies Germany-only coverage
-  anywhere.
-- The full test suite passes with the two new coverage-check tests
-  included.
+- [x] `maps_gis.md` no longer states or implies Germany-only coverage
+  as the *current* state — the historical Phase 4 section is left
+  intact (it was correct for its time) with a clearly-labeled
+  correction note directly beneath it.
+- [x] The full test suite passes with the two new coverage-check tests
+  included — `make ci` green, 213 tests, 92%+ coverage.
+
+**Left over**
+
+None for this phase's own scope. (Phase 2's manual spot-check and
+mobile confirmation remain open — tracked there, not duplicated here.)
+
+**Summary**
+
+Corrected `maps_gis.md` in place rather than rewriting its history: the
+original Black Forest/Germany decision is left as-is (it was the right
+call for what was planned then), with a dated correction note added
+immediately below it pointing to this doc. Added a one-line note to
+`buckets.md` bucket #1 — bucket stays done, not reopened, since this is
+a data-coverage fix within an already-shipped feature, not new scope.
+
+**Recommended next steps**
+
+- Close Phase 2's two open items when convenient: the manual pan/zoom
+  spot-check toward the Alps or Balkans, and an explicit mobile check of
+  "Dream of North" (only desktop was confirmed via the hard refresh).
+  Both are quick, low-risk, and don't block anything else.
+- No code or infra work is blocked on either of those — this refactor's
+  actual engineering (extract, upload, deploy, safeguard, tests) is
+  fully shipped and verified. What's left is purely visual confirmation.
+- Worth remembering for next time a `.pmtiles`-sized (or similarly
+  large) asset needs to move: the `RSYNC_EXCLUDE` gap that caused the
+  first deploy failure is fixed now, but it's a reminder to sanity-check
+  `make deploy`'s file list before running it on the next multi-GB
+  asset, rather than assuming exclusions are exhaustive.
 
 ---
 

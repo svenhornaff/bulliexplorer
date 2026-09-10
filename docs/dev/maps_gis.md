@@ -383,6 +383,18 @@ the live DB with `_geocode` mocked.
 **Left over**
 None.
 
+**Correction (added by `gis_refactor.md`, later)**: the Black
+Forest/Baden-Württemberg-only bbox decided below was correct for the
+posts planned at the time, but under-scoped for the project going
+forward — "Dream of North" (a 4,247km route to 71°N) exposed it as a
+gray map void outside Germany. Replaced with a Europe-wide extract (bbox
+`-25,34,45,72`); see `gis_refactor.md` for the full fix, root-cause
+table, and the coverage-check safeguard added to `geo_sync.py` so this
+class of gap surfaces in logs immediately next time instead of silently.
+Confirmed at the time: geocoding, `fitBounds()`, and GPX stats math were
+already fully global and needed no changes — only this one static asset
+was regional.
+
 **Summary**
 Installed `pmtiles` 1.31.2 CLI via Homebrew.  Extracted the Black Forest /
 Baden-Württemberg region (bbox 7.0,47.5 — 9.5,49.0, zoom 0–14) from
