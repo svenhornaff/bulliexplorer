@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_db_session
+from app.models.nearby_amenity import NearbyAmenity
 from app.models.point_of_interest import PointOfInterest
 from app.models.post import Post
 from app.models.route import Route
@@ -85,10 +86,18 @@ async def post_detail(
     poi_result = await db.execute(select(PointOfInterest).where(PointOfInterest.post_id == post.id))
     pois = poi_result.scalars().all()
 
+    # Auto-discovered amenities (Phase 4, gis_cycling_upgrade.md) — tied to
+    # the route, not the post, and only queried when a route exists.
+    amenities: list[NearbyAmenity] = []
+    if route is not None:
+        amenity_result = await db.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))
+        amenities = list(amenity_result.scalars().all())
+
     # Convert to GeoJSON dicts for the template's inline JavaScript.
     # Jinja2's |tojson filter serialises these safely into <script> tags.
     route_geojson: dict[str, Any] | None = _route_to_geojson(route)
     pois_geojson: dict[str, Any] = _pois_to_geojson(list(pois))
+    amenities_geojson: dict[str, Any] = _amenities_to_geojson(amenities)
 
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -100,6 +109,7 @@ async def post_detail(
             "pois": pois,
             "route_geojson": route_geojson,
             "pois_geojson": pois_geojson,
+            "amenities_geojson": amenities_geojson,
             "tiles_url": settings.tiles_url,
             "year": datetime.now().year,
         },
@@ -175,5 +185,45 @@ def _pois_to_geojson(pois: list[PointOfInterest]) -> dict[str, Any]:
             )
         except Exception as exc:  # noqa: BLE001 — skip one bad POI, don't 404 the page
             logger.warning("POI geometry parse error name=%r: %s", poi.name, exc)
+            continue
+    return {"type": "FeatureCollection", "features": features}
+
+
+def _amenities_to_geojson(amenities: list[NearbyAmenity]) -> dict[str, Any]:
+    """Convert NearbyAmenity rows to a GeoJSON FeatureCollection dict.
+
+    Same shape/error-handling convention as :func:`_pois_to_geojson` —
+    auto-discovered amenities are rendered as their own map source/layer
+    (Phase 4, ``docs/dev/gis_cycling_upgrade.md``), visually distinct from
+    and toggled independently of curated PointOfInterest markers.
+
+    Parameters
+    ----------
+    amenities:
+        List of NearbyAmenity ORM rows (may be empty).
+
+    Returns
+    -------
+    GeoJSON FeatureCollection dict (``features`` may be empty).
+    """
+    features: list[dict[str, Any]] = []
+    for amenity in amenities:
+        if amenity.location is None:
+            continue
+        try:
+            _shape = to_shape(amenity.location)  # type: ignore[arg-type] — WKBElement at runtime
+            assert isinstance(_shape, ShapelyPoint)  # noqa: S101 — guaranteed by Geometry("POINT")
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [_shape.x, _shape.y]},
+                    "properties": {
+                        "name": amenity.name or "",
+                        "category": amenity.category,
+                    },
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 — skip one bad amenity, don't 404 the page
+            logger.warning("NearbyAmenity geometry parse error id=%r: %s", amenity.id, exc)
             continue
     return {"type": "FeatureCollection", "features": features}

@@ -134,6 +134,7 @@ collections:
             widget: "select"
             options:
               - { label: "Campsite", value: "campsite" }
+              - { label: "Shelter", value: "shelter" }
               - { label: "Restaurant", value: "restaurant" }
               - { label: "Hotel", value: "hotel" }
               - { label: "Gas station", value: "gas_station" }

@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # picked up automatically without a manual step.
     content_dir = BASE_DIR / "content" / "posts"
     async with get_session_factory()() as session:
-        await sync_posts(content_dir, session)
+        await sync_posts(content_dir, session, enable_amenity_discovery=settings.enable_amenity_discovery)
         await session.commit()
 
     yield

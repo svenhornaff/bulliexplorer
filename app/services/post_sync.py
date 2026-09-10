@@ -50,6 +50,8 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)", re.DOTALL)
 async def sync_posts(
     content_dir: Path,
     session: AsyncSession,
+    *,
+    enable_amenity_discovery: bool = False,
 ) -> dict[str, int]:
     """Reconcile ``content_dir/*.md`` files with the ``posts`` table.
 
@@ -61,6 +63,10 @@ async def sync_posts(
     session:
         An open ``AsyncSession``.  The caller owns the transaction; this
         function does **not** commit or roll back.
+    enable_amenity_discovery:
+        Off by default — threaded down to ``sync_route``. See that
+        function's docstring; the default keeps every existing caller
+        and test unaffected while this is off.
 
     Returns
     -------
@@ -85,7 +91,13 @@ async def sync_posts(
         post = await _upsert_post(session, pp)
         # Flush so ``post.id`` is available for FK references in geo rows.
         await session.flush()
-        await sync_route(session, post.id, pp.frontmatter.route, content_dir)
+        await sync_route(
+            session,
+            post.id,
+            pp.frontmatter.route,
+            content_dir,
+            enable_amenity_discovery=enable_amenity_discovery,
+        )
         await sync_pois(session, post.id, pp.frontmatter.points_of_interest)
 
         # Body-block render plan (Phase 4). The "route present, no explicit

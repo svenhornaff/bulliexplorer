@@ -16,12 +16,26 @@ Nominatim usage policy (https://operations.osmfoundation.org/policies/nominatim/
 - Identify your application via ``User-Agent``.
 - No more than 1 request per second — enforced by :data:`_MIN_REQUEST_INTERVAL`
   and the module-level :data:`_last_geocode_time` timestamp.
+
+Overpass amenity discovery (Phase 4, ``docs/dev/gis_cycling_upgrade.md``):
+- Auto-discovered, not authored — see :mod:`app.models.nearby_amenity`'s
+  module docstring for why this is a separate table from PointOfInterest.
+- Chunked by contiguous point-index groups along the route, not one query
+  over the whole bounding box — a long route (this project's own "Dream
+  of North" spans ~4,200 km / half of Scandinavia) would otherwise mean
+  one Overpass query covering a huge, mostly-irrelevant area. Consecutive
+  GPX points are geographically local to each other even when the whole
+  route's *overall* span is huge, so splitting by index naturally follows
+  the actual path — see :func:`_amenity_query_bboxes`.
+- Same 1 req/s discipline as Nominatim, enforced independently (a
+  different remote service, its own rate-limit clock).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from pathlib import Path
 
 import gpxpy
@@ -31,9 +45,11 @@ from shapely.geometry import LineString, Point
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.nearby_amenity import NearbyAmenity
 from app.models.point_of_interest import PointOfInterest
 from app.models.post_schema import PoiFrontmatter, RouteFrontmatter
 from app.models.route import Route
+from app.services.overpass import AmenityResult, query_nearby_amenities
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +130,30 @@ _MIN_REQUEST_INTERVAL: float = 1.0
 # that consecutive geocoding calls in the same sync run are spaced correctly.
 _last_geocode_time: float = 0.0
 
+# Overpass usage policy (https://operations.osmfoundation.org/policies/overpass/)
+# doesn't mandate an exact rate, but this project applies the same 1 req/s
+# discipline it already uses for Nominatim — a separate clock, since these
+# are two independent remote services.
+_MIN_OVERPASS_INTERVAL: float = 1.0
+_last_overpass_time: float = 0.0
+
+# Buffer padding (km) around each query bbox — an "along-route service
+# corridor" scale (water/fuel/camping a touring cyclist might detour a
+# short way for), not "somewhere in the region".
+_AMENITY_SEARCH_RADIUS_KM: float = 2.0
+
+# Below this span (~111 km), a route's own bounding box plus buffer is a
+# small enough area for a single Overpass query — covers this project's
+# local rides (Kinzig Valley, Sunday Gravel Loop) with just one request.
+_SINGLE_QUERY_MAX_SPAN_DEG: float = 1.0
+
+# Hard cap on chunks/requests per route sync, regardless of route length —
+# keeps sync time and Overpass load bounded even for an outlier route like
+# "Dream of North" (~4,200 km / half of Scandinavia).
+_MAX_AMENITY_QUERIES: int = 30
+
+_KM_PER_DEGREE_LAT: float = 111.0
+
 
 # ---------------------------------------------------------------------------
 # Public surface
@@ -127,6 +167,8 @@ async def sync_route(
     content_dir: Path,
     *,
     http_client: httpx.AsyncClient | None = None,
+    enable_amenity_discovery: bool = False,
+    overpass_client: httpx.AsyncClient | None = None,
 ) -> None:
     """Upsert or delete the Route row for a post.
 
@@ -148,6 +190,17 @@ async def sync_route(
         Optional ``httpx.AsyncClient`` used to fetch ``gpx_file`` when it
         is a URL.  When ``None`` a default client is created internally —
         pass an explicit client in tests to inject a mock transport.
+    enable_amenity_discovery:
+        Off by default (``Settings.enable_amenity_discovery``, threaded
+        down from ``sync_posts``) — a new third-party network dependency
+        (Overpass) on every route sync shouldn't turn on silently, and
+        every existing caller/test needs zero changes while it's off.
+    overpass_client:
+        Optional ``httpx.AsyncClient`` used for the Overpass query when
+        ``enable_amenity_discovery`` is on. When ``None`` a default client
+        is created internally — pass an explicit client in tests to
+        inject a mock transport. Separate from ``http_client`` (GPX
+        fetching) since they're two independent remote services.
     """
     existing = await _get_existing_route(session, post_id)
 
@@ -211,6 +264,177 @@ async def sync_route(
             logger.debug("Updated Route for post_id=%d", post_id)
         else:
             logger.debug("Route for post_id=%d unchanged — no write", post_id)
+
+    if enable_amenity_discovery:
+        # Flush so route.id is populated for a fresh insert (an update
+        # already has one). Needed before sync_amenities, which ties rows
+        # to route_id.
+        await session.flush()
+        route_row = existing if existing is not None else route
+        await sync_amenities(session, route_row, linestring, http_client=overpass_client)
+
+
+def _amenity_query_bboxes(linestring: LineString) -> list[tuple[float, float, float, float]]:
+    """Split a route's coordinates into Overpass query bboxes.
+
+    Short/local routes (span below :data:`_SINGLE_QUERY_MAX_SPAN_DEG`) get
+    one bbox covering the whole buffered envelope. Longer routes are split
+    into up to :data:`_MAX_AMENITY_QUERIES` **contiguous** chunks by point
+    index — not a uniform grid over the overall bounding box. Consecutive
+    GPX points are geographically close to each other even when the
+    route's *overall* span is huge (a long route winds through many local
+    areas rather than covering one huge area uniformly), so an
+    index-contiguous chunk's own local bbox stays small and relevant
+    regardless of how far-flung the route as a whole is.
+
+    Returns bboxes in Overpass QL's own ``(south, west, north, east)``
+    order, each already padded by :data:`_AMENITY_SEARCH_RADIUS_KM`.
+    """
+    coords = list(linestring.coords)
+    min_lon, min_lat, max_lon, max_lat = linestring.bounds
+    overall_span = max(max_lat - min_lat, max_lon - min_lon)
+
+    if overall_span <= _SINGLE_QUERY_MAX_SPAN_DEG:
+        chunks = [coords]
+    else:
+        num_chunks = min(_MAX_AMENITY_QUERIES, math.ceil(overall_span / _SINGLE_QUERY_MAX_SPAN_DEG))
+        chunk_size = math.ceil(len(coords) / num_chunks)
+        chunks = [coords[i : i + chunk_size] for i in range(0, len(coords), chunk_size)]
+
+    bboxes: list[tuple[float, float, float, float]] = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        lons = [c[0] for c in chunk]
+        lats = [c[1] for c in chunk]
+        bboxes.append(_buffered_bbox(min(lons), min(lats), max(lons), max(lats)))
+    return bboxes
+
+
+def _buffered_bbox(
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+) -> tuple[float, float, float, float]:
+    """Pad a lon/lat bbox by :data:`_AMENITY_SEARCH_RADIUS_KM` each side.
+
+    Deliberately not a precise geodesic buffer — v1 uses a bounding-box +
+    radius, not a precise along-the-track corridor
+    (``docs/dev/gis_cycling_upgrade.md`` Phase 4). Returns
+    ``(south, west, north, east)``, Overpass QL's own bbox order.
+    """
+    lat_buffer = _AMENITY_SEARCH_RADIUS_KM / _KM_PER_DEGREE_LAT
+    # Longitude degrees shrink with cos(latitude); use the bbox's own
+    # midpoint latitude so the buffer doesn't over/under-shoot at high
+    # latitudes (this project's routes go as far north as ~71°N).
+    mid_lat = (min_lat + max_lat) / 2
+    lon_buffer = _AMENITY_SEARCH_RADIUS_KM / (_KM_PER_DEGREE_LAT * max(math.cos(math.radians(mid_lat)), 0.01))
+    return (
+        min_lat - lat_buffer,
+        min_lon - lon_buffer,
+        max_lat + lat_buffer,
+        max_lon + lon_buffer,
+    )
+
+
+async def sync_amenities(
+    session: AsyncSession,
+    route: Route,
+    linestring: LineString,
+    *,
+    http_client: httpx.AsyncClient | None = None,
+) -> None:
+    """Discover and upsert :class:`NearbyAmenity` rows for a route.
+
+    Best-effort, snapshot-replace semantics:
+
+    - Queries Overpass in full **before** touching the DB. Existing
+      amenities are only replaced once every chunk query has *succeeded*
+      (partial success across chunks still preserves the old snapshot —
+      an incomplete answer is worse than a stale one for derived data
+      nobody manually edits).
+    - A successful query with zero results legitimately clears old rows
+      (the amenities genuinely aren't there any more, e.g. the route
+      changed).
+    - Deduplicates by ``(osm_element_type, osm_element_id)`` across
+      chunks — the buffer padding means adjacent chunks' bboxes overlap,
+      so the same OSM element can appear in more than one chunk's result.
+
+    Parameters
+    ----------
+    session:
+        Open ``AsyncSession``.  Caller owns the transaction.
+    route:
+        The just-upserted :class:`Route` row (``route.id`` must already be
+        populated — caller flushes first for a fresh insert).
+    linestring:
+        The route's parsed geometry, used to build query bboxes.
+    http_client:
+        Optional ``httpx.AsyncClient`` used for Overpass requests.  When
+        ``None`` a default client is created internally — pass an
+        explicit client in tests to inject a mock transport.
+    """
+    global _last_overpass_time  # noqa: PLW0603 — module-level rate-limit timestamp
+
+    bboxes = _amenity_query_bboxes(linestring)
+
+    _close_client = False
+    client = http_client
+    if client is None:
+        client = httpx.AsyncClient()
+        _close_client = True
+
+    try:
+        all_results: list[AmenityResult] = []
+        for south, west, north, east in bboxes:
+            loop = asyncio.get_running_loop()
+            elapsed = loop.time() - _last_overpass_time
+            if elapsed < _MIN_OVERPASS_INTERVAL:
+                await asyncio.sleep(_MIN_OVERPASS_INTERVAL - elapsed)
+            _last_overpass_time = loop.time()
+
+            chunk_results = await query_nearby_amenities(south, west, north, east, http_client=client)
+            if chunk_results is None:
+                # One chunk failed — the overall answer is incomplete.
+                # Preserve whatever amenities already exist rather than
+                # replace them with a partial result.
+                logger.warning(
+                    "Overpass amenity sync incomplete for route_id=%d (bbox %s,%s,%s,%s failed) — "
+                    "leaving existing NearbyAmenity rows untouched",
+                    route.id,
+                    south,
+                    west,
+                    north,
+                    east,
+                )
+                return
+            all_results.extend(chunk_results)
+    finally:
+        if _close_client:
+            await client.aclose()
+
+    # Dedupe across chunks (overlapping buffers can return the same OSM
+    # element from more than one chunk).
+    deduped: dict[tuple[str, int], AmenityResult] = {}
+    for result in all_results:
+        deduped[(result.osm_element_type, result.osm_element_id)] = result
+
+    # All chunk queries succeeded — safe to replace the snapshot now.
+    await session.execute(delete(NearbyAmenity).where(NearbyAmenity.route_id == route.id))
+    for result in deduped.values():
+        amenity = NearbyAmenity(
+            route_id=route.id,
+            osm_element_type=result.osm_element_type,
+            osm_element_id=result.osm_element_id,
+            category=result.category,
+            name=result.name,
+            location=from_shape(Point(result.lon, result.lat), srid=4326),
+            tags=result.tags,
+        )
+        session.add(amenity)
+
+    logger.info("Synced %d NearbyAmenity rows for route_id=%d", len(deduped), route.id)
 
 
 async def sync_pois(

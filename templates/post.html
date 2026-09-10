@@ -71,13 +71,15 @@ Vendor JS loaded last — only on posts that actually render a map. #}
 
     // ── Data injected from server ──────────────────────────────────────────
     // |tojson filter escapes forward-slashes and special chars — safe in <script>.
-    const ROUTE_GEOJSON = {{ route_geojson | tojson }};
-    const POIS_GEOJSON  = {{ pois_geojson  | tojson }};
-    const TILES_URL     = {{ tiles_url     | tojson }};
+    const ROUTE_GEOJSON     = {{ route_geojson     | tojson }};
+    const POIS_GEOJSON      = {{ pois_geojson      | tojson }};
+    const AMENITIES_GEOJSON = {{ amenities_geojson | tojson }};
+    const TILES_URL          = {{ tiles_url          | tojson }};
 
     // ── Category → marker colour map ──────────────────────────────────────
     const CATEGORY_COLOURS = {
       campsite:    "#4CAF50",  // green
+      shelter:     "#795548",  // brown
       restaurant:  "#FF9800",  // orange
       hotel:       "#2196F3",  // blue
       gas_station: "#9C27B0",  // purple
@@ -254,6 +256,49 @@ Vendor JS loaded last — only on posts that actually render a map. #}
           .setPopup(new maplibregl.Popup({ offset: 10 }).setHTML(popupHtml))
           .addTo(map);
       });
+
+      // ── Nearby-amenity markers (Phase 4, gis_cycling_upgrade.md) ────────
+      // Auto-discovered, not curated — deliberately muted (smaller, lower
+      // opacity, no drop shadow) so curated POI markers stay the primary
+      // visual signal. Off by default; created but not added to the map
+      // until the "Show nearby services" toggle is checked (same plain-
+      // DOM-marker approach as POIs above, so these also survive a
+      // setStyle() theme swap for free — no re-add-after-swap logic
+      // needed, unlike the route line/casing style layers below).
+      var amenityFeatures = (AMENITIES_GEOJSON && AMENITIES_GEOJSON.features) || [];
+      var amenityMarkers = amenityFeatures.map(function (feature) {
+        var props  = feature.properties;
+        var colour = CATEGORY_COLOURS[props.category] || CATEGORY_COLOURS.other;
+
+        var el = document.createElement("div");
+        el.setAttribute("aria-label", props.name || props.category);
+        el.style.cssText = [
+          "width:9px", "height:9px", "border-radius:50%",
+          "background:" + colour,
+          "opacity:0.65",
+          "border:1px solid #fff",
+          "cursor:pointer",
+        ].join(";");
+
+        var popupHtml = "<strong>" + (props.name || props.category) + "</strong>";
+
+        return new maplibregl.Marker({ element: el })
+          .setLngLat(feature.geometry.coordinates)
+          .setPopup(new maplibregl.Popup({ offset: 8 }).setHTML(popupHtml));
+      });
+
+      var amenityToggle = document.getElementById("amenity-toggle-input");
+      if (amenityToggle) {
+        amenityToggle.addEventListener("change", function () {
+          amenityMarkers.forEach(function (marker) {
+            if (amenityToggle.checked) {
+              marker.addTo(map);
+            } else {
+              marker.remove();
+            }
+          });
+        });
+      }
     });
 
     // ── Live theme swap: react to the nav toggle without a page reload ────

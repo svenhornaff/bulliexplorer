@@ -690,6 +690,20 @@ body.map-fullscreen-active {
   overflow: hidden;
 }
 
+.amenity-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: var(--space-4);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.amenity-toggle input {
+  cursor: pointer;
+}
+
 /* ── Body-block content (Phase 4, §5.3): gallery, callout ────────────── */
 .post-gallery {
   display: grid;

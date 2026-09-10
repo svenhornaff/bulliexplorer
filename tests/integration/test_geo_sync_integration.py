@@ -14,6 +14,7 @@ Run with: docker compose up -d && uv run pytest tests/integration/ -v
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import gpxpy
 import pytest
@@ -23,9 +24,11 @@ from sqlalchemy import select, text
 import app.core.db as db_module
 from app.core.config import get_settings
 from app.core.db import dispose_engine, get_session_factory, init_engine
+from app.models.nearby_amenity import NearbyAmenity
 from app.models.point_of_interest import PointOfInterest
 from app.models.post import Post
 from app.models.route import Route
+from app.services.overpass import _parse_element  # noqa: PLC2701
 from app.services.post_sync import sync_posts
 
 REAL_DB_URL = get_settings().database_url
@@ -597,3 +600,160 @@ Body.
             (await session.execute(select(PointOfInterest).where(PointOfInterest.post_id == post.id))).scalars().all()
         )
         assert len(pois) == 1, "Exactly one POI row after two syncs"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 (gis_cycling_upgrade.md): NearbyAmenity discovery via Overpass.
+#
+# enable_amenity_discovery defaults to False (app/core/config.py) — every
+# test above passes with zero changes because sync_route() never calls
+# Overpass unless this flag is explicitly on. These tests turn it on
+# deliberately, with a mocked transport — never a real network call.
+# ---------------------------------------------------------------------------
+
+
+_OVERPASS_CAMPSITE = {
+    "type": "node",
+    "id": 999,
+    "lat": 48.02,
+    "lon": 8.02,
+    "tags": {"tourism": "camp_site", "name": "Overpass Test Camp"},
+}
+
+
+@pytest.mark.integration
+async def test_amenity_discovery_populates_nearby_amenity_rows(tmp_path):
+    """Syncing a route with enable_amenity_discovery=True populates
+    NearbyAmenity rows from the (mocked) Overpass response — the actual
+    DB round-trip the unit tests can't cover.
+    """
+    _write_gpx(tmp_path, "route.gpx")
+    _write_md(
+        tmp_path,
+        "amenity-post.md",
+        """\
+---
+title: Amenity Post
+slug: amenity-post
+date: 2025-06-01
+route:
+  name: Amenity Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+
+    async with factory() as session:
+        with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
+            mock_query.return_value = [_parse_element(_OVERPASS_CAMPSITE)]
+            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+        await session.commit()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "amenity-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+
+        amenities = (
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))).scalars().all()
+        )
+        assert len(amenities) == 1
+        assert amenities[0].category == "campsite"
+        assert amenities[0].name == "Overpass Test Camp"
+        assert amenities[0].osm_element_type == "node"
+        assert amenities[0].osm_element_id == 999
+
+        location = to_shape(amenities[0].location)
+        assert location.x == pytest.approx(8.02)
+        assert location.y == pytest.approx(48.02)
+
+
+@pytest.mark.integration
+async def test_amenity_discovery_disabled_by_default_no_rows(tmp_path):
+    """enable_amenity_discovery defaults to False — sync_posts() called
+    the ordinary way (as every other test in this file does) creates zero
+    NearbyAmenity rows and makes zero Overpass calls, confirmed via a
+    mock that would raise if it were ever actually invoked.
+    """
+    _write_gpx(tmp_path, "route.gpx")
+    _write_md(
+        tmp_path,
+        "no-amenity-post.md",
+        """\
+---
+title: No Amenity Post
+slug: no-amenity-post
+date: 2025-06-01
+route:
+  name: No Amenity Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+    with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
+        async with factory() as session:
+            await sync_posts(tmp_path, session)  # enable_amenity_discovery not passed — defaults off
+            await session.commit()
+        mock_query.assert_not_awaited()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "no-amenity-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+
+        amenities = (
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))).scalars().all()
+        )
+        assert amenities == []
+
+
+@pytest.mark.integration
+async def test_amenity_discovery_resync_replaces_snapshot_not_duplicates(tmp_path):
+    """Re-syncing the same route with amenity discovery on twice produces
+    the same NearbyAmenity row — not a duplicate (delete-and-replace
+    idempotency, same discipline as PointOfInterest/Route).
+    """
+    _write_gpx(tmp_path, "route.gpx")
+    _write_md(
+        tmp_path,
+        "resync-amenity-post.md",
+        """\
+---
+title: Resync Amenity Post
+slug: resync-amenity-post
+date: 2025-06-01
+route:
+  name: Resync Amenity Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+    parsed = _parse_element(_OVERPASS_CAMPSITE)
+
+    with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
+        mock_query.return_value = [parsed]
+        async with factory() as session:
+            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+            await session.commit()
+        async with factory() as session:
+            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+            await session.commit()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "resync-amenity-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+
+        amenities = (
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))).scalars().all()
+        )
+        assert len(amenities) == 1, "Exactly one NearbyAmenity row after two syncs, not a duplicate"

@@ -45,4 +45,13 @@ template's context. #}
              role="img"
              aria-label="Interactive map of {{ route.name }}"></div>
     </div>
+    {# Amenity toggle (Phase 4, gis_cycling_upgrade.md) — auto-discovered,
+    not curated, so it defaults off and is hidden entirely when there's
+    nothing to show (empty collection isn't rendered as an empty control). #}
+    {% if amenities_geojson and amenities_geojson.features %}
+        <label class="amenity-toggle">
+            <input type="checkbox" id="amenity-toggle-input" aria-controls="post-map" />
+            Show nearby services
+        </label>
+    {% endif %}
 {% endif %}

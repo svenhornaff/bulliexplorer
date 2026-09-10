@@ -168,20 +168,22 @@ async def _post_session():
 
 
 async def _post_with_route_session():
-    """Post-detail session: post found with route (no POIs)."""
+    """Post-detail session: post found with route (no POIs, no amenities)."""
     yield _session(
         _result(scalar=_FakePostWithRouteMapBlock()),
         _result(scalar=_FakeRoute()),
-        _result(scalars_list=[]),
+        _result(scalars_list=[]),  # POIs query
+        _result(scalars_list=[]),  # NearbyAmenity query (route is not None)
     )
 
 
 async def _post_with_route_and_pois_session():
-    """Post-detail session: post found with route and one POI."""
+    """Post-detail session: post found with route and one POI (no amenities)."""
     yield _session(
         _result(scalar=_FakePostWithRouteMapBlock()),
         _result(scalar=_FakeRoute()),
-        _result(scalars_list=[_FakePOI()]),
+        _result(scalars_list=[_FakePOI()]),  # POIs query
+        _result(scalars_list=[]),  # NearbyAmenity query (route is not None)
     )
 
 

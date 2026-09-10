@@ -127,7 +127,8 @@ async def resync(
     content_dir = main_module.BASE_DIR / "content" / "posts"
     logger.info("Manual resync triggered from %s", request.client)
 
-    counts = await sync_posts(content_dir, db)
+    settings = get_settings()
+    counts = await sync_posts(content_dir, db, enable_amenity_discovery=settings.enable_amenity_discovery)
     # get_db_session commits on clean exit — no explicit commit needed here.
 
     logger.info("Resync complete: %s", counts)
@@ -233,7 +234,7 @@ async def github_webhook(
     fetch_counts = await fetch_and_write(**fetch_kwargs)
 
     content_dir = main_module.BASE_DIR / "content" / "posts"
-    sync_counts = await sync_posts(content_dir, db)
+    sync_counts = await sync_posts(content_dir, db, enable_amenity_discovery=settings.enable_amenity_discovery)
 
     logger.info("Webhook publish complete: fetch=%s sync=%s", fetch_counts, sync_counts)
     return {

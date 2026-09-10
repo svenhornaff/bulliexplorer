@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     # --- Internal endpoints --------------------------------------------------
     resync_token: str  # no default — missing config crashes on startup
 
+    # --- Nearby amenity discovery (gis_cycling_upgrade.md Phase 4) ---------
+    # Off by default — a new third-party network dependency (Overpass) on
+    # every route sync shouldn't turn on silently. Existing route-sync
+    # callers/tests need zero changes either way: this flag only gates
+    # whether sync_route() calls out to Overpass at all.
+    enable_amenity_discovery: bool = False
+
     # --- GitHub Contents API (webhook auto-publish) -------------------------
     # Fine-grained PAT with Contents: Read on the bulliexplorer repo.
     # Used by POST /internal/webhook/github to fetch committed files.

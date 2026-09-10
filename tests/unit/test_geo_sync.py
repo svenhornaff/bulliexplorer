@@ -21,6 +21,8 @@ from shapely.geometry import LineString, Point
 import app.services.geo_sync as _geo_module
 from app.models.post_schema import PoiFrontmatter
 from app.services.geo_sync import (  # noqa: PLC2701
+    _amenity_query_bboxes,
+    _buffered_bbox,
     _check_tile_coverage,
     _geocode,
     _parse_gpx,
@@ -551,3 +553,72 @@ async def test_geocoding_place_query_without_client_returns_none():
 
     assert point is None
     mock_gc.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _buffered_bbox / _amenity_query_bboxes (Phase 4, gis_cycling_upgrade.md)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_buffered_bbox_returns_south_west_north_east_order():
+    south, west, north, east = _buffered_bbox(min_lon=8.0, min_lat=48.0, max_lon=8.1, max_lat=48.1)
+    assert south < 48.0
+    assert west < 8.0
+    assert north > 48.1
+    assert east > 8.1
+
+
+@pytest.mark.unit
+def test_amenity_query_bboxes_short_route_is_single_bbox():
+    """A short/local route (below _SINGLE_QUERY_MAX_SPAN_DEG) gets exactly
+    one bbox covering its whole buffered envelope — covers this project's
+    actual local rides (Kinzig Valley, Sunday Gravel Loop) with 1 request.
+    """
+    linestring = LineString([(8.0, 48.0), (8.05, 48.05), (8.1, 48.0)])
+    bboxes = _amenity_query_bboxes(linestring)
+    assert len(bboxes) == 1
+
+
+@pytest.mark.unit
+def test_amenity_query_bboxes_long_route_is_chunked():
+    """A route spanning more than _SINGLE_QUERY_MAX_SPAN_DEG is split into
+    multiple chunks by contiguous point index — not one huge bbox over
+    the whole span (this project's real motivating case: "Dream of
+    North", ~4,200 km / half of Scandinavia).
+    """
+    # 100 points marching from Freiburg to well past Nordkapp — spans far
+    # more than 1 degree, so this must NOT collapse to a single bbox.
+    coords = [(8.0 + i * 0.2, 48.0 + i * 0.25) for i in range(100)]
+    linestring = LineString(coords)
+    bboxes = _amenity_query_bboxes(linestring)
+    assert len(bboxes) > 1
+    assert len(bboxes) <= 30  # _MAX_AMENITY_QUERIES
+
+
+@pytest.mark.unit
+def test_amenity_query_bboxes_chunk_count_is_capped():
+    """However many points a route has, the number of Overpass queries
+    per sync never exceeds _MAX_AMENITY_QUERIES — the whole point of
+    chunking is a bounded request budget regardless of route length.
+    """
+    coords = [(8.0 + i * 0.05, 48.0 + i * 0.06) for i in range(2000)]
+    linestring = LineString(coords)
+    bboxes = _amenity_query_bboxes(linestring)
+    assert len(bboxes) <= 30
+
+
+@pytest.mark.unit
+def test_amenity_query_bboxes_chunks_are_geographically_local():
+    """Chunking by contiguous point index (not a uniform grid over the
+    overall bbox) means each chunk's own local span stays small even
+    though the route's overall span is huge — the whole reason this
+    approach avoids one giant irrelevant-area query.
+    """
+    coords = [(8.0 + i * 0.2, 48.0 + i * 0.25) for i in range(100)]
+    linestring = LineString(coords)
+    overall_span = max(linestring.bounds[3] - linestring.bounds[1], linestring.bounds[2] - linestring.bounds[0])
+    bboxes = _amenity_query_bboxes(linestring)
+    for south, west, north, east in bboxes:
+        assert (north - south) < overall_span
+        assert (east - west) < overall_span
