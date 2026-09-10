@@ -44,7 +44,10 @@ _MARKER_RE = re.compile(
     re.MULTILINE,
 )
 
-_md = MarkdownIt()
+# CommonMark (markdown-it-py's default preset) doesn't include GFM pipe
+# tables — they're a built-in block rule, just disabled by default. No new
+# dependency needed, just enable the rule already shipped with the library.
+_md = MarkdownIt().enable("table")
 
 
 def build_body_blocks(

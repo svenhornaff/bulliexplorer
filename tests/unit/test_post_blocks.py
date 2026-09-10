@@ -32,6 +32,24 @@ def test_empty_body_produces_no_blocks():
 
 
 @pytest.mark.unit
+def test_pipe_table_renders_as_html_table():
+    """GFM pipe tables render as <table>, not literal pipe text.
+
+    Regression test: markdown-it-py's default preset is bare CommonMark,
+    which doesn't include tables — they showed up as raw `| a | b |`
+    text on the live site until _md.enable("table") was added.
+    """
+    body = "| | Route Details |\n| --- | --- |\n| \U0001f97e **Distance** | ~25.2 km |"
+    blocks = build_body_blocks(body, [], [])
+    assert len(blocks) == 1
+    html = blocks[0]["html"]
+    assert "<table>" in html
+    assert "<th>Route Details</th>" in html
+    assert "~25.2 km" in html
+    assert "| Route Details |" not in html
+
+
+@pytest.mark.unit
 def test_route_map_marker_produces_route_map_block_in_place():
     body = "Intro text.\n\n[[route-map]]\n\nOutro text."
     blocks = build_body_blocks(body, [], [])

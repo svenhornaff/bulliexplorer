@@ -564,6 +564,33 @@ article pre code {
   padding: 0;
 }
 
+article table {
+  width: 100%;
+  margin: 0 0 var(--space-3);
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+article th,
+article td {
+  padding: 0.5em 0.75em;
+  border: 1px solid var(--color-border);
+  text-align: left;
+}
+
+article th {
+  background: var(--color-surface-2);
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  article table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}
+
 /* ── Route / map styles (unchanged behaviour, retokenized) ─────────────── */
 .route-stats {
   display: flex;
