@@ -322,19 +322,10 @@ the base style, so it comes along for free with no extra wiring.
   is the only method called on toggle) and via the same real-rendered-
   output check used for every prior phase — not yet eyeballed in an
   actual browser.
-- [ ] Keyboard-only pass — **needs a real browser**, not verified here.
-  Implemented: Tab is trapped to the wrap's focusable elements (toggle
-  button + MapLibre's own nav/attribution controls) while open, Escape
-  closes and returns focus to the toggle button explicitly (`.focus()`
-  call, not left to browser default).
-- [ ] Screen-reader pass — **needs a real browser/AT, not verified
-  here.** Implemented: `role="dialog"`/`aria-modal="true"`/`aria-label`
-  are set only while active (not static markup, so nothing is
-  misannounced before the modal opens); the Tab-trap intentionally only
-  intercepts the Tab key, never arrow keys, so a screen reader's own
-  virtual-cursor/quick-nav browsing can still reach and activate the
-  close button even if a user can't or doesn't use Escape — directly
-  satisfying this criterion's "doesn't trap a screen-reader user" wording.
+- [x] Keyboard-only pass — confirmed by user UAT: expand button in
+  place and working, Tab/Shift+Tab/Escape behave as implemented.
+- [x] Screen-reader pass — confirmed by user UAT alongside the
+  keyboard pass.
 
 **Testing**
 
@@ -356,11 +347,8 @@ the base style, so it comes along for free with no extra wiring.
 
 **Left over**
 
-- The two manual passes above (keyboard-only, screen reader) —
-  genuinely need a human at a real browser/AT; not something verifiable
-  from this session. Everything checkable without one (state
-  preservation, ARIA wiring, focus-trap logic, DOM ordering) was
-  checked.
+None — both manual passes (keyboard-only, screen reader) confirmed via
+user UAT.
 
 **Summary**
 
