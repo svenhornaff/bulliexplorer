@@ -584,6 +584,7 @@ the appropriately-sized fix for where this project actually is, not an
 overreaction.
 
 **Scope**
+
 - [x] Add a fallback mirror: `https://overpass.kumi.systems/api/interpreter`
   — confirmed as a well-established, actively-used, globally-covering
   mirror (referenced consistently across sources from 2017 through
@@ -615,6 +616,7 @@ overreaction.
   or whether self-hosting eventually becomes worth it.
 
 **Done when**
+
 - [x] A fixture test simulating a primary failure + mirror success confirms
   the chunk's data is still captured, not lost.
 - [x] A fixture test confirms a mid-sync primary failure routes *remaining*
@@ -634,6 +636,7 @@ overreaction.
   as fixtures and correctly trigger the fallback in the test suite.
 
 **Testing**
+
 - Unit tests in `tests/unit/test_overpass.py`: mocked primary failure +
   mirror success (data captured, confirmed via `result_meta`), mocked
   primary failure + mirror also failing (correctly returns `None`, same
