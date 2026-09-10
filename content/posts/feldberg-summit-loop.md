@@ -41,7 +41,7 @@ According to our planned GPX route:
 | 🔄 **Route type** | Loop |
 | 💪 **Challenge** | Demanding — a proper full-day hike |
 
-With roughly **25 km and almost 1,000 metres of climbing**, this isn't going to be a casual Sunday stroll.
+With roughly **25 km and almost 1,000 metres of climbing**, this isn't going to be a casual Saturday stroll.
 
 ## 🌲 Into the Black Forest
 
