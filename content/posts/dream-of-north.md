@@ -2,7 +2,7 @@
 title: Dream of North
 slug: dream-of-north
 date: 2026-09-03
-summary: No race number, no tracker, no cut-off. Just 71°10′ N and whatever the road and nature might bring in between. A travel adventure from a different kind - true, I am nuts.
+summary: No race number, no tracker, no cut-off. Just 71°10′ N and whatever the road and nature might bring in between. A travel adventure from a different kind - true, I am nuts. 😂
 cover_image: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/nc4200_cover.png
 tags:
   - 71°10′ N
