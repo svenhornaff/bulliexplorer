@@ -112,25 +112,6 @@ async def _insert_poi(factory, post_id: int) -> None:
         await session.commit()
 
 
-def _make_app(tiles_url: str = "pmtiles://https://example.com/tiles.pmtiles"):
-    """FastAPI app with tiles_url patched in settings."""
-    from app.main import create_app
-
-    application = create_app()
-
-    # Patch get_settings inside the posts router so tiles_url is set.
-    original_get_settings = get_settings
-
-    class _PatchedSettings:
-        def __getattr__(self, name: str):
-            return getattr(original_get_settings(), name)
-
-        tiles_url = tiles_url
-        is_production = False
-
-    return application, _PatchedSettings
-
-
 # ---------------------------------------------------------------------------
 # Phase 5 Done-when criterion — post with route + POIs renders correctly
 # ---------------------------------------------------------------------------
@@ -187,6 +168,40 @@ async def test_post_with_route_renders_map_container():
     assert "maplibre-gl.js" in resp.text
     assert "LineString" in resp.text  # route GeoJSON inlined
     assert "FeatureCollection" in resp.text  # POIs GeoJSON inlined
+
+
+@pytest.mark.integration
+async def test_post_with_route_renders_fullscreen_toggle():
+    """Phase 2 (gis_cycling_upgrade.md): the full-screen map toggle button
+    and its wrapping element render alongside the map, with the ARIA
+    attributes the accessibility scope requires present from the start.
+    """
+    factory = get_session_factory()
+    post_id = await _insert_post(factory)
+    await _insert_route(factory, post_id)
+
+    from app.main import create_app
+
+    application = create_app()
+    transport = ASGITransport(app=application)
+
+    with patch("app.routes.posts.get_settings") as mock_gs:
+        mock_gs.return_value.tiles_url = "pmtiles://https://example.com/tiles.pmtiles"
+        mock_gs.return_value.is_production = False
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/posts/kinzig-valley-loop")
+
+    assert resp.status_code == 200
+    assert 'id="map-wrap"' in resp.text
+    assert 'id="map-fullscreen-toggle"' in resp.text
+    assert 'aria-pressed="false"' in resp.text
+    assert 'aria-controls="post-map"' in resp.text
+    # The toggle must be rendered *before* #post-map so the focus-trap's
+    # first/last element ordering (post.html's getFocusable walk) puts it
+    # first — a screen-reader/keyboard user landing in the modal always
+    # reaches the close control without having to Shift+Tab backwards.
+    assert resp.text.index('id="map-fullscreen-toggle"') < resp.text.index('id="post-map"')
 
 
 @pytest.mark.integration

@@ -31,7 +31,18 @@ template's context. #}
 {% endif %}
 </div>
 {% if route_geojson and tiles_url %}
-    <div id="post-map"
-         role="img"
-         aria-label="Interactive map of {{ route.name }}"></div>
+    <div class="map-wrap" id="map-wrap">
+        <button type="button"
+                class="map-toggle-btn"
+                id="map-fullscreen-toggle"
+                aria-pressed="false"
+                aria-controls="post-map"
+                aria-label="View map full screen">
+            <span class="icon-expand">{{ icons.icon_expand() }}</span>
+            <span class="icon-collapse">{{ icons.icon_collapse() }}</span>
+        </button>
+        <div id="post-map"
+             role="img"
+             aria-label="Interactive map of {{ route.name }}"></div>
+    </div>
 {% endif %}

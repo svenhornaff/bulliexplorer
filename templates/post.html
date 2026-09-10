@@ -315,6 +315,97 @@ Vendor JS loaded last — only on posts that actually render a map. #}
         },
       );
     });
+
+    // ── Full-screen map toggle (Phase 2, gis_cycling_upgrade.md) ──────────
+    // Reuses the SAME map instance — never re-initialised — by toggling a
+    // `position: fixed` class on the wrapper and calling map.resize(), the
+    // documented MapLibre pattern for a container whose pixel size changed
+    // outside its own control (https://maplibre.org/maplibre-gl-js/docs/API/classes/Map/#resize).
+    const mapWrap  = document.getElementById("map-wrap");
+    const toggleBtn = document.getElementById("map-fullscreen-toggle");
+
+    if (mapWrap && toggleBtn) {
+      function getFocusable(container) {
+        return Array.prototype.slice
+          .call(
+            container.querySelectorAll(
+              'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+            ),
+          )
+          .filter(function (el) {
+            return !el.disabled && el.offsetParent !== null;
+          });
+      }
+
+      function openFullscreen() {
+        mapWrap.classList.add("is-fullscreen");
+        mapWrap.setAttribute("role", "dialog");
+        mapWrap.setAttribute("aria-modal", "true");
+        mapWrap.setAttribute("aria-label", "Full screen map");
+        document.body.classList.add("map-fullscreen-active");
+        toggleBtn.setAttribute("aria-pressed", "true");
+        toggleBtn.setAttribute("aria-label", "Exit full screen map");
+        // Wait one frame so the layout change above has actually taken
+        // effect before asking MapLibre to re-measure its container —
+        // resize() reads the container's current pixel size synchronously.
+        requestAnimationFrame(function () {
+          map.resize();
+        });
+      }
+
+      function closeFullscreen() {
+        mapWrap.classList.remove("is-fullscreen");
+        mapWrap.removeAttribute("role");
+        mapWrap.removeAttribute("aria-modal");
+        mapWrap.removeAttribute("aria-label");
+        document.body.classList.remove("map-fullscreen-active");
+        toggleBtn.setAttribute("aria-pressed", "false");
+        toggleBtn.setAttribute("aria-label", "View map full screen");
+        requestAnimationFrame(function () {
+          map.resize();
+        });
+      }
+
+      toggleBtn.addEventListener("click", function () {
+        if (mapWrap.classList.contains("is-fullscreen")) {
+          closeFullscreen();
+          toggleBtn.focus();
+        } else {
+          openFullscreen();
+        }
+      });
+
+      // Escape closes; Tab is trapped within the wrap's own focusable
+      // elements (the toggle/close button plus MapLibre's own nav/
+      // attribution controls) while open — only intercepts Tab, so a
+      // screen reader's own virtual-cursor/quick-nav browsing (which
+      // doesn't use Tab) is never trapped, satisfying this phase's
+      // "doesn't trap a screen-reader user who can't find/use Escape"
+      // requirement.
+      document.addEventListener("keydown", function (e) {
+        if (!mapWrap.classList.contains("is-fullscreen")) return;
+
+        if (e.key === "Escape") {
+          closeFullscreen();
+          toggleBtn.focus();
+          return;
+        }
+
+        if (e.key === "Tab") {
+          const focusable = getFocusable(mapWrap);
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      });
+    }
   }());
 </script>
 {% endif %}

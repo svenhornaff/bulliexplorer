@@ -296,38 +296,95 @@ the base style, so it comes along for free with no extra wiring.
 
 **Scope**
 
-- [ ] Expand icon overlaid on the map's corner (existing pattern:
-  MapLibre's built-in `NavigationControl`-adjacent custom control, or a
-  simple absolutely-positioned button — match whatever's visually
-  consistent with the site's existing icon language from
-  `ui_ux_refresh.md`'s design tokens).
-- [ ] Clicking it moves the **same** MapLibre instance into a
-  fixed-position, full-viewport overlay — critically, do not
-  re-initialize a second map instance (wasteful, and risks the two
-  instances drifting out of sync). Resize the existing container and
-  call `map.resize()` — MapLibre's documented method for this exact
-  case.
-- [ ] Escape key and a visible close button both dismiss it, returning
-  the map to its inline size (again via `map.resize()`, not
-  re-creation).
-- [ ] Focus trap while open, `aria-modal="true"` — matches the WCAG 2.2
-  AA target already committed to project-wide.
+- [x] Expand icon overlaid on the map's corner — a simple
+  absolutely-positioned button (top-left, clear of MapLibre's own
+  `NavigationControl`/`AttributionControl`/`ScaleControl`, which occupy
+  the other three corners). Matches the existing `.theme-toggle` button
+  chrome exactly (`--color-border`/`--color-surface`/`--color-text`
+  tokens, same border/radius pattern), and the existing icon macro
+  convention in `partials/icons.html` (hand-authored 24x24 stroke SVGs,
+  `icon_expand`/`icon_collapse`).
+- [x] Clicking it toggles a `position: fixed` class on the wrapper and
+  calls `map.resize()` — the **same** MapLibre instance the whole time,
+  never re-initialized.
+- [x] Escape key and the same visible toggle button (relabeled/re-iconed
+  via `aria-pressed`) both dismiss it, again via `map.resize()`.
+- [x] Focus trap (Tab-only, cycling the wrap's own focusable elements)
+  while open, plus `role="dialog"`/`aria-modal="true"` set via JS only
+  while the overlay is actually active.
 
 **Done when**
 
-- Expanding and collapsing preserves the current pan/zoom/route-fit
-  state exactly — no jump or reset.
-- Keyboard-only: Tab cycles only within the modal while open, Escape
-  closes it, focus returns to the expand button on close (not lost to
-  `<body>`).
-- Screen-reader pass: modal is announced on open, dismissible, and
-  doesn't trap a screen-reader user who can't find/use Escape.
+- [x] Expanding and collapsing preserves pan/zoom/route-fit exactly —
+  the SAME map instance is never torn down or re-created, only
+  `resize()`d, so there is no state to lose in the first place. Verified
+  structurally (single `map` instance referenced throughout, `resize()`
+  is the only method called on toggle) and via the same real-rendered-
+  output check used for every prior phase — not yet eyeballed in an
+  actual browser.
+- [ ] Keyboard-only pass — **needs a real browser**, not verified here.
+  Implemented: Tab is trapped to the wrap's focusable elements (toggle
+  button + MapLibre's own nav/attribution controls) while open, Escape
+  closes and returns focus to the toggle button explicitly (`.focus()`
+  call, not left to browser default).
+- [ ] Screen-reader pass — **needs a real browser/AT, not verified
+  here.** Implemented: `role="dialog"`/`aria-modal="true"`/`aria-label`
+  are set only while active (not static markup, so nothing is
+  misannounced before the modal opens); the Tab-trap intentionally only
+  intercepts the Tab key, never arrow keys, so a screen reader's own
+  virtual-cursor/quick-nav browsing can still reach and activate the
+  close button even if a user can't or doesn't use Escape — directly
+  satisfying this criterion's "doesn't trap a screen-reader user" wording.
 
 **Testing**
 
-- Manual keyboard-only and screen-reader passes, per the same standard
-  already used for Phase 5 of `ui_ux_refresh.md` — no automated
-  equivalent for this class of interaction.
+- Two new integration tests in `test_post_map_integration.py`
+  confirming the toggle button, its wrapping element, and the required
+  ARIA attributes (`aria-pressed="false"`, `aria-controls="post-map"`)
+  render, and that the toggle button precedes `#post-map` in the DOM
+  (so the focus trap's first-element ordering actually lands on the
+  close control, not somewhere inside the map).
+- Real-rendered-output check, same method used every prior phase: the
+  actual production HTML for `dream-of-north` (Jinja placeholders
+  already substituted with real GeoJSON, not a synthetic approximation)
+  extracts to syntactically valid JavaScript via `node --check`, with
+  `openFullscreen`/`closeFullscreen`/`getFocusable` and the toggle's DOM
+  id each present exactly once.
+- Manual keyboard-only and screen-reader passes still needed — no
+  automated equivalent for this class of interaction, per this phase's
+  own original plan.
+
+**Left over**
+
+- The two manual passes above (keyboard-only, screen reader) —
+  genuinely need a human at a real browser/AT; not something verifiable
+  from this session. Everything checkable without one (state
+  preservation, ARIA wiring, focus-trap logic, DOM ordering) was
+  checked.
+
+**Summary**
+
+Added a full-screen toggle to the existing map (not a second modal/map
+instance) via `#map-wrap`/`#map-fullscreen-toggle` in
+`partials/route_stats.html`, two new icon macros
+(`icon_expand`/`icon_collapse`), and a `position: fixed` CSS toggle plus
+`map.resize()` call in `post.html`'s existing MapLibre script. A
+keydown listener traps Tab within the wrap's focusable elements and
+dismisses on Escape, restoring focus to the toggle button either way.
+Also found and removed an unrelated pre-existing dead/buggy helper
+(`_make_app` in `test_post_map_integration.py`, never called, with a
+genuine `tiles_url = tiles_url` self-reference bug) while touching that
+file.
+
+**Recommended next steps**
+
+Before Phase 3/4 work, the two left-over manual passes above should get
+a real look — quick (open a post with a route, click the expand button,
+try Tab/Shift+Tab and Escape, then a VoiceOver/NVDA pass). Nothing found
+in this phase changes Phase 3's already-closed fork or Phase 4's plan;
+Phase 4's own map-rendering pieces (if any use the map at all) would
+inherit this toggle for free, same reasoning as Phase 1's carry-forward
+note.
 
 ### Phase 3 — Surface-type visualization: fork on Phase 0's finding
 

@@ -111,3 +111,35 @@ macro accepts an optional `cls` for sizing/spacing hooks. #}
         <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" />
     </svg>
 {% endmacro %}
+{% macro icon_expand(cls="icon") %}
+    <svg class="{{ cls }}"
+         viewBox="0 0 24 24"
+         fill="none"
+         stroke="currentColor"
+         stroke-width="2"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         aria-hidden="true"
+         focusable="false">
+        <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+        <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+        <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+        <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+    </svg>
+{% endmacro %}
+{% macro icon_collapse(cls="icon") %}
+    <svg class="{{ cls }}"
+         viewBox="0 0 24 24"
+         fill="none"
+         stroke="currentColor"
+         stroke-width="2"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         aria-hidden="true"
+         focusable="false">
+        <path d="M9 3v4a1 1 0 0 1-1 1H4" />
+        <path d="M15 3v4a1 1 0 0 1 1 1h4" />
+        <path d="M4 15h4a1 1 0 0 1 1 1v4" />
+        <path d="M20 15h-4a1 1 0 0 1-1 1v4" />
+    </svg>
+{% endmacro %}

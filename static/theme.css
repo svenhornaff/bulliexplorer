@@ -632,6 +632,64 @@ article tbody tr:last-child td {
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
 }
 
+.map-wrap {
+  position: relative;
+}
+
+.map-toggle-btn {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+.map-toggle-btn .icon-collapse {
+  display: none;
+}
+
+.map-toggle-btn[aria-pressed="true"] .icon-expand {
+  display: none;
+}
+
+.map-toggle-btn[aria-pressed="true"] .icon-collapse {
+  display: inline-flex;
+}
+
+.map-wrap.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--color-bg);
+}
+
+.map-wrap.is-fullscreen .map-toggle-btn {
+  top: 1rem;
+  left: 1rem;
+}
+
+.map-wrap.is-fullscreen #post-map {
+  height: 100%;
+  border-radius: 0;
+  margin-bottom: 0;
+  box-shadow: none;
+}
+
+body.map-fullscreen-active {
+  overflow: hidden;
+}
+
 /* ── Body-block content (Phase 4, §5.3): gallery, callout ────────────── */
 .post-gallery {
   display: grid;
