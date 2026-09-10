@@ -111,6 +111,58 @@ Vendor JS loaded last — only on posts that actually render a map. #}
       return flavor === "dark" ? "#f0954a" : "#b85c00";
     }
 
+    // Cycling-aware basemap layers (gis_cycling_upgrade.md Phase 1).
+    // Filtered on the "roads" source-layer's `kind`/`kind_detail` fields
+    // (confirmed present via direct tile inspection in Phase 0 — `kind`
+    // only has 5 broad buckets; the real cycleway/path/track/footway
+    // distinction lives on `kind_detail`, the OSM highway=* value).
+    // Two layers, CyclOSM-inspired: a solid, saturated line for dedicated
+    // cycleways, a dashed muted line for path/track (likely-unpaved,
+    // shared-use). Deliberately excludes footway/sidewalk/steps/
+    // pedestrian, which also live under kind_detail's kind="path" bucket
+    // but aren't cycling infrastructure.
+    // Appended to (not replacing) basemaps.layers()'s own array, so they
+    // draw on top of the base road styling but below the route line and
+    // POI markers, which are added after "load", later in paint order.
+    function cyclingLayers(flavor) {
+      var cycleway = flavor === "dark" ? "#5b9bff" : "#0a5fd6";
+      var unpaved  = flavor === "dark" ? "#c9a876" : "#8a6d3b";
+      return [
+        {
+          id: "cycling-unpaved-likely",
+          type: "line",
+          source: "protomaps",
+          "source-layer": "roads",
+          minzoom: 11,
+          filter: [
+            "all",
+            ["==", ["get", "kind"], "path"],
+            ["in", ["get", "kind_detail"], ["literal", ["path", "track"]]],
+          ],
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: {
+            "line-color": unpaved,
+            "line-width": 1.2,
+            "line-dasharray": [2, 1.5],
+          },
+        },
+        {
+          id: "cycling-cycleway",
+          type: "line",
+          source: "protomaps",
+          "source-layer": "roads",
+          minzoom: 11,
+          filter: [
+            "all",
+            ["==", ["get", "kind"], "path"],
+            ["==", ["get", "kind_detail"], "cycleway"],
+          ],
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: { "line-color": cycleway, "line-width": 1.5 },
+        },
+      ];
+    }
+
     const flavor = currentFlavor();
     const ROUTE_LINE_COLOR = routeLineColor(flavor);
 
@@ -130,7 +182,9 @@ Vendor JS loaded last — only on posts that actually render a map. #}
               '<a href="https://openstreetmap.org">OpenStreetMap</a>',
           },
         },
-        layers: basemaps.layers("protomaps", basemaps.namedFlavor(flavor), { lang: "de" }),
+        layers: basemaps
+          .layers("protomaps", basemaps.namedFlavor(flavor), { lang: "de" })
+          .concat(cyclingLayers(flavor)),
       },
       // Rough centre — overridden once the map loads and fits to the route.
       center: [8.1, 48.1],
@@ -227,7 +281,8 @@ Vendor JS loaded last — only on posts that actually render a map. #}
                 '<a href="https://openstreetmap.org">OpenStreetMap</a>',
             },
           },
-          layers: basemaps.layers("protomaps", basemaps.namedFlavor(nextFlavor), { lang: "de" }),
+          layers: basemaps.layers("protomaps", basemaps.namedFlavor(nextFlavor), { lang: "de" })
+            .concat(cyclingLayers(nextFlavor)),
         },
         {
           // transformStyle carries the route source/layers over from the

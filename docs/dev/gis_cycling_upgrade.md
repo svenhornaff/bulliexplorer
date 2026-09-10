@@ -192,7 +192,7 @@ accidentally styling pedestrian-only infrastructure the same way.
 
 **Scope**
 
-- [ ] New `cyclingLayers(flavor)` function (co-located with
+- [x] New `cyclingLayers(flavor)` function (co-located with
   `routeLineColor(flavor)` in `post.html`'s existing script, same
   pattern) — returns MapLibre layer definitions filtered on
   `kind_detail == 'cycleway'` **(corrected from `kind == 'cycleway'` by
@@ -205,32 +205,95 @@ accidentally styling pedestrian-only infrastructure the same way.
   against the base road palette, dashed/dotted variant for
   `kind_detail == 'path'`/`'track'` to distinguish unpaved-likely
   routes from dedicated cycleways).
-- [ ] Both light and dark flavor variants — reuse the existing
+- [x] Both light and dark flavor variants — reuse the existing
   flavor-aware pattern already established for the route line color,
   don't hardcode one theme.
-- [ ] Phase 0 confirmed `surface` is NOT present — skip the
+- [x] Phase 0 confirmed `surface` is NOT present — skip the
   paved/unpaved sub-item entirely, not just this phase's version of it;
   see Phase 3's fork below, now resolved to "stop, formally."
-- [ ] Appended to the existing `basemaps.layers()` array, not replacing
-  it — confirmed additive per the technical foundation above.
+- [x] Appended to the existing `basemaps.layers()` array, not replacing
+  it — confirmed additive per the technical foundation above (also
+  wired into the theme-swap `setStyle()` rebuild, which regenerates the
+  full style — `cyclingLayers(nextFlavor)` is called fresh there too,
+  so it doesn't need transformStyle carry-over the way the dynamically
+  added route/POI layers do).
 
 **Done when**
 
-- Cycleways/paths/tracks render visibly distinct from regular roads on
-  both light and dark flavors, verified on a real area with known
-  cycling infrastructure (not just the route line itself — the
-  *surrounding* map context).
-- No regression to existing route-line/POI-marker rendering — the new
-  layers are additive, verified by comparing before/after screenshots
-  of an existing post.
+- [ ] Cycleways/paths/tracks render visibly distinct from regular roads
+  on both light and dark flavors, verified on a real area with known
+  cycling infrastructure — **needs a real browser, not verified here.**
+  What *was* verified: the real, fully-rendered page (not a synthetic
+  approximation — `dream-of-north` served locally, Jinja placeholders
+  already substituted with real GeoJSON) extracts to syntactically
+  valid JavaScript (`node --check`), `cyclingLayers` is defined exactly
+  once and `.concat()`-appended in both the initial style and the
+  theme-swap rebuild, and both new layers correctly reference the
+  `"roads"` source-layer and filter on `kind_detail` (Phase 0's
+  correction), confirmed present twice each in the rendered output.
+- [ ] No regression to existing route-line/POI-marker rendering —
+  **needs the same real-browser check.** Structurally verified instead:
+  the new layers are purely additive (`.concat()`, not replacing
+  `basemaps.layers()`'s array), added to the *base style* which loads
+  before `map.on("load")` adds the route/POI layers — so they sit
+  underneath in paint order and can't visually occlude the route line
+  or markers.
 
 **Testing**
 
-- No meaningful automated test for visual rendering (same reasoning
-  established in `media_storage_r2.md`'s Phase 4 and `gis_refactor.md`'s
-  Phase 2 — this is client-side WebGL rendering, not testable without a
-  real browser). Manual visual verification, documented with
-  screenshots in the Summary.
+- Went further than this phase's own plan anticipated: added two
+  automated tests in `tests/unit/test_templates.py`
+  (`test_post_with_route_and_tiles_includes_cycling_layers`,
+  `test_post_with_route_and_tiles_cycling_layers_use_kind_detail`),
+  following the existing string-presence-on-rendered-HTML pattern
+  already used for `ROUTE_GEOJSON`/`POIS_GEOJSON` in that file. These
+  catch a regression in the *code being present and structurally
+  correct* (right function, right filter keys, right layer count) —
+  they cannot and do not replace the still-needed manual visual check
+  above, which is genuinely browser-only, per this phase's original
+  reasoning.
+
+**Left over**
+
+- Both "Done when" items — visual confirmation that cycleways/paths/
+  tracks render distinctly on a real area with known cycling
+  infrastructure, on both light and dark flavors, and that nothing
+  regressed for the route line/POI markers. Genuinely needs a real
+  browser; not something verifiable from this session. Structural
+  correctness (right code, right filters, right append order, valid
+  JS on a real rendered page) was verified instead — see Testing above.
+
+**Summary**
+
+Added `cyclingLayers(flavor)` to `post.html`'s existing MapLibre script,
+co-located with `routeLineColor(flavor)` in the same pattern. Two new
+layers on the `"roads"` source-layer: a solid, saturated line for
+`kind_detail == "cycleway"`, a dashed muted line for `kind_detail` in
+`["path", "track"]` (both gated on `kind == "path"` first, since that's
+the only `kind` bucket those `kind_detail` values fall under) — using
+the corrected property from Phase 0's finding, not the doc's original
+`kind`-only assumption. Both flavor-aware (separate light/dark color
+pairs, chosen to sit distinctly apart from the existing route-line
+accent color so the two don't get confused). Appended via `.concat()`
+in both places the base style gets built — initial load and the
+theme-swap `setStyle()` rebuild — not replacing `basemaps.layers()`'s
+own array. Added two automated tests beyond what this phase's plan
+called for, verifying the code is present and structurally correct on a
+real rendered page; also verified directly against real production
+HTML (not just tests) that the rendered `<script>` block is syntactically
+valid JavaScript.
+
+**Recommended next steps**
+
+Before Phase 2 (the full-screen modal) starts, the two left-over visual
+checks above should get a real look — they're quick (open a post with a
+route in a cycling-dense area, e.g. by temporarily pointing `TILES_URL`
+or checking `dream-of-north`'s Scandinavian stretch, and toggle light/
+dark) and Phase 2 will be easier to verify visually once it's confirmed
+the base map already looks right underneath the modal. Nothing found in
+this phase should change Phase 2's plan — the modal wraps the *existing*
+map instance via `map.resize()`, and `cyclingLayers()` is part of the
+base style now, so it comes along for free with no extra wiring needed.
 
 ### Phase 2 — Full-screen map modal
 

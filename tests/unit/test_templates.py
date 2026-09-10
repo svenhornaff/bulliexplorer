@@ -561,3 +561,30 @@ async def test_post_with_route_and_tiles_inlines_poi_geojson(client_with_route_a
     assert "POIS_GEOJSON" in resp.text
     assert "FeatureCollection" in resp.text
     assert "Wild Campsite" in resp.text
+
+
+@pytest.mark.unit
+async def test_post_with_route_and_tiles_includes_cycling_layers(client_with_route_and_tiles):
+    """cyclingLayers() (gis_cycling_upgrade.md Phase 1) is defined and
+    appended to both the initial style and the theme-swap setStyle call.
+    """
+    resp = await client_with_route_and_tiles.get("/posts/test-post")
+    assert "function cyclingLayers(flavor)" in resp.text
+    # Appended via .concat(...) in both places the base style is built —
+    # initial load and the theme-change setStyle rebuild — not replacing
+    # basemaps.layers()'s own array.
+    assert resp.text.count(".concat(cyclingLayers(") == 2
+
+
+@pytest.mark.unit
+async def test_post_with_route_and_tiles_cycling_layers_use_kind_detail(client_with_route_and_tiles):
+    """Filters on kind_detail (the OSM highway=* value), not kind itself —
+    Phase 0's tile-inspection finding: kind only has 5 broad buckets, the
+    real cycleway/path/track distinction lives on kind_detail.
+    """
+    resp = await client_with_route_and_tiles.get("/posts/test-post")
+    assert '"kind_detail"' in resp.text
+    assert '"cycleway"' in resp.text
+    # Both cycling layers read from the "roads" source-layer confirmed
+    # present via direct tile inspection in Phase 0.
+    assert resp.text.count('"source-layer": "roads"') >= 2
