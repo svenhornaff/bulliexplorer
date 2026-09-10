@@ -93,6 +93,20 @@ def create_app() -> FastAPI:
     # --- Static files & templates -------------------------------------------
     app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
+    # StaticFiles doesn't set Cache-Control on its own — only ETag/
+    # Last-Modified, so browsers fall back to heuristic caching (which can
+    # hold a stale CSS/JS file indefinitely with no revalidation, notably
+    # in Safari). `no-cache` forces a conditional GET on every request;
+    # ETag/Last-Modified are already there, so an unchanged file gets a
+    # cheap 304, and a changed one (right after a deploy) is never served
+    # stale.
+    @app.middleware("http")
+    async def _static_cache_headers(request, call_next):  # noqa: ANN001, ANN202 — Starlette's own untyped middleware signature
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     # Store templates on app.state so routes can access them
     app.state.templates = Jinja2Templates(directory=BASE_DIR / "templates")
 

@@ -566,21 +566,28 @@ article pre code {
 
 article table {
   width: 100%;
-  margin: 0 0 var(--space-3);
+  margin: var(--space-4) 0;
   border-collapse: collapse;
   font-size: 0.95em;
+  line-height: 1.5;
 }
 
 article th,
 article td {
-  padding: 0.5em 0.75em;
-  border: 1px solid var(--color-border);
+  padding: 0.75em 1em;
+  border-bottom: 1px solid var(--color-border);
   text-align: left;
+  vertical-align: top;
 }
 
 article th {
   background: var(--color-surface-2);
   font-weight: 600;
+  border-bottom: 2px solid var(--color-accent);
+}
+
+article tbody tr:last-child td {
+  border-bottom: none;
 }
 
 @media (max-width: 640px) {
