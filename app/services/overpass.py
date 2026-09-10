@@ -135,7 +135,20 @@ async def query_nearby_amenities(
             resp.raise_for_status()
             payload = resp.json()
         except Exception as exc:  # noqa: BLE001 — any network/HTTP/parse failure is non-fatal
-            logger.warning("Overpass request failed for bbox (%s,%s,%s,%s): %s", south, west, north, east, exc)
+            # Some httpx exceptions (e.g. a bare ReadTimeout/ConnectError from
+            # an underlying anyio timeout) stringify to "" — %s alone then
+            # logs an empty, undiagnosable message. Always include the
+            # exception's own type name so a future failure is actually
+            # diagnosable from logs alone, without ad-hoc reproduction.
+            logger.warning(
+                "Overpass request failed for bbox (%s,%s,%s,%s): %s: %s",
+                south,
+                west,
+                north,
+                east,
+                type(exc).__name__,
+                exc,
+            )
             return None
 
         # A 200 response can still carry a "remark" describing a timeout
