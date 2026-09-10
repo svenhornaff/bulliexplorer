@@ -27,7 +27,7 @@ There are hikes, and then there are days in the mountains that turn into stories
 
 Since this is a proper loop, we **start and finish at the same spot**, making logistics nice and easy.
 
-📍 **Start & Finish:** [Google Maps](https://maps.app.goo.gl/VbNfyS8r6tp5NE8J9) **Camping Hochschwarzwald** - Versteegen
+📍 **Start & Finish:** [Google Maps](https://maps.app.goo.gl/VbNfyS8r6tp5NE8J9) **Camping Hochschwarzwald**
 
 According to our planned GPX route:
 
