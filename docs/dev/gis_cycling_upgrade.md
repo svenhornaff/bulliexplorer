@@ -37,6 +37,23 @@ over generic tourism POIs). Used below as a *design* reference, not a
 drop-in — its actively-maintained version is a raster tile server, and
 its MapLibre vector-style port is explicitly marked unmaintained upstream.
 
+**Third reference, checked directly**: [VeloPlanner](https://veloplanner.com/) —
+a cycling route *planner* (not a documentation tool like this project),
+with live overlays for campsites/hotels/attractions, surfaces, and road
+classes along a route. Confirmed against their own site: **these overlays
+are OpenStreetMap-derived, not a proprietary dataset** ("Our routing uses
+OpenStreetMap data... Surface data is generally very accurate on major
+cycling routes"). Same source this project's basemap already uses — the
+gap isn't data access, it's that nothing here queries or renders it yet.
+
+**One architectural distinction worth being deliberate about before
+Phase 4**: VeloPlanner is built to help someone find services along a
+route they're *planning* — a live tool. BulliExplorer documents routes
+already *ridden* — a published blog post. That argues against a live
+third-party API call on every page load (new runtime dependency, new
+failure mode, slower page loads) and for the same pattern already used
+for geocoding: **resolve once, at sync time, store the result.**
+
 ---
 
 ## Technical foundation — checked against the actual library and tile schema in use
@@ -83,49 +100,122 @@ on the answer.
 ### Phase 0 — Discovery: what's actually in the tiles
 
 **Scope**
-- [ ] Using a tile inspector (e.g. PMTiles' own viewer at pmtiles.io, or
-  MapLibre's own feature-query on a loaded layer), inspect real
-  `kind=cycleway`/`kind=path`/`kind=track` features from the current
-  Europe extract, on a handful of real, known-locations (e.g. any
-  street known to have a marked cycleway).
-- [ ] Record which properties are actually present per feature —
-  specifically checking for `surface`, `smoothness`, `cycleway` (lane
-  type), and `bicycle` (access) tags, not just `kind`.
+
+- [x] Inspected real tile data directly from the Europe extract (not a
+  tile-inspector UI — extracted raw tiles with `pmtiles tile`, gunzip'd
+  them, and decoded the MVT protobuf with `mapbox-vector-tile` for exact
+  per-feature property inspection) at z14 across five real locations:
+  Amsterdam and Copenhagen (globally cycleway-dense, strongest test of
+  best-case tagging), Freiburg im Breisgau (this project's own home
+  region), the Kinzig Valley (already-documented gravel/track terrain,
+  a rural proxy for surface tagging), and a rural point near Nordkapp
+  (sanity check — came back with no `roads` layer at all, as expected
+  for that empty an area).
+- [x] Recorded which properties are actually present per feature —
+  checked for `surface`, `smoothness`, `cycleway`, `bicycle`, and
+  everything else present on the `roads` layer, not just `kind`.
 
 **Done when**
-- A concrete, written answer exists to: "does `surface` survive into
-  the tiles, yes or no" — this is the fork point for Phase 3.
-- The exact `kind` values actually present in the extract are confirmed
-  (docs list what's *possible*; this confirms what's *actually there*
-  for this specific Europe extract).
+
+- [x] Concrete, written answer: **`surface` does NOT survive into the
+  tiles — confirmed absent.** Zero occurrences of `surface`,
+  `smoothness`, `cycleway` (as a lane-type tag), or `bicycle` across all
+  five tiles and ~1,100 combined road features, including the rural
+  Kinzig Valley sample (7 `track`-classified features there specifically,
+  the terrain type most likely to carry a surface tag if any did).
+  **This resolves Phase 3's fork toward "stop here, formally"** — real
+  surface-synced visualization needs map-matching, not available from
+  this tile data.
+- [x] Exact `kind` values confirmed present, **and a correction to this
+  doc's research section**: `kind` itself only has five broad buckets
+  — `major_road`, `minor_road`, `path`, `rail`, `other` — not the
+  `cycleway`/`path`/`track`/`bridleway`/`sidewalk` distinction the
+  research section expected from Protomaps' docs. That finer
+  distinction lives on a **different property**, `kind_detail`, which
+  carries the OSM `highway=*` value directly. Filtered under
+  `kind == 'path'`, real observed `kind_detail` values include
+  `cycleway`, `footway`, `path`, `track`, `sidewalk`, `steps`,
+  `pedestrian`, `crossing`, `driveway`, `pier`, `corridor`, `platform`
+  — Amsterdam alone had 61 `cycleway`- and 5 `path`-classified features
+  in a single z14 tile, real usable density for Phase 1's styling.
+  **Phase 1 should filter on `kind_detail`, not `kind`**, when it's
+  picked up — this doc's Phase 1 scope text (written before this
+  finding) still says `kind`; corrected in that phase's own scope below
+  since Phase 1 hasn't started yet, no dangling inconsistency left.
 
 **Testing**
-- No automated test — this is a one-time data-discovery step, output is
-  a short written finding in this doc's Phase 0 summary, not code.
+
+- No automated test, per this phase's own plan — this finding is the
+  test. Verified concretely rather than assumed: real archive, real
+  decoded protobuf bytes, five real locations chosen specifically to
+  stress-test the best case (cycling capitals) and the terrain most
+  likely to carry a surface tag (rural gravel), not just the easiest
+  case to confirm.
+
+**Left over**
+
+None.
+
+**Summary**
+
+Answered both of Phase 0's open questions with real, decoded tile data
+rather than assumption: extracted raw MVT tiles from the Europe extract
+with `pmtiles tile`, gunzip'd them, and decoded the protobuf with
+`mapbox-vector-tile` across five real locations — two cycling capitals
+(Amsterdam, Copenhagen) as the best-case test, this project's own
+Freiburg/Black Forest region, the already-documented gravel Kinzig
+Valley as a rural surface-tag test, and a rural Nordkapp point as a
+sanity check. Found `surface`/`smoothness`/`bicycle` genuinely absent
+(zero occurrences across ~1,100 road features) — resolving Phase 3's
+fork to "stop, formally." Also found and corrected a real inaccuracy in
+this doc's own research section: the fine cycleway/path/track/footway
+distinction lives on `kind_detail` (the OSM `highway=*` value), not on
+`kind` itself as assumed — `kind` only has five broad buckets. Corrected
+Phase 1's scope text to filter on `kind_detail` before Phase 1 starts,
+so it doesn't inherit a known-wrong assumption.
+
+**Recommended next steps**
+
+Phase 1 can proceed as scoped, with the `kind_detail` correction already
+folded in — no additional discovery needed before starting it. Phase 3
+is closed per the fork resolution above; if real surface-synced
+elevation profiles are ever picked up, it needs its own concept doc
+evaluating map-matching engines (OSRM/Valhalla-style), not a reopening
+of this phase. One thing worth flagging for whoever scopes Phase 1's
+actual implementation: `kind_detail` values observed here also include
+`footway`/`sidewalk`/`steps`/`pedestrian` under `kind == 'path'` —
+Phase 1's dashed/dotted "likely unpaved" treatment should make sure it's
+matching cycling-relevant values (`cycleway`, `path`, `track`) and not
+accidentally styling pedestrian-only infrastructure the same way.
 
 ### Phase 1 — Cycling-aware basemap style layers
 
 **Scope**
+
 - [ ] New `cyclingLayers(flavor)` function (co-located with
   `routeLineColor(flavor)` in `post.html`'s existing script, same
   pattern) — returns MapLibre layer definitions filtered on
-  `kind == 'cycleway'`, styled distinctly (CyclOSM-inspired: a
-  saturated, high-contrast color against the base road palette,
-  dashed/dotted variant for `kind == 'path'`/`'track'` to distinguish
-  unpaved-likely routes from dedicated cycleways).
+  `kind_detail == 'cycleway'` **(corrected from `kind == 'cycleway'` by
+  Phase 0's finding — `kind` only has five broad buckets;
+  `kind_detail` carries the OSM `highway=*` value and is where the
+  real cycleway/path/track/footway distinction actually lives, filter
+  additionally on `kind == 'path'` first since that's the only `kind`
+  bucket `kind_detail` in ["cycleway", "path", "track"] falls under)**,
+  styled distinctly (CyclOSM-inspired: a saturated, high-contrast color
+  against the base road palette, dashed/dotted variant for
+  `kind_detail == 'path'`/`'track'` to distinguish unpaved-likely
+  routes from dedicated cycleways).
 - [ ] Both light and dark flavor variants — reuse the existing
   flavor-aware pattern already established for the route line color,
   don't hardcode one theme.
-- [ ] If Phase 0 confirms `surface` is present: add a subtle
-  paved/unpaved visual distinction to these same layers (e.g. a
-  slightly different dash pattern), scoped to what's honestly
-  achievable from tile data alone — **not** the full route-level
-  surface-sync feature, that's Phase 3's fork, not this phase's scope
-  creep.
+- [ ] Phase 0 confirmed `surface` is NOT present — skip the
+  paved/unpaved sub-item entirely, not just this phase's version of it;
+  see Phase 3's fork below, now resolved to "stop, formally."
 - [ ] Appended to the existing `basemaps.layers()` array, not replacing
   it — confirmed additive per the technical foundation above.
 
 **Done when**
+
 - Cycleways/paths/tracks render visibly distinct from regular roads on
   both light and dark flavors, verified on a real area with known
   cycling infrastructure (not just the route line itself — the
@@ -135,6 +225,7 @@ on the answer.
   of an existing post.
 
 **Testing**
+
 - No meaningful automated test for visual rendering (same reasoning
   established in `media_storage_r2.md`'s Phase 4 and `gis_refactor.md`'s
   Phase 2 — this is client-side WebGL rendering, not testable without a
@@ -144,6 +235,7 @@ on the answer.
 ### Phase 2 — Full-screen map modal
 
 **Scope**
+
 - [ ] Expand icon overlaid on the map's corner (existing pattern:
   MapLibre's built-in `NavigationControl`-adjacent custom control, or a
   simple absolutely-positioned button — match whatever's visually
@@ -162,6 +254,7 @@ on the answer.
   AA target already committed to project-wide.
 
 **Done when**
+
 - Expanding and collapsing preserves the current pan/zoom/route-fit
   state exactly — no jump or reset.
 - Keyboard-only: Tab cycles only within the modal while open, Escape
@@ -171,14 +264,23 @@ on the answer.
   doesn't trap a screen-reader user who can't find/use Escape.
 
 **Testing**
+
 - Manual keyboard-only and screen-reader passes, per the same standard
   already used for Phase 5 of `ui_ux_refresh.md` — no automated
   equivalent for this class of interaction.
 
 ### Phase 3 — Surface-type visualization: fork on Phase 0's finding
 
-**If Phase 0 found `surface` tags are NOT reliably present in the
-tiles** (the likely outcome, given Protomaps' own "some keys may only be
+**Resolved by Phase 0: `surface` tags are confirmed absent** — zero
+occurrences across five real locations (including a rural gravel/track
+sample specifically chosen to give this the best chance of a hit) and
+~1,100 combined road features. **This fork stops here, formally**, per
+the plan already written below for this outcome. Not revisited or
+second-guessed in this phase — Phase 0's finding is concrete enough to
+act on directly, not just "likely" as originally framed.
+
+~~**If Phase 0 found `surface` tags are NOT reliably present in the
+tiles**~~ (the likely outcome, given Protomaps' own "some keys may only be
 present in a subset of features" caveat): **stop here, formally.** Real
 surface-synced elevation profiles need map-matching against a properly
 surface-tagged road network — a genuine geospatial project (evaluate
@@ -187,11 +289,13 @@ self-hosted OSRM/Valhalla-style engine), not a styling task. Document
 this as its own future concept doc if it's ever picked up — don't let it
 quietly become scope inside this one.
 
-**If Phase 0 found `surface` tags ARE present for a meaningful share of
+~~**If Phase 0 found `surface` tags ARE present for a meaningful share of
 features**: a narrower, honestly-scoped version becomes feasible without
-map-matching:
+map-matching~~ — not this project's outcome; kept below only as the
+record of what the other branch would have looked like.
 
-**Scope** (only if the fork above resolves this direction)
+**Scope** (not applicable — Phase 0 resolved the fork the other way)
+
 - [ ] Extend `cyclingLayers()` (Phase 1) to color-code paths/cycleways
   by `surface` value where present (paved vs. unpaved distinction, not
   a full gravel/dirt/singletrack gradient — that level of nuance likely
@@ -207,7 +311,66 @@ sub-scope is actually picked up — not written speculatively here.
 
 ---
 
-## Explicitly deferred, regardless of Phase 3's fork
+### Phase 4 — Auto-discovered nearby amenities (campsites, shelters, water, fuel)
+
+**Scope**
+
+- [ ] Add `shelter` to the `category` select options in `config.yml`
+  (mountain huts / bike shelters — distinct from `campsite`, a real gap
+  for touring content specifically). Zero migration needed —
+  `category` is a plain string column, not a DB-level enum, confirmed
+  in `app/models/point_of_interest.py`.
+- [ ] New model, **`NearbyAmenity`**, distinct from `PointOfInterest`:
+  the existing model is *authored* content (you chose it, wrote a note,
+  it's editorial). This is *derived* data (an algorithm found it nearby)
+  — conflating the two would mean a reader can no longer tell "the
+  author specifically recommends this" from "this happens to exist
+  within 2km." Tied to `route_id`, not `post_id` directly (transitively
+  linked via the route).
+- [ ] Overpass API query in `geo_sync.py`'s route-sync path, run once
+  when a route is first synced (not on every page load — matches the
+  "resolve once, store it" pattern from the research section). Query a
+  buffer around the route's bounding box for `tourism=camp_site`,
+  `tourism=wilderness_hut`, `amenity=shelter`, `amenity=drinking_water`,
+  `amenity=fuel`, `shop=bicycle`. **V1 uses a bounding-box + radius
+  buffer, not a precise corridor search along the track** — simpler to
+  implement correctly, a reasonable first cut; a tighter per-point
+  corridor query is a real but separate future refinement, not blocking
+  this phase.
+- [ ] Respect Overpass's usage policy the same way `geo_sync.py` already
+  respects Nominatim's (identify via `User-Agent`, rate-limit, cache —
+  this project already has the discipline for this from the geocoding
+  work, apply the same standard here).
+- [ ] Rendering: auto-discovered amenities get a visually distinct,
+  muted marker style from the author's curated `PointOfInterest`
+  markers — the curated ones stay the primary signal on the map, this
+  is supplementary. Toggle control (e.g. "Show nearby services")
+  defaulting **off**, so the map isn't cluttered by default and the
+  author's actual picks stay the visual focus.
+
+**Done when**
+
+- Syncing a real route (e.g. "Dream of North") populates `NearbyAmenity`
+  rows for at least campsites and fuel stations along its length —
+  verified against a known real-world example (a campsite you know
+  exists near a specific point on the route).
+- Toggling the overlay on/off in the browser shows/hides only the
+  auto-discovered markers, leaving curated POIs untouched either way.
+- Re-syncing the same route doesn't duplicate rows (idempotent, same
+  discipline already established for `post_sync.py`/`geo_sync.py`).
+
+**Testing**
+
+- Unit: Overpass response parsing, mocked — no real network call in
+  tests, same pattern already used for the Nominatim geocoding tests.
+- Unit: idempotency — syncing the same route twice produces the same
+  `NearbyAmenity` row count, not double.
+- Integration: a fixture route with a mocked Overpass response
+  round-trips correctly into the DB with the right categories.
+
+---
+
+## Explicitly deferred, regardless of Phase 3's fork or Phase 4
 
 - **Full route-level surface-synced elevation profile chart** (the
   actual Komoot/RideWithGPS-grade feature) — needs map-matching, a real
@@ -216,10 +379,18 @@ sub-scope is actually picked up — not written speculatively here.
   deferred: not just "a chart is more work than a stats row" (the
   original reasoning) but "the surface-sync version specifically needs
   infrastructure this project doesn't have yet."
-- **CyclOSM-style bike-specific POI icons** (bike shops, repair
-  stations, water points as distinct icons vs. generic markers) — cheap
-  to add later on top of Phase 1's layers, not blocking, not included
-  here to keep this phase's scope contained.
+- **CyclOSM-style bike-specific POI icons** for Phase 1's basemap
+  cycleway layers specifically (distinct from Phase 4's amenity markers,
+  which already get their own icon treatment) — cheap to add later,
+  not blocking either phase.
+- **Precise corridor search** for Phase 4 (along-the-track buffer
+  instead of bounding-box) — real refinement, not needed for a useful
+  v1.
+- **Live/on-demand Overpass queries** (re-querying as a reader pans the
+  map, VeloPlanner-style) — deliberately rejected per the research
+  section's reasoning: this is a documentation tool, not a planner: a
+  live third-party dependency on every map interaction isn't worth it
+  for content that doesn't change once published.
 - **A custom/enriched tileset** (building your own Planetiler-based
   tiles with guaranteed surface tags, rather than relying on what
   Protomaps' general-purpose extract happens to include) — real
