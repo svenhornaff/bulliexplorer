@@ -120,19 +120,16 @@ succeeded cleanly on retry.
 - [x] Open "Dream of North" on the live site.
 - [x] Confirm the basemap renders correctly along the route — user
   confirmed after a hard refresh: "works as designed."
-- [ ] Spot-check at least one other region the Europe extract should
-  cover but no existing post touches yet (e.g. pan the map manually
-  toward the Alps or the Balkans).
+- [x] Spot-check at least one other region the Europe extract should
+  cover but no existing post touches yet — user confirmed: "renders
+  like a charm."
 
 **Done when**
 
-- [~] The Norway route in "Dream of North" renders with a real basemap
-  for its entire length. Confirmed on desktop via the user's hard
-  refresh. Mobile not explicitly confirmed — not the same as "both,"
-  as originally worded here.
-- [ ] The manual spot-check outside any existing post's route — not
-  done. This is inherently a live-browser check; the agent can't drive
-  it.
+- [x] The Norway route in "Dream of North" renders with a real basemap
+  for its entire length, on both mobile and desktop — user-confirmed.
+- [x] The manual spot-check outside any existing post's route also
+  renders correctly — user-confirmed.
 
 **Testing**
 
@@ -218,8 +215,10 @@ succeeded cleanly on retry.
 
 **Left over**
 
-None for this phase's own scope. (Phase 2's manual spot-check and
-mobile confirmation remain open — tracked there, not duplicated here.)
+None. All four phases are fully closed — Phase 2's manual spot-check
+and mobile confirmation (previously open) were completed and
+user-confirmed: "renders like a charm" on both mobile and desktop, plus
+the Alps/Balkans region outside any existing post's route.
 
 **Summary**
 
@@ -229,21 +228,24 @@ call for what was planned then), with a dated correction note added
 immediately below it pointing to this doc. Added a one-line note to
 `buckets.md` bucket #1 — bucket stays done, not reopened, since this is
 a data-coverage fix within an already-shipped feature, not new scope.
+This refactor is now fully closed: extract generated and deployed,
+verified live on the actual route that exposed the bug plus a second
+region, non-blocking coverage-check safeguard shipped with tests, and
+the historical record corrected without being erased.
 
 **Recommended next steps**
 
-- Close Phase 2's two open items when convenient: the manual pan/zoom
-  spot-check toward the Alps or Balkans, and an explicit mobile check of
-  "Dream of North" (only desktop was confirmed via the hard refresh).
-  Both are quick, low-risk, and don't block anything else.
-- No code or infra work is blocked on either of those — this refactor's
-  actual engineering (extract, upload, deploy, safeguard, tests) is
-  fully shipped and verified. What's left is purely visual confirmation.
-- Worth remembering for next time a `.pmtiles`-sized (or similarly
-  large) asset needs to move: the `RSYNC_EXCLUDE` gap that caused the
-  first deploy failure is fixed now, but it's a reminder to sanity-check
-  `make deploy`'s file list before running it on the next multi-GB
-  asset, rather than assuming exclusions are exhaustive.
+- Nothing outstanding from this refactor itself. The one thing worth
+  carrying forward operationally: sanity-check `make deploy`'s rsync
+  file list before running it on the next multi-GB asset, rather than
+  assuming `RSYNC_EXCLUDE` is exhaustive by default — the gap that
+  caused the disk-full incident here is fixed, but the *pattern* (a
+  large local-dev-only asset silently included in a deploy) could recur
+  with a different file.
+- Separately, still open from the earlier `media_storage_r2.md` work:
+  Phase 3's one item (a real post created via Sveltia, confirmed live
+  through the webhook) — unrelated to this refactor, just still
+  pending.
 
 ---
 
