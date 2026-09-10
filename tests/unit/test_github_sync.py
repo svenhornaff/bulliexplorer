@@ -77,6 +77,42 @@ async def test_fetch_writes_post_file(tmp_path):
     # Phase 3) — confirm the client never even requests it.
     requested_urls = [call.args[0] for call in mock_client.get.await_args_list]
     assert not any("static/uploads" in url for url in requested_urls)
+    # No explicit ref passed → defaults to the develop branch name.
+    assert any("ref=develop" in url for url in requested_urls)
+
+
+@pytest.mark.unit
+async def test_fetch_uses_given_ref_not_branch_name(tmp_path):
+    """An explicit ref (e.g. a webhook's commit SHA) is used in the
+    Contents API request instead of the default branch name.
+
+    Regression test: branch-based raw.githubusercontent.com URLs are
+    CDN-cached for a few minutes keyed by URL, so two pushes to the same
+    file in quick succession can have the second fetch served stale
+    content — pinning to the exact commit SHA closes that gap.
+    """
+    listing = _dir_listing(["my-post.md"])
+
+    async def mock_get(url, **kwargs):
+        if "content/posts" in url and "raw.githubusercontent" not in url:
+            return _mock_response(200, listing)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = b"content"
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=mock_get)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("app.services.github_sync.httpx.AsyncClient", return_value=mock_client):
+        await fetch_and_write(tmp_path, github_token="tok", ref="abc123def456")  # noqa: S106
+
+    requested_urls = [call.args[0] for call in mock_client.get.await_args_list]
+    assert any("ref=abc123def456" in url for url in requested_urls)
+    assert not any("ref=develop" in url for url in requested_urls)
 
 
 @pytest.mark.unit

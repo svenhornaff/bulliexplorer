@@ -40,13 +40,14 @@ _SYNC_DIRS: tuple[tuple[str, ...], ...] = (("content/posts", "content/posts"),)
 async def fetch_and_write(
     base_dir: Path,
     github_token: str,
+    ref: str = _BRANCH,
 ) -> dict[str, int]:
     """Fetch repo content from GitHub and write it to the local filesystem.
 
-    Fetches ``content/posts/`` from the ``develop`` branch using the GitHub
-    Contents API, then writes each file into the corresponding
-    volume-mounted directory under ``base_dir``.  Files present locally but
-    deleted from the repo are removed.
+    Fetches ``content/posts/`` using the GitHub Contents API at ``ref``,
+    then writes each file into the corresponding volume-mounted directory
+    under ``base_dir``.  Files present locally but deleted from the repo
+    are removed.
 
     Parameters
     ----------
@@ -55,6 +56,15 @@ async def fetch_and_write(
         anchored under this directory.
     github_token:
         Fine-grained PAT with Contents: Read on the repo.
+    ref:
+        Git ref to fetch at — a commit SHA, branch name, or tag. Defaults
+        to the ``develop`` branch. The webhook handler passes the exact
+        commit SHA from the push payload instead: branch-based
+        ``raw.githubusercontent.com`` URLs are CDN-cached for a few
+        minutes keyed by URL, so two pushes to the same file within that
+        window can have the second fetch served stale content from the
+        first. A commit SHA is content-addressed and immutable, so the
+        CDN can cache it forever without ever going stale.
 
     Returns
     -------
@@ -77,6 +87,7 @@ async def fetch_and_write(
                 repo_dir=repo_dir,
                 local_dir=local_dir,
                 counts=counts,
+                ref=ref,
             )
 
     logger.info(
@@ -92,6 +103,7 @@ async def _sync_dir(
     repo_dir: str,
     local_dir: Path,
     counts: dict[str, int],
+    ref: str = _BRANCH,
 ) -> dict[str, int]:
     """Recursively mirror one GitHub directory into a local directory.
 
@@ -109,10 +121,12 @@ async def _sync_dir(
         Corresponding absolute local path to write into.
     counts:
         Running ``{"fetched": N, "deleted": N}`` counters — mutated in place.
+    ref:
+        Git ref to fetch at — see ``fetch_and_write``'s docstring.
     """
     local_dir.mkdir(parents=True, exist_ok=True)
 
-    url = f"{_GITHUB_API}/repos/{_REPO}/contents/{repo_dir}?ref={_BRANCH}"
+    url = f"{_GITHUB_API}/repos/{_REPO}/contents/{repo_dir}?ref={ref}"
     resp = await client.get(url)
 
     if resp.status_code == 404:
@@ -154,6 +168,7 @@ async def _sync_dir(
             repo_dir=f"{repo_dir}/{subdir_name}",
             local_dir=local_dir / subdir_name,
             counts=counts,
+            ref=ref,
         )
 
     # Remove local files/dirs no longer present in the repo.

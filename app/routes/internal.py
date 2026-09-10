@@ -191,7 +191,12 @@ async def github_webhook(
        with 401 before reading the payload if the signature is wrong.
     2. Parse the JSON payload; ignore any push that is not to ``develop``.
     3. Fetch ``content/posts/`` from the GitHub Contents API using
-       ``GITHUB_TOKEN``.
+       ``GITHUB_TOKEN``, pinned to the push's exact commit SHA (``after``)
+       rather than the ``develop`` branch name — branch-based
+       ``raw.githubusercontent.com`` URLs are CDN-cached for a few minutes
+       keyed by URL, so two pushes to the same file within that window can
+       have the second fetch served stale content from the first. A
+       commit SHA is immutable, so the CDN can cache it forever safely.
     4. Write fetched files into the volume-mounted local directory.
     5. Run ``sync_posts()`` so the DB reflects the new/changed posts.
 
@@ -215,12 +220,17 @@ async def github_webhook(
         logger.info("Webhook: ignoring push to %s (not develop)", ref)
         return {"status": "ignored", "reason": f"push to {ref!r}, not develop"}
 
-    logger.info("Webhook: push to develop — fetching content from GitHub")
+    # Pin the fetch to the push's exact commit SHA rather than the
+    # `develop` branch name — see fetch_and_write's docstring for why.
+    # Falls back to fetch_and_write's own branch-name default only if a
+    # malformed payload is somehow missing `after`.
+    commit_sha = payload.get("after")
+    logger.info("Webhook: push to develop (%s) — fetching content from GitHub", commit_sha or "develop")
 
-    fetch_counts = await fetch_and_write(
-        base_dir=main_module.BASE_DIR,
-        github_token=settings.github_token,
-    )
+    fetch_kwargs = {"base_dir": main_module.BASE_DIR, "github_token": settings.github_token}
+    if commit_sha:
+        fetch_kwargs["ref"] = commit_sha
+    fetch_counts = await fetch_and_write(**fetch_kwargs)
 
     content_dir = main_module.BASE_DIR / "content" / "posts"
     sync_counts = await sync_posts(content_dir, db)

@@ -34,8 +34,8 @@ def _sign(body: bytes, secret: str = _WEBHOOK_SECRET) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
-def _push_payload(ref: str = "refs/heads/develop") -> bytes:
-    return json.dumps({"ref": ref, "commits": []}).encode()
+def _push_payload(ref: str = "refs/heads/develop", after: str = "abc123def456") -> bytes:
+    return json.dumps({"ref": ref, "after": after, "commits": []}).encode()
 
 
 async def _empty_db():
@@ -187,6 +187,37 @@ async def test_webhook_develop_push_calls_fetch_and_sync(webhook_client):
     assert data["status"] == "ok"
     assert data["fetch"] == fake_fetch
     assert data["sync"] == fake_sync
+
+
+@pytest.mark.unit
+async def test_webhook_pins_fetch_to_push_commit_sha(webhook_client):
+    """fetch_and_write is called with ref=<the push's exact commit SHA>.
+
+    Regression test: branch-based raw.githubusercontent.com URLs are
+    CDN-cached for a few minutes keyed by URL — two pushes to the same
+    file within that window could have the second fetch served stale
+    content from the first. Pinning to the commit SHA from the webhook
+    payload's `after` field closes that gap.
+    """
+    body = _push_payload(ref="refs/heads/develop", after="deadbeef1234")
+    mock_fetch = AsyncMock(return_value={"fetched": 1, "deleted": 0})
+
+    with (
+        patch("app.routes.internal.fetch_and_write", new=mock_fetch),
+        patch("app.routes.internal.sync_posts", new=AsyncMock(return_value={})),
+    ):
+        resp = await webhook_client.post(
+            "/internal/webhook/github",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": _sign(body),
+            },
+        )
+
+    assert resp.status_code == 200
+    assert mock_fetch.await_args is not None
+    assert mock_fetch.await_args.kwargs["ref"] == "deadbeef1234"
 
 
 @pytest.mark.unit
