@@ -7,7 +7,7 @@ cover_image: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/Feldberg-
 tags:
   - Black Forest
   - Hiking
-draft: true
+draft: false
 route:
   name: Feldberg Summit Loop
   gpx_file: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/2026-08-03_3166334591_Feldberg Summit Round.gpx
