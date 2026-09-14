@@ -91,14 +91,6 @@ Because the race gives you a route _and_ a clock, and I only wanted one of them.
 
 No number means I can stop in Lofoten for two days if Lofoten deserves two days. No tracker means nobody is watching me make a bad decision at 22:00 in the rain. No cut-off means the trip is finished when I'm standing on the cliff, not when a rule says so.
 
-It isn't harder than the NC4000. It's just mine.
-
-## Between now and 2028
-
-Two years is a long runway, and I intend to use all of it:
-
-✅ Staged prep tours — long weekends first, then a full week at target pace, then a two-week block loaded exactly as I'll ride it ✅ The setup decided early and then left alone — light, front-and-frame, no panniers, no last-minute experiments ✅ Nordic supply planning practised somewhere less remote than Finnmark ✅ Everything re-planned once as a gravel route, just to see honestly what it costs in metres and days
-
 And the one thing I already know I'll carry, because everyone who has ridden north says the same: a spare shift cable.
 
 **Dream of North.** Might be the one last big experiment. Or the second last.
