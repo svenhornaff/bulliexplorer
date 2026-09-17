@@ -24,6 +24,37 @@ Sentry disclosure is omitted when `SENTRY_DSN` is empty. Cloudflare remains disc
 because authored content can contain direct R2 image links independent of settings.
 Do not deploy this draft until the missing values have been reviewed and supplied.
 
+### `LEGAL_ADDRESS` specifically — avoiding a home address
+
+Checked current sources rather than assumed: German law requires a
+"ladungsfähige Anschrift" — a real address actually capable of receiving
+formal/legal delivery, not just a mailing point. Consistently, across
+multiple independent current sources:
+
+- **A plain PO box (Postfach) alone is commonly treated as
+  insufficient** — described in more than one source as a classic
+  reason for a cease-and-desist letter (Abmahnung), not a safe choice.
+- **A c/o address at a friend's or relative's place is similarly
+  described as legally shaky** — not a reliable substitute.
+- **The standard, widely-used solution is a commercial virtual/business
+  address service** — a real street address that actually receives and
+  forwards mail, explicitly marketed for exactly this situation
+  (freelancers, creators, solo site operators who don't want a home
+  address public). Several such providers exist in Germany; this is a
+  normal, common category of service, not an unusual workaround.
+
+**Not settled by this research, and not something to treat as settled
+without checking**: whether a specific provider's address is actually
+sufficient for *this* offering's specific legal classification (the
+`§ 18 MStV`/journalistic-editing question already flagged above
+interacts with this — some address requirements differ by exactly that
+classification). Worth a direct check with whichever service is
+considered, or a lawyer, before publishing — not something to infer
+from general web research alone.
+
+`LEGAL_ADDRESS` stays empty (triggering the existing 503 safety net)
+until this is actually resolved one way or the other.
+
 ## Account-side work (not accomplished by a repository change)
 
 - Verify hosting AVV/DPA and actual request/error logs, including any Cloudflare proxy configuration.

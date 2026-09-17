@@ -289,6 +289,17 @@ S3_ACCESS_KEY=
 S3_SECRET_KEY=
 S3_BUCKET=bulliexplorer
 TILES_URL=
+
+# Public legal disclosure values — see docs/dev/legal_gdpr.md.
+# LEGAL_ADDRESS stays empty until a ladungsfaehige Anschrift is confirmed —
+# /impressum and /datenschutz return 503 in production while any are unset.
+LEGAL_NAME=
+LEGAL_ADDRESS=
+LEGAL_EMAIL=
+LEGAL_HOSTING=
+LEGAL_LOG_RETENTION=
+LEGAL_CLOUDFLARE_DETAILS=
+LEGAL_SENTRY_DETAILS=
 ```
 
 Generate secrets:
