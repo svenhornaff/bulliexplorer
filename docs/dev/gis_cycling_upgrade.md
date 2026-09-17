@@ -698,6 +698,19 @@ overreaction.
   down in the same window), that's the point to reconsider — right
   now this is genuinely unverified in practice, only in fixtures.
 
+**Cross-reference — a different failure shape this phase doesn't cover**:
+`docs/dev/fix_overpass_urban_density_timeout.md` documents a real
+production case (`dream-of-north`'s Rhineland-area chunk) where the
+same bbox timed out against *both* instances, deterministically — the
+mirror fallback above correctly handles a transient, whole-instance-bad
+moment, but not a bbox that's structurally expensive regardless of which
+server answers it (a densely-OSM-mapped urban area forcing a much
+larger feature-index scan than an equally-sized rural bbox). That doc
+adds a bounded adaptive-split fallback (split the bbox in half, retry
+each half, once) on top of this phase's per-instance fallback — a future
+reader debugging "the mirror fallback fired but the chunk still failed"
+should look there, not re-diagnose it here.
+
 ---
 
 ## Explicitly deferred, regardless of Phase 3's fork or Phase 4

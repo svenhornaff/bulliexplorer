@@ -23,6 +23,13 @@ Design (``docs/dev/gis_cycling_upgrade.md`` Phase 4):
   improves real-world reliability for very little code — short of
   self-hosting an Overpass instance, which stays out of scope here.
   Only retries on *failure*; never doubles up load on a healthy primary.
+- A bbox that still fails against *every* instance is a different
+  failure shape from a transient outage — it can mean the bbox covers
+  a densely-OSM-mapped area where the query is structurally expensive
+  regardless of which server answers it
+  (``docs/dev/fix_overpass_urban_density_timeout.md``). In that case,
+  the bbox is split in half and each half is retried through the same
+  instance-fallback logic, once (never recursively past one split).
 - Same discipline this project already applies to Nominatim: an
   identifying ``User-Agent``, and a request budget the caller can inject
   a client into for testing.
@@ -63,7 +70,18 @@ _INTER_INSTANCE_RETRY_DELAY_S = 1.0
 # giving Overpass room to actually hit *its own* timeout and return a
 # clean (if partial) response, rather than us cutting the connection first
 # and turning a would-be-parseable "remark" into a bare network error.
-_HTTP_TIMEOUT_S = 35.0
+# Raised 35s -> 90s (fix_overpass_urban_density_timeout.md Phase 1) after
+# a real dense-urban bbox (Cologne-Bonn-Ruhr) timed out against both
+# instances at 35s — cheap headroom to try before reaching for the
+# heavier Phase 2 adaptive-split fix below.
+_HTTP_TIMEOUT_S = 90.0
+
+# Max times a failing bbox is split in half and retried
+# (fix_overpass_urban_density_timeout.md Phase 2). Capped at 1 — split
+# once into two halves, never recurse into quarters/eighths — so the
+# worst-case extra query count for one bad chunk stays small and
+# predictable rather than open-ended.
+_MAX_SPLIT_DEPTH: int = 1
 
 # OSM tag -> this project's amenity category (config.yml's category
 # select plus a couple of derived-only values not offered to authors,
@@ -129,6 +147,15 @@ async def query_nearby_amenities(
     know, Overpass didn't answer" and preserve existing data in the
     latter case rather than wiping it.
 
+    A bbox that fails against *every* configured instance is retried
+    once as two halves (split along its longer axis) before giving up
+    entirely — handles a bbox that's structurally expensive regardless of
+    which server answers it, e.g. a densely-OSM-mapped urban area, not
+    just a transient whole-instance outage
+    (``docs/dev/fix_overpass_urban_density_timeout.md``). Both halves
+    must succeed for this to return anything — one half failing still
+    means an incomplete answer for the original bbox.
+
     Parameters
     ----------
     south, west, north, east:
@@ -156,8 +183,6 @@ async def query_nearby_amenities(
     A list of :class:`AmenityResult` (possibly empty, if genuinely
     nothing was found), or ``None`` on any failure.
     """
-    query = _build_query(south, west, north, east)
-
     _close_client = False
     client = http_client
     if client is None:
@@ -165,46 +190,165 @@ async def query_nearby_amenities(
         _close_client = True
 
     try:
-        payload = None
-        served_index = None
-        ordered_indices = [(start_index + i) % len(_OVERPASS_URLS) for i in range(len(_OVERPASS_URLS))]
-        for attempt, idx in enumerate(ordered_indices):
-            if attempt > 0:
-                # Only paces the failure-recovery path — a healthy
-                # first attempt never sleeps here.
-                await asyncio.sleep(_INTER_INSTANCE_RETRY_DELAY_S)
-            payload = await _query_one_instance(client, _OVERPASS_URLS[idx], query, south, west, north, east)
-            if payload is not None:
-                served_index = idx
-                break
-
+        results, served_index = await _query_bbox_with_split(
+            south, west, north, east, client, start_index=start_index, split_depth=0
+        )
         if result_meta is not None:
             result_meta["served_index"] = served_index
-
-        if payload is None:
-            return None
-        assert served_index is not None  # noqa: S101 — payload set only alongside served_index, together
-
-        elements = payload.get("elements", [])
-        results: list[AmenityResult] = []
-        for element in elements:
-            parsed = _parse_element(element)
-            if parsed is not None:
-                results.append(parsed)
-
-        logger.info(
-            "Overpass (%s) returned %d amenities for bbox (%s,%s,%s,%s)",
-            _OVERPASS_URLS[served_index],
-            len(results),
-            south,
-            west,
-            north,
-            east,
-        )
         return results
     finally:
         if _close_client:
             await client.aclose()
+
+
+async def _query_bbox_with_split(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    client: httpx.AsyncClient,
+    *,
+    start_index: int,
+    split_depth: int,
+) -> tuple[list[AmenityResult] | None, int | None]:
+    """Try every instance for one bbox; split-and-retry once on total failure.
+
+    A bbox failing against *every* configured instance (see
+    :func:`_query_one_bbox_all_instances`) can mean a transient
+    whole-instance issue, but it can also mean the bbox is structurally
+    expensive regardless of which server answers it — e.g. it covers a
+    densely-OSM-mapped area, so the same geographic span has to scan a
+    much larger feature index than an equally-sized rural bbox
+    (``docs/dev/fix_overpass_urban_density_timeout.md``). In that case
+    the bbox is split into two halves along its longer axis and each
+    half is retried through the same instance-fallback logic, bounded to
+    :data:`_MAX_SPLIT_DEPTH` (1) — split once, never recurse into
+    quarters/eighths, so one bad chunk's worst-case extra query count
+    stays small and predictable.
+
+    Both halves must succeed for this to report success — a half that
+    also fails on every instance means the answer for the *other* half
+    alone is still an incomplete answer for the original bbox, and this
+    project doesn't trust partial Overpass answers anywhere else in the
+    pipeline either (``geo_sync.py``'s ``sync_amenities`` aborts an
+    entire sync rather than write a partial snapshot).
+
+    Returns
+    -------
+    A tuple of ``(results, served_index)``. ``served_index`` is the
+    ``_OVERPASS_URLS`` index that actually served the response — for a
+    split bbox, the second half's serving instance, since that's the most
+    recently confirmed to be working. Both are ``None`` together on total
+    failure (this bbox, and any split attempted for it, never got a
+    trustworthy answer).
+    """
+    results, served_index = await _query_one_bbox_all_instances(south, west, north, east, client, start_index)
+    if results is not None:
+        return results, served_index
+
+    if split_depth >= _MAX_SPLIT_DEPTH:
+        return None, None
+
+    logger.warning(
+        "bbox (%s,%s,%s,%s) too expensive for any instance, retrying as two halves", south, west, north, east
+    )
+    (s1, w1, n1, e1), (s2, w2, n2, e2) = _split_bbox_in_half(south, west, north, east)
+    # Both halves are independent queries with no data dependency between
+    # them — run concurrently so a split doesn't double the wall-clock
+    # cost of the already-slow failure path.
+    (result_a, idx_a), (result_b, idx_b) = await asyncio.gather(
+        _query_bbox_with_split(s1, w1, n1, e1, client, start_index=start_index, split_depth=split_depth + 1),
+        _query_bbox_with_split(s2, w2, n2, e2, client, start_index=start_index, split_depth=split_depth + 1),
+    )
+    if result_a is None or result_b is None:
+        return None, None
+
+    # The two halves share a clean split boundary in principle, but
+    # Overpass bbox filters are inclusive on both ends — an element
+    # sitting exactly on the dividing line can be returned by both
+    # halves. Dedup by the same natural key geo_sync.py already uses
+    # across chunks.
+    deduped: dict[tuple[str, int], AmenityResult] = {}
+    for result in (*result_a, *result_b):
+        deduped[(result.osm_element_type, result.osm_element_id)] = result
+
+    # idx_b is never None here (result_b is not None only alongside a
+    # served_index) — reported as the "last half" per this bbox's own
+    # split, not the recursive call's own start_index.
+    return list(deduped.values()), idx_b
+
+
+async def _query_one_bbox_all_instances(
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    client: httpx.AsyncClient,
+    start_index: int,
+) -> tuple[list[AmenityResult] | None, int | None]:
+    """Try every ``_OVERPASS_URLS`` instance, in ``start_index`` order.
+
+    Returns ``(results, served_index)`` on the first instance to answer
+    successfully, or ``(None, None)`` if every instance fails.
+    """
+    query = _build_query(south, west, north, east)
+    payload = None
+    served_index = None
+    ordered_indices = [(start_index + i) % len(_OVERPASS_URLS) for i in range(len(_OVERPASS_URLS))]
+    for attempt, idx in enumerate(ordered_indices):
+        if attempt > 0:
+            # Only paces the failure-recovery path — a healthy
+            # first attempt never sleeps here.
+            await asyncio.sleep(_INTER_INSTANCE_RETRY_DELAY_S)
+        payload = await _query_one_instance(client, _OVERPASS_URLS[idx], query, south, west, north, east)
+        if payload is not None:
+            served_index = idx
+            break
+
+    if payload is None:
+        return None, None
+    assert served_index is not None  # noqa: S101 — payload set only alongside served_index, together
+
+    elements = payload.get("elements", [])
+    results: list[AmenityResult] = []
+    for element in elements:
+        parsed = _parse_element(element)
+        if parsed is not None:
+            results.append(parsed)
+
+    logger.info(
+        "Overpass (%s) returned %d amenities for bbox (%s,%s,%s,%s)",
+        _OVERPASS_URLS[served_index],
+        len(results),
+        south,
+        west,
+        north,
+        east,
+    )
+    return results, served_index
+
+
+def _split_bbox_in_half(
+    south: float, west: float, north: float, east: float
+) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
+    """Split a bbox into two halves along its longer axis.
+
+    Splits along latitude if the bbox is taller than it is wide, else
+    along longitude — keeps each half as close to square as possible
+    rather than always halving the same axis regardless of shape.
+    Returns two ``(south, west, north, east)`` bboxes covering the same
+    total area with no gap or overlap along the split axis (Overpass's
+    own inclusive bbox bounds mean elements sitting exactly on the
+    dividing line can still appear in both — handled by the caller's
+    dedup, not here).
+    """
+    lat_span = north - south
+    lon_span = east - west
+    if lat_span >= lon_span:
+        mid_lat = (south + north) / 2
+        return (south, west, mid_lat, east), (mid_lat, west, north, east)
+    mid_lon = (west + east) / 2
+    return (south, west, north, mid_lon), (south, mid_lon, north, east)
 
 
 async def _query_one_instance(

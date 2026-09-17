@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import urllib.parse
+
 import httpx
 import pytest
 
-from app.services.overpass import _OVERPASS_URLS, AmenityResult, _build_query, _parse_element, query_nearby_amenities
+from app.services.overpass import (  # noqa: PLC2701
+    _MAX_SPLIT_DEPTH,
+    _OVERPASS_URLS,
+    AmenityResult,
+    _build_query,
+    _parse_element,
+    _split_bbox_in_half,
+    query_nearby_amenities,
+)
 
 # ---------------------------------------------------------------------------
 
@@ -48,6 +58,38 @@ class _PerUrlTransport(httpx.AsyncBaseTransport):
         if isinstance(outcome, Exception):
             raise outcome
         return httpx.Response(200, json=outcome)
+
+
+class _PerUrlAndBboxTransport(httpx.AsyncBaseTransport):
+    """Mock transport keyed on (url, bbox-substring-in-query-body).
+
+    A split retries the SAME two URLs with a DIFFERENT (halved) bbox, so
+    a plain per-URL transport can't distinguish an original query from
+    one of its split halves. This keys responses on the request body
+    containing a given bbox substring instead, so a test can express
+    "primary+mirror both fail for the full bbox, but each half succeeds
+    against a specific instance." Falls back to ``default`` when no
+    bbox key matches (e.g. a URL that should never be reached for a
+    given bbox at all raises on unmatched lookups instead).
+    """
+
+    def __init__(self, responses: dict[tuple[str, str], dict | Exception]) -> None:
+        self._responses = responses
+        self.requests: list[httpx.Request] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        url = str(request.url)
+        # The POST body is form-urlencoded (the query string is inside a
+        # "data=..." field), so a plain bbox substring like "(0.0,0.0)"
+        # never matches the raw bytes — decode first.
+        body = urllib.parse.unquote(request.content.decode())
+        for (expected_url, bbox_substring), outcome in self._responses.items():
+            if expected_url == url and bbox_substring in body:
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return httpx.Response(200, json=outcome)
+        raise AssertionError(f"no mocked response for url={url!r} body={body!r}")
 
 
 _CAMPSITE_NODE = {
@@ -359,3 +401,157 @@ async def test_query_nearby_amenities_no_pacing_on_healthy_primary(monkeypatch):
     async with httpx.AsyncClient(transport=transport) as client:
         await query_nearby_amenities(1.0, 2.0, 3.0, 4.0, http_client=client)
     assert sleep_calls == []
+
+
+# ---------------------------------------------------------------------------
+# _split_bbox_in_half
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_split_bbox_in_half_splits_the_taller_axis():
+    """A bbox taller (lat span) than it is wide (lon span) splits along
+    latitude, not longitude."""
+    half_a, half_b = _split_bbox_in_half(south=0.0, west=0.0, north=2.0, east=1.0)
+    assert half_a == (0.0, 0.0, 1.0, 1.0)
+    assert half_b == (1.0, 0.0, 2.0, 1.0)
+
+
+@pytest.mark.unit
+def test_split_bbox_in_half_splits_the_wider_axis():
+    """A bbox wider (lon span) than it is tall (lat span) splits along
+    longitude instead."""
+    half_a, half_b = _split_bbox_in_half(south=0.0, west=0.0, north=1.0, east=2.0)
+    assert half_a == (0.0, 0.0, 1.0, 1.0)
+    assert half_b == (0.0, 1.0, 1.0, 2.0)
+
+
+@pytest.mark.unit
+def test_split_bbox_in_half_covers_the_same_total_area_with_no_gap():
+    """The two halves must share exactly the split boundary — no gap, no
+    double-covered strip beyond the intentional inclusive-bound overlap
+    Overpass itself allows at the exact boundary."""
+    (s1, w1, n1, e1), (s2, w2, n2, e2) = _split_bbox_in_half(south=0.0, west=0.0, north=4.0, east=1.0)
+    assert n1 == s2  # halves meet exactly at the midpoint, no gap
+    assert s1 == 0.0
+    assert n2 == 4.0
+
+
+# ---------------------------------------------------------------------------
+# query_nearby_amenities — adaptive split on dual-instance failure
+# (fix_overpass_urban_density_timeout.md Phase 2)
+# ---------------------------------------------------------------------------
+
+_FULL_BBOX = (0.0, 0.0, 2.0, 1.0)
+_FULL_BBOX_STR = "(0.0,0.0,2.0,1.0)"
+_HALF_A_STR = "(0.0,0.0,1.0,1.0)"  # south half
+_HALF_B_STR = "(1.0,0.0,2.0,1.0)"  # north half
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_splits_bbox_when_both_instances_fail():
+    """A bbox failing against BOTH instances is split into two halves
+    and each half is retried through the normal instance-fallback path —
+    the actual observed failure shape from fix_overpass_urban_density_timeout.md
+    (same bbox timing out on both overpass-api.de and the mirror)."""
+    primary, mirror = _OVERPASS_URLS
+    transport = _PerUrlAndBboxTransport(
+        {
+            (primary, _FULL_BBOX_STR): httpx.ReadTimeout("timed out"),
+            (mirror, _FULL_BBOX_STR): httpx.ReadTimeout("timed out"),
+            (primary, _HALF_A_STR): {"elements": [_CAMPSITE_NODE]},
+            (primary, _HALF_B_STR): {"elements": [_FUEL_WAY]},
+        }
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        results = await query_nearby_amenities(*_FULL_BBOX, http_client=client)
+    assert results is not None
+    assert {r.category for r in results} == {"campsite", "gas_station"}
+    # 2 failed attempts for the full bbox + 1 successful attempt per half.
+    assert len(transport.requests) == 4
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_split_is_bounded_to_one_level():
+    """A half that ALSO fails against both instances is not split again —
+    the depth cap (_MAX_SPLIT_DEPTH) stops recursion at quarters, keeping
+    worst-case query count for one bad chunk small and predictable."""
+    assert _MAX_SPLIT_DEPTH == 1
+    primary, mirror = _OVERPASS_URLS
+    transport = _PerUrlAndBboxTransport(
+        {
+            (primary, _FULL_BBOX_STR): httpx.ReadTimeout("timed out"),
+            (mirror, _FULL_BBOX_STR): httpx.ReadTimeout("timed out"),
+            (primary, _HALF_A_STR): httpx.ReadTimeout("timed out"),
+            (mirror, _HALF_A_STR): httpx.ReadTimeout("timed out"),
+            (primary, _HALF_B_STR): {"elements": []},
+        }
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        results = await query_nearby_amenities(*_FULL_BBOX, http_client=client)
+    # Half A failing on both instances means an incomplete answer overall
+    # — even though half B succeeded, the whole bbox's answer is untrusted.
+    assert results is None
+    # Bounded: full bbox (2) + half A (2, gives up, no further split) +
+    # half B (1) = 5 total requests, never a quarter-bbox query.
+    assert len(transport.requests) == 5
+    assert not any("0.5" in str(r.content) for r in transport.requests)
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_split_dedupes_boundary_elements():
+    """Overpass bbox bounds are inclusive on both ends, so an element
+    sitting exactly on the split boundary can be returned by both halves
+    — must be deduplicated, not double-counted."""
+    primary, mirror = _OVERPASS_URLS
+    transport = _PerUrlAndBboxTransport(
+        {
+            (primary, _FULL_BBOX_STR): httpx.ReadTimeout("timed out"),
+            (mirror, _FULL_BBOX_STR): httpx.ReadTimeout("timed out"),
+            (primary, _HALF_A_STR): {"elements": [_CAMPSITE_NODE]},
+            (primary, _HALF_B_STR): {"elements": [_CAMPSITE_NODE]},  # same element, boundary duplicate
+        }
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        results = await query_nearby_amenities(*_FULL_BBOX, http_client=client)
+    assert results is not None
+    assert len(results) == 1
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_split_result_meta_reflects_last_half():
+    """result_meta["served_index"] after a split reports whichever
+    instance served the SECOND half — the most recently confirmed to be
+    working, for geo_sync.py's sticky failover to start the next chunk
+    there."""
+    primary, mirror = _OVERPASS_URLS
+    transport = _PerUrlAndBboxTransport(
+        {
+            (primary, _FULL_BBOX_STR): httpx.ReadTimeout("timed out"),
+            (mirror, _FULL_BBOX_STR): httpx.ReadTimeout("timed out"),
+            (primary, _HALF_A_STR): {"elements": []},
+            (primary, _HALF_B_STR): httpx.ReadTimeout("timed out"),
+            (mirror, _HALF_B_STR): {"elements": []},
+        }
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        meta: dict = {}
+        results = await query_nearby_amenities(*_FULL_BBOX, http_client=client, result_meta=meta)
+    assert results is not None
+    assert meta["served_index"] == 1  # mirror served half B, the last half
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_healthy_chunk_never_triggers_split():
+    """A chunk that succeeds normally must never trigger any splitting
+    logic — no regression to the common case, which is every chunk on
+    every route except the one dense-urban bbox this fix targets."""
+    transport = _PerUrlAndBboxTransport(
+        {
+            (_OVERPASS_URLS[0], _FULL_BBOX_STR): {"elements": [_CAMPSITE_NODE]},
+        }
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        results = await query_nearby_amenities(*_FULL_BBOX, http_client=client)
+    assert results is not None
+    assert len(transport.requests) == 1  # no split, no mirror, no half queries
