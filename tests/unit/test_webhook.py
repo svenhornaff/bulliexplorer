@@ -20,6 +20,7 @@ from sqlalchemy.engine import Result
 
 from app.core.db import get_db_session
 from app.main import create_app
+from app.services.post_sync import SyncResult
 
 _WEBHOOK_SECRET = "test-webhook-secret"  # noqa: S105 — test sentinel
 _VALID_TOKEN = "test-resync-token"  # noqa: S105 — test sentinel
@@ -167,7 +168,7 @@ async def test_webhook_develop_push_calls_fetch_and_sync(webhook_client):
     """Valid develop push → fetch_and_write + sync_posts called, counts returned."""
     body = _push_payload(ref="refs/heads/develop")
     fake_fetch = {"fetched": 2, "deleted": 0}
-    fake_sync = {"upserted": 2, "deleted": 0, "skipped": 0}
+    fake_sync = SyncResult(upserted=2, deleted=0, skipped=0)
 
     with (
         patch("app.routes.internal.fetch_and_write", new=AsyncMock(return_value=fake_fetch)),
@@ -186,7 +187,53 @@ async def test_webhook_develop_push_calls_fetch_and_sync(webhook_client):
     data = resp.json()
     assert data["status"] == "ok"
     assert data["fetch"] == fake_fetch
-    assert data["sync"] == fake_sync
+    assert data["sync"] == {"upserted": 2, "deleted": 0, "skipped": 0}
+    # enable_amenity_discovery defaults to False in Settings — no task
+    # scheduled, response says so rather than an unqualified "started".
+    assert data["amenity_sync"] == "skipped"
+
+
+@pytest.mark.unit
+async def test_webhook_schedules_amenity_task_without_blocking_response(webhook_client, monkeypatch):
+    """Same property as the resync endpoint
+    (docs/dev/fix_startup_blocking_amenity_sync.md Phase 3, "more urgent
+    than it sounds" — GitHub's own webhook timeout): the webhook response
+    must return "amenity_sync": "started" without ever awaiting the
+    actual amenity sync, so a slow route can never cause GitHub to record
+    a false-negative delivery failure.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "enable_amenity_discovery", True)
+
+    body = _push_payload(ref="refs/heads/develop")
+    fake_fetch = {"fetched": 1, "deleted": 0}
+    fake_sync = SyncResult(upserted=1, amenity_route_ids=[7])
+
+    never_awaited = AsyncMock()
+
+    with (
+        patch("app.routes.internal.fetch_and_write", new=AsyncMock(return_value=fake_fetch)),
+        patch("app.routes.internal.sync_posts", new=AsyncMock(return_value=fake_sync)),
+        patch("app.services.background_sync.sync_amenities_for_routes", new=never_awaited),
+    ):
+        resp = await webhook_client.post(
+            "/internal/webhook/github",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": _sign(body),
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["amenity_sync"] == "started"
+
+    import asyncio
+
+    await asyncio.sleep(0)
+    never_awaited.assert_awaited_once()
 
 
 @pytest.mark.unit
@@ -204,7 +251,7 @@ async def test_webhook_pins_fetch_to_push_commit_sha(webhook_client):
 
     with (
         patch("app.routes.internal.fetch_and_write", new=mock_fetch),
-        patch("app.routes.internal.sync_posts", new=AsyncMock(return_value={})),
+        patch("app.routes.internal.sync_posts", new=AsyncMock(return_value=SyncResult())),
     ):
         resp = await webhook_client.post(
             "/internal/webhook/github",

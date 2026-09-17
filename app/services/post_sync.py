@@ -18,6 +18,7 @@ Design rules (per AGENTS.md):
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -42,6 +43,24 @@ logger = get_logger(__name__)
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)", re.DOTALL)
 
 
+@dataclass(frozen=True)
+class SyncResult:
+    """Outcome of one :func:`sync_posts` run.
+
+    ``amenity_route_ids`` is deliberately its own explicit field, not a
+    dict key alongside the counts — see
+    ``docs/dev/fix_startup_blocking_amenity_sync.md`` Phase 1. Amenity
+    discovery is a distinct, separately-scheduled concern (typically a
+    background task, per Phase 2/3) from the counts below, which describe
+    content sync alone.
+    """
+
+    upserted: int = 0
+    deleted: int = 0
+    skipped: int = 0
+    amenity_route_ids: list[int] = field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Public surface
 # ---------------------------------------------------------------------------
@@ -50,10 +69,18 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n(.*)", re.DOTALL)
 async def sync_posts(
     content_dir: Path,
     session: AsyncSession,
-    *,
-    enable_amenity_discovery: bool = False,
-) -> dict[str, int]:
+) -> SyncResult:
     """Reconcile ``content_dir/*.md`` files with the ``posts`` table.
+
+    Deliberately does **not** run amenity discovery itself — see
+    :class:`SyncResult`'s docstring and
+    ``docs/dev/fix_startup_blocking_amenity_sync.md`` Phase 1. This
+    function only handles content sync (posts, routes, POIs, ride stats),
+    which is fast and involves no third-party network calls beyond the
+    already-quick R2 GPX fetch. It returns the route ids that were
+    upserted with a route this run so the *caller* can decide when (and
+    whether) to run amenity discovery for them — typically as a
+    background task, not inline here.
 
     Parameters
     ----------
@@ -63,19 +90,18 @@ async def sync_posts(
     session:
         An open ``AsyncSession``.  The caller owns the transaction; this
         function does **not** commit or roll back.
-    enable_amenity_discovery:
-        Off by default — threaded down to ``sync_route``. See that
-        function's docstring; the default keeps every existing caller
-        and test unaffected while this is off.
 
     Returns
     -------
-    dict with keys ``upserted``, ``deleted``, ``skipped`` counting what
-    happened during this run.
+    SyncResult
+        ``upserted``/``deleted``/``skipped`` counts for content sync, plus
+        ``amenity_route_ids`` — the ids of every route upserted this run
+        that a caller may want to schedule amenity discovery for.
     """
     md_files = sorted(content_dir.glob("*.md"))
 
     counts = {"upserted": 0, "deleted": 0, "skipped": 0}
+    amenity_route_ids: list[int] = []
 
     # ── 1. Parse + validate every file, build slug → parsed data map ────────
     parsed: dict[str, _ParsedPost] = {}
@@ -91,13 +117,14 @@ async def sync_posts(
         post = await _upsert_post(session, pp)
         # Flush so ``post.id`` is available for FK references in geo rows.
         await session.flush()
-        await sync_route(
+        route_id = await sync_route(
             session,
             post.id,
             pp.frontmatter.route,
             content_dir,
-            enable_amenity_discovery=enable_amenity_discovery,
         )
+        if route_id is not None:
+            amenity_route_ids.append(route_id)
         await sync_pois(session, post.id, pp.frontmatter.points_of_interest)
 
         # Body-block render plan (Phase 4). The "route present, no explicit
@@ -124,7 +151,12 @@ async def sync_posts(
         counts["deleted"],
         counts["skipped"],
     )
-    return counts
+    return SyncResult(
+        upserted=counts["upserted"],
+        deleted=counts["deleted"],
+        skipped=counts["skipped"],
+        amenity_route_ids=amenity_route_ids,
+    )
 
 
 # ---------------------------------------------------------------------------

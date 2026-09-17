@@ -38,10 +38,11 @@ import datetime
 import logging
 import math
 from pathlib import Path
+from typing import cast
 
 import gpxpy
 import httpx
-from geoalchemy2.shape import from_shape
+from geoalchemy2.shape import from_shape, to_shape
 from shapely.geometry import LineString, Point
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -193,10 +194,19 @@ async def sync_route(
     content_dir: Path,
     *,
     http_client: httpx.AsyncClient | None = None,
-    enable_amenity_discovery: bool = False,
-    overpass_client: httpx.AsyncClient | None = None,
-) -> None:
+) -> int | None:
     """Upsert or delete the Route row for a post.
+
+    Deliberately does **not** touch Overpass/amenity discovery at all —
+    see ``docs/dev/fix_startup_blocking_amenity_sync.md`` Phase 1. That
+    was a design mistake this function used to make: a best-effort,
+    already-designed-to-tolerate-failure enhancement (amenities) was
+    inline in the one path (content sync) that's allowed to block
+    startup/request/webhook handling entirely. Amenity discovery for a
+    route this call upserted is the caller's responsibility now, via
+    :func:`sync_route_amenities` — called separately, on its own
+    schedule (typically a background task), using the route id this
+    function returns.
 
     Parameters
     ----------
@@ -216,17 +226,15 @@ async def sync_route(
         Optional ``httpx.AsyncClient`` used to fetch ``gpx_file`` when it
         is a URL.  When ``None`` a default client is created internally —
         pass an explicit client in tests to inject a mock transport.
-    enable_amenity_discovery:
-        Off by default (``Settings.enable_amenity_discovery``, threaded
-        down from ``sync_posts``) — a new third-party network dependency
-        (Overpass) on every route sync shouldn't turn on silently, and
-        every existing caller/test needs zero changes while it's off.
-    overpass_client:
-        Optional ``httpx.AsyncClient`` used for the Overpass query when
-        ``enable_amenity_discovery`` is on. When ``None`` a default client
-        is created internally — pass an explicit client in tests to
-        inject a mock transport. Separate from ``http_client`` (GPX
-        fetching) since they're two independent remote services.
+
+    Returns
+    -------
+    int or None
+        The route's id if a Route row exists for this post after this
+        call (fresh insert or existing update), or ``None`` if there is
+        no route (frontmatter had none, an existing row was deleted, or
+        the GPX failed to parse). Callers use this to know which routes
+        need amenity discovery.
     """
     existing = await _get_existing_route(session, post_id)
 
@@ -235,7 +243,7 @@ async def sync_route(
         if existing is not None:
             await session.delete(existing)
             logger.info("Deleted orphaned Route for post_id=%d", post_id)
-        return
+        return None
 
     # Parse the GPX file.
     parsed = await _parse_gpx(route_fm.gpx_file, content_dir, http_client=http_client)
@@ -246,7 +254,7 @@ async def sync_route(
             "Skipping route upsert for post_id=%d — GPX could not be parsed",
             post_id,
         )
-        return
+        return existing.id if existing is not None else None
 
     linestring, distance_km, elevation_gain_m, elevation_loss_m, duration_minutes = parsed
     _check_tile_coverage(linestring, post_id, route_fm.name)
@@ -265,6 +273,7 @@ async def sync_route(
         session.add(route)
         logger.debug("Inserted Route for post_id=%d", post_id)
     else:
+        route = existing
         changed = False
         updates: dict[str, object] = {
             "name": route_fm.name,
@@ -291,13 +300,11 @@ async def sync_route(
         else:
             logger.debug("Route for post_id=%d unchanged — no write", post_id)
 
-    if enable_amenity_discovery:
-        # Flush so route.id is populated for a fresh insert (an update
-        # already has one). Needed before sync_amenities, which ties rows
-        # to route_id.
-        await session.flush()
-        route_row = existing if existing is not None else route
-        await sync_amenities(session, route_row, linestring, http_client=overpass_client)
+    # Flush so route.id is populated for a fresh insert (an update already
+    # has one) — the caller needs a real id back to schedule amenity
+    # discovery against.
+    await session.flush()
+    return route.id
 
 
 def _amenity_query_bboxes(linestring: LineString) -> list[tuple[float, float, float, float]]:
@@ -362,6 +369,55 @@ def _buffered_bbox(
         max_lat + lat_buffer,
         max_lon + lon_buffer,
     )
+
+
+async def sync_route_amenities(
+    session: AsyncSession,
+    route_id: int,
+    *,
+    http_client: httpx.AsyncClient | None = None,
+) -> None:
+    """Load a Route by id and run amenity discovery for it.
+
+    Public entry point for callers that only have a route id, not an
+    in-memory ``Route`` + parsed ``linestring`` — typically the
+    background-task path (``docs/dev/fix_startup_blocking_amenity_sync.md``
+    Phase 2/3): by the time amenity discovery actually runs, the content-
+    sync session that upserted the route has already committed and
+    closed, so the original ``Route`` ORM object and its in-memory
+    ``linestring`` are gone. Re-fetching by id in the caller's own
+    session is the only correct option here — the geometry itself is
+    durable (it's a DB column), only the in-memory Python objects aren't.
+
+    Tests that already have an in-memory ``Route`` + ``linestring`` (e.g.
+    right after building both without a round-trip) should call
+    :func:`sync_amenities` directly instead — that's still the lower-
+    level primitive this function delegates to.
+
+    Parameters
+    ----------
+    session:
+        Open ``AsyncSession``.  Caller owns the transaction (including any
+        commit — this function does not commit).
+    route_id:
+        The ``Route.id`` to sync amenities for.
+    http_client:
+        Optional ``httpx.AsyncClient`` used for Overpass requests, passed
+        straight through to :func:`sync_amenities`.
+    """
+    route = await session.get(Route, route_id)
+    if route is None:
+        # The route was deleted (e.g. by a later post edit) between being
+        # scheduled for amenity discovery and this call actually running
+        # — entirely possible for the background-task path, where some
+        # time passes between scheduling and execution. Nothing to sync.
+        logger.warning("sync_route_amenities: route_id=%d no longer exists — skipping", route_id)
+        return
+    # to_shape()'s return type is the generic BaseGeometry — Route.track is
+    # always a LINESTRING column (see app/models/route.py), so this is a
+    # safe narrowing, not an assumption specific to this call site.
+    linestring = cast("LineString", to_shape(route.track))  # type: ignore[arg-type] — WKBElement at runtime
+    await sync_amenities(session, route, linestring, http_client=http_client)
 
 
 async def sync_amenities(

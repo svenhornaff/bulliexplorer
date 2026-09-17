@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.core.db import get_db_session
 from app.main import create_app
+from app.services.post_sync import SyncResult
 
 _VALID_TOKEN = "test-resync-token"  # noqa: S105 — test sentinel, not a real secret
 
@@ -83,8 +84,8 @@ async def test_resync_wrong_token_returns_401(resync_client):
 @pytest.mark.unit
 async def test_resync_correct_token_returns_200(resync_client):
     """Correct token + mocked sync → 200 with counts."""
-    fake_counts = {"upserted": 1, "deleted": 0, "skipped": 0}
-    with patch("app.routes.internal.sync_posts", new=AsyncMock(return_value=fake_counts)):
+    fake_result = SyncResult(upserted=1, deleted=0, skipped=0)
+    with patch("app.routes.internal.sync_posts", new=AsyncMock(return_value=fake_result)):
         resp = await resync_client.post(
             "/internal/resync",
             headers={"X-Resync-Token": _VALID_TOKEN},
@@ -95,13 +96,16 @@ async def test_resync_correct_token_returns_200(resync_client):
     assert body["upserted"] == 1
     assert body["deleted"] == 0
     assert body["skipped"] == 0
+    # enable_amenity_discovery defaults to False in Settings — no task
+    # scheduled, response says so rather than an unqualified "started".
+    assert body["amenity_sync"] == "skipped"
 
 
 @pytest.mark.unit
 async def test_resync_returns_sync_counts(resync_client):
     """Counts returned from sync_posts are forwarded in the response."""
-    fake_counts = {"upserted": 3, "deleted": 1, "skipped": 2}
-    with patch("app.routes.internal.sync_posts", new=AsyncMock(return_value=fake_counts)):
+    fake_result = SyncResult(upserted=3, deleted=1, skipped=2)
+    with patch("app.routes.internal.sync_posts", new=AsyncMock(return_value=fake_result)):
         resp = await resync_client.post(
             "/internal/resync",
             headers={"X-Resync-Token": _VALID_TOKEN},
@@ -111,6 +115,44 @@ async def test_resync_returns_sync_counts(resync_client):
     assert body["upserted"] == 3
     assert body["deleted"] == 1
     assert body["skipped"] == 2
+
+
+@pytest.mark.unit
+async def test_resync_schedules_amenity_task_without_blocking_response(resync_client, monkeypatch):
+    """When enable_amenity_discovery is on and sync_posts reports routes
+    needing amenity discovery, the resync response must return
+    "amenity_sync": "started" without ever awaiting the actual amenity
+    sync itself — the whole point of
+    docs/dev/fix_startup_blocking_amenity_sync.md Phase 3.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "enable_amenity_discovery", True)
+
+    fake_result = SyncResult(upserted=1, amenity_route_ids=[42])
+
+    never_awaited = AsyncMock()
+
+    with (
+        patch("app.routes.internal.sync_posts", new=AsyncMock(return_value=fake_result)),
+        patch("app.services.background_sync.sync_amenities_for_routes", new=never_awaited),
+    ):
+        resp = await resync_client.post(
+            "/internal/resync",
+            headers={"X-Resync-Token": _VALID_TOKEN},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["amenity_sync"] == "started"
+    # The response returned already — give the scheduled task a tick to
+    # actually run, then confirm it did (proving it was genuinely
+    # scheduled, not silently dropped), all *after* the response.
+    import asyncio
+
+    await asyncio.sleep(0)
+    never_awaited.assert_awaited_once()
 
 
 @pytest.mark.unit

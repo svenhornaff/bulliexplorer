@@ -107,8 +107,8 @@ Body.
             counts = await sync_posts(tmp_path, session)
             await session.commit()
 
-    assert counts["upserted"] == 1
-    assert counts["skipped"] == 0
+    assert counts.upserted == 1
+    assert counts.skipped == 0
 
     # Geocode was called exactly once with the right query.
     mock_gc.assert_awaited_once()
@@ -172,7 +172,7 @@ Body.
             counts = await sync_posts(tmp_path, session)
             await session.commit()
 
-    assert counts["upserted"] == 1
+    assert counts.upserted == 1
 
     # The geocoding function must never have been called.
     mock_gc.assert_not_awaited()
@@ -235,8 +235,8 @@ Body.
             await session.commit()
 
     # Post is upserted despite the bad POI.
-    assert counts["upserted"] == 1
-    assert counts["skipped"] == 0  # post-level skip, not POI-level
+    assert counts.upserted == 1
+    assert counts.skipped == 0  # post-level skip, not POI-level
 
     # Geocoding was attempted for the bad query.
     mock_gc.assert_awaited_once()

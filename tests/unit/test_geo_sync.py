@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from geoalchemy2.shape import from_shape
 from shapely.geometry import LineString, Point
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +33,7 @@ from app.services.geo_sync import (  # noqa: PLC2701
     _resolve_poi_location,
     _resolve_poi_location_with_geocoding,
     sync_amenities,
+    sync_route_amenities,
 )
 
 # Minimal valid GPX with two track points and elevation/timestamp data.
@@ -625,6 +627,57 @@ def test_amenity_query_bboxes_chunks_are_geographically_local():
     for south, west, north, east in bboxes:
         assert (north - south) < overall_span
         assert (east - west) < overall_span
+
+
+# ---------------------------------------------------------------------------
+# sync_route_amenities — the route_id-only public entry point
+# (docs/dev/fix_startup_blocking_amenity_sync.md Phase 1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_sync_route_amenities_loads_route_and_delegates():
+    """sync_route_amenities(session, route_id) loads the Route by id,
+    converts route.track back to a shapely linestring, and delegates to
+    sync_amenities — the actual amenity-discovery logic stays in one
+    place, this is just the route_id-only entry point background tasks
+    use once the original in-memory Route/linestring from content sync
+    no longer exist.
+    """
+    linestring = LineString([(8.0, 48.0), (8.1, 48.1)])
+    route = Route(id=42, name="Test Route", track=from_shape(linestring, srid=4326))
+
+    fake_session = AsyncMock(spec=AsyncSession)
+    fake_session.get = AsyncMock(return_value=route)
+
+    with patch("app.services.geo_sync.sync_amenities", new_callable=AsyncMock) as mock_sync_amenities:
+        await sync_route_amenities(fake_session, 42)
+
+    fake_session.get.assert_awaited_once_with(Route, 42)
+    mock_sync_amenities.assert_awaited_once()
+    call_args = mock_sync_amenities.await_args
+    assert call_args is not None
+    assert call_args.args[0] is fake_session
+    assert call_args.args[1] is route
+    # The linestring passed through must be the geometry recovered from
+    # route.track, not some other object — same coordinates round-tripped.
+    assert list(call_args.args[2].coords) == list(linestring.coords)
+
+
+@pytest.mark.unit
+async def test_sync_route_amenities_missing_route_is_a_noop():
+    """If the route no longer exists by the time this runs (deleted by a
+    later post edit between being scheduled and actually running —
+    entirely possible for the background-task path), this must log and
+    return, not raise.
+    """
+    fake_session = AsyncMock(spec=AsyncSession)
+    fake_session.get = AsyncMock(return_value=None)
+
+    with patch("app.services.geo_sync.sync_amenities", new_callable=AsyncMock) as mock_sync_amenities:
+        await sync_route_amenities(fake_session, 999)
+
+    mock_sync_amenities.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

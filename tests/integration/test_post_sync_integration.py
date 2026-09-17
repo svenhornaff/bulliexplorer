@@ -109,9 +109,9 @@ async def test_post_round_trips_into_db(tmp_path):
         counts = await sync_posts(tmp_path, session)
         await session.commit()
 
-    assert counts["upserted"] == 1
-    assert counts["deleted"] == 0
-    assert counts["skipped"] == 0
+    assert counts.upserted == 1
+    assert counts.deleted == 0
+    assert counts.skipped == 0
 
     # Verify the row in DB.
     async with factory() as session:
@@ -146,8 +146,8 @@ async def test_sync_is_idempotent(tmp_path):
         counts2 = await sync_posts(tmp_path, session)
         await session.commit()
 
-    assert counts1["upserted"] == 1
-    assert counts2["upserted"] == 1  # still counted as processed, but no DB write
+    assert counts1.upserted == 1
+    assert counts2.upserted == 1  # still counted as processed, but no DB write
 
     # Only one row must exist.
     async with factory() as session:
@@ -183,8 +183,8 @@ async def test_deleted_file_removes_db_row(tmp_path):
         counts = await sync_posts(tmp_path, session)
         await session.commit()
 
-    assert counts["deleted"] == 1
-    assert counts["upserted"] == 0
+    assert counts.deleted == 1
+    assert counts.upserted == 0
 
     async with factory() as session:
         result = await session.execute(select(Post).where(Post.slug == "test-ride"))
@@ -202,8 +202,8 @@ async def test_invalid_file_skipped_valid_file_upserted(tmp_path):
         counts = await sync_posts(tmp_path, session)
         await session.commit()
 
-    assert counts["upserted"] == 1
-    assert counts["skipped"] == 1
+    assert counts.upserted == 1
+    assert counts.skipped == 1
 
     async with factory() as session:
         result = await session.execute(select(Post))
@@ -253,8 +253,8 @@ async def test_multiple_posts_all_upserted(tmp_path):
         counts = await sync_posts(tmp_path, session)
         await session.commit()
 
-    assert counts["upserted"] == 2
-    assert counts["skipped"] == 0
+    assert counts.upserted == 2
+    assert counts.skipped == 0
 
     async with factory() as session:
         result = await session.execute(select(Post))

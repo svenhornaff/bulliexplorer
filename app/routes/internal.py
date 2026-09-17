@@ -15,7 +15,8 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.security import APIKeyHeader
 
 from app.core.config import get_settings
-from app.core.db import get_db_session
+from app.core.db import get_db_session, get_session_factory
+from app.services.background_sync import schedule_amenity_sync
 from app.services.github_sync import fetch_and_write
 from app.services.post_sync import sync_posts
 from app.utils.log_factory import get_logger
@@ -117,10 +118,22 @@ async def resync(
         curl -X POST -H "X-Resync-Token: $RESYNC_TOKEN" \\
              https://bulliexplorer.com/internal/resync
 
+    Content sync (posts/routes/POIs) is awaited and reflected in the
+    response. Amenity discovery (Overpass) for any affected routes is
+    started as a background task instead — **not** awaited as part of
+    this response — per
+    ``docs/dev/fix_startup_blocking_amenity_sync.md`` Phase 3: it used to
+    block this endpoint for as long as the slowest route's Overpass
+    retries/splits/backoff took, up to several minutes for a large
+    route. ``amenity_sync": "started"`` in the response means exactly
+    that — scheduled, not synchronously completed — so a caller isn't
+    misled by an unqualified "done".
+
     Returns
     -------
     dict
-        ``{"status": "ok", "upserted": N, "deleted": N, "skipped": N}``
+        ``{"status": "ok", "upserted": N, "deleted": N, "skipped": N,
+        "amenity_sync": "started"|"skipped"}``
     """
     import app.main as main_module
 
@@ -128,11 +141,28 @@ async def resync(
     logger.info("Manual resync triggered from %s", request.client)
 
     settings = get_settings()
-    counts = await sync_posts(content_dir, db, enable_amenity_discovery=settings.enable_amenity_discovery)
+    result = await sync_posts(content_dir, db)
     # get_db_session commits on clean exit — no explicit commit needed here.
 
-    logger.info("Resync complete: %s", counts)
-    return {"status": "ok", **counts}
+    amenity_sync_status = "skipped"
+    if settings.enable_amenity_discovery:
+        task = schedule_amenity_sync(
+            main_module.app.state,
+            get_session_factory(),
+            result.amenity_route_ids,
+            task_name="amenity_sync_resync",
+        )
+        if task is not None:
+            amenity_sync_status = "started"
+
+    logger.info("Resync complete: upserted=%d deleted=%d skipped=%d", result.upserted, result.deleted, result.skipped)
+    return {
+        "status": "ok",
+        "upserted": result.upserted,
+        "deleted": result.deleted,
+        "skipped": result.skipped,
+        "amenity_sync": amenity_sync_status,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -234,11 +264,32 @@ async def github_webhook(
     fetch_counts = await fetch_and_write(**fetch_kwargs)
 
     content_dir = main_module.BASE_DIR / "content" / "posts"
-    sync_counts = await sync_posts(content_dir, db, enable_amenity_discovery=settings.enable_amenity_discovery)
+    result = await sync_posts(content_dir, db)
 
+    # Same split as the resync endpoint above: respond to GitHub as soon
+    # as content sync completes, amenity discovery continues in the
+    # background. This one matters more than it sounds
+    # (fix_startup_blocking_amenity_sync.md) — GitHub expects a webhook
+    # response within a short window and may mark the delivery as failed
+    # (visible as a timeout in the repo's webhook delivery log) even
+    # though the sync kept running server-side regardless, a confusing
+    # false-negative for anyone checking whether a publish worked.
+    amenity_sync_status = "skipped"
+    if settings.enable_amenity_discovery:
+        task = schedule_amenity_sync(
+            main_module.app.state,
+            get_session_factory(),
+            result.amenity_route_ids,
+            task_name="amenity_sync_webhook",
+        )
+        if task is not None:
+            amenity_sync_status = "started"
+
+    sync_counts = {"upserted": result.upserted, "deleted": result.deleted, "skipped": result.skipped}
     logger.info("Webhook publish complete: fetch=%s sync=%s", fetch_counts, sync_counts)
     return {
         "status": "ok",
         "fetch": fetch_counts,
         "sync": sync_counts,
+        "amenity_sync": amenity_sync_status,
     }

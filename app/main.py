@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.core.config import get_settings
 from app.core.db import dispose_engine, get_session_factory, init_engine
+from app.services.background_sync import cancel_amenity_sync_tasks, schedule_amenity_sync
 from app.services.post_sync import sync_posts
 from app.utils.log_factory import configure_logging, get_logger
 
@@ -68,14 +69,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_engine(settings.database_url)
 
     # Sync Markdown posts → DB on every startup so new/changed files are
-    # picked up automatically without a manual step.
+    # picked up automatically without a manual step. Deliberately does
+    # NOT include amenity discovery (Overpass) inline — that used to be
+    # threaded through here and could block the app from ever reporting
+    # healthy for several minutes on a route needing several retried/
+    # split/rate-limited Overpass chunks. See
+    # docs/dev/fix_startup_blocking_amenity_sync.md. Content sync itself
+    # (this call) is fast and has no such failure mode — it stays
+    # blocking, since a reader hitting a post needs it to actually exist.
     content_dir = BASE_DIR / "content" / "posts"
-    async with get_session_factory()() as session:
-        await sync_posts(content_dir, session, enable_amenity_discovery=settings.enable_amenity_discovery)
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        result = await sync_posts(content_dir, session)
         await session.commit()
+
+    if settings.enable_amenity_discovery:
+        schedule_amenity_sync(
+            app.state,
+            session_factory,
+            result.amenity_route_ids,
+            task_name="amenity_sync_startup",
+        )
 
     yield
     logger.info("BulliExplorer shutting down")
+    await cancel_amenity_sync_tasks(app.state)
     await dispose_engine()
 
 

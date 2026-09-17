@@ -28,6 +28,7 @@ from app.models.nearby_amenity import NearbyAmenity
 from app.models.point_of_interest import PointOfInterest
 from app.models.post import Post
 from app.models.route import Route
+from app.services.geo_sync import sync_route_amenities
 from app.services.overpass import _parse_element  # noqa: PLC2701
 from app.services.post_sync import sync_posts
 
@@ -170,8 +171,8 @@ Post body.
         counts = await sync_posts(tmp_path, session)
         await session.commit()
 
-    assert counts["upserted"] == 1
-    assert counts["skipped"] == 0
+    assert counts.upserted == 1
+    assert counts.skipped == 0
 
     # Verify Route row exists and geometry round-trips through PostGIS.
     async with factory() as session:
@@ -302,9 +303,9 @@ Just text, no GPX, no POIs.
         counts = await sync_posts(tmp_path, session)
         await session.commit()
 
-    assert counts["upserted"] == 1
-    assert counts["skipped"] == 0
-    assert counts["deleted"] == 0
+    assert counts.upserted == 1
+    assert counts.skipped == 0
+    assert counts.deleted == 0
 
     # Post row exists with correct data.
     async with factory() as session:
@@ -361,8 +362,8 @@ Plain body.
         counts = await sync_posts(tmp_path, session)
         await session.commit()
 
-    assert counts["upserted"] == 2
-    assert counts["skipped"] == 0
+    assert counts.upserted == 2
+    assert counts.skipped == 0
 
     async with factory() as session:
         # Geo post has a Route.
@@ -539,8 +540,8 @@ Body.
         await session.commit()
 
     # Post is upserted despite the bad POI.
-    assert counts["upserted"] == 1
-    assert counts["skipped"] == 0
+    assert counts.upserted == 1
+    assert counts.skipped == 0
 
     # Only the POI with coordinates was written.
     async with factory() as session:
@@ -605,10 +606,16 @@ Body.
 # ---------------------------------------------------------------------------
 # Phase 4 (gis_cycling_upgrade.md): NearbyAmenity discovery via Overpass.
 #
-# enable_amenity_discovery defaults to False (app/core/config.py) — every
-# test above passes with zero changes because sync_route() never calls
-# Overpass unless this flag is explicitly on. These tests turn it on
-# deliberately, with a mocked transport — never a real network call.
+# sync_route()/sync_posts() no longer call Overpass at all—see
+# docs/dev/fix_startup_blocking_amenity_sync.md Phase 1. Amenity discovery
+# is a separate, explicitly-invoked step now (sync_route_amenities(),
+# typically run from a background task in production — see
+# app/services/background_sync.py — but called directly and synchronously
+# here since these tests only care about the amenity-sync behavior itself,
+# not the background-task wiring). Every test above this point passes with
+# zero changes since amenity discovery was never inline in the first place
+# post-refactor. Always a mocked transport here — never a real network
+# call.
 # ---------------------------------------------------------------------------
 
 
@@ -648,9 +655,15 @@ Body.
     factory = get_session_factory()
 
     async with factory() as session:
+        result = await sync_posts(tmp_path, session)
+        await session.commit()
+
+    assert len(result.amenity_route_ids) == 1, "exactly one route should need amenity discovery"
+
+    async with factory() as session:
         with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = [_parse_element(_OVERPASS_CAMPSITE)]
-            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+            await sync_route_amenities(session, result.amenity_route_ids[0])
         await session.commit()
 
     async with factory() as session:
@@ -672,11 +685,12 @@ Body.
 
 
 @pytest.mark.integration
-async def test_amenity_discovery_disabled_by_default_no_rows(tmp_path):
-    """enable_amenity_discovery defaults to False — sync_posts() called
-    the ordinary way (as every other test in this file does) creates zero
-    NearbyAmenity rows and makes zero Overpass calls, confirmed via a
-    mock that would raise if it were ever actually invoked.
+async def test_amenity_discovery_not_run_unless_explicitly_invoked(tmp_path):
+    """sync_posts() alone (as every other test in this file does) creates
+    zero NearbyAmenity rows and makes zero Overpass calls, confirmed via a
+    mock that would raise if it were ever actually invoked —
+    sync_route_amenities() must be called separately for amenities to
+    exist at all (fix_startup_blocking_amenity_sync.md Phase 1).
     """
     _write_gpx(tmp_path, "route.gpx")
     _write_md(
@@ -699,9 +713,11 @@ Body.
     factory = get_session_factory()
     with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
         async with factory() as session:
-            await sync_posts(tmp_path, session)  # enable_amenity_discovery not passed — defaults off
+            result = await sync_posts(tmp_path, session)  # sync_route_amenities not called
             await session.commit()
         mock_query.assert_not_awaited()
+
+    assert len(result.amenity_route_ids) == 1, "the route is still reported as needing amenity discovery"
 
     async with factory() as session:
         post = (await session.execute(select(Post).where(Post.slug == "no-amenity-post"))).scalar_one()
@@ -740,10 +756,15 @@ Body.
     factory = get_session_factory()
     parsed = _parse_element(_OVERPASS_CAMPSITE)
 
+    async with factory() as session:
+        result = await sync_posts(tmp_path, session)
+        await session.commit()
+    route_id = result.amenity_route_ids[0]
+
     with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
         mock_query.return_value = [parsed]
         async with factory() as session:
-            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+            await sync_route_amenities(session, route_id)
             await session.commit()
 
         # The per-route cooldown (geo_sync.py's _AMENITY_SYNC_COOLDOWN) would
@@ -752,23 +773,19 @@ Body.
         # "long enough since last attempt" so this test still exercises the
         # actual delete-and-replace path, not the cooldown skip.
         async with factory() as session:
-            post = (await session.execute(select(Post).where(Post.slug == "resync-amenity-post"))).scalar_one()
-            route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+            route = await session.get(Route, route_id)
             route.amenities_synced_at = None
             await session.commit()
 
         async with factory() as session:
-            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+            await sync_route_amenities(session, route_id)
             await session.commit()
 
     assert mock_query.await_count == 2, "cooldown reset correctly — both syncs actually queried Overpass"
 
     async with factory() as session:
-        post = (await session.execute(select(Post).where(Post.slug == "resync-amenity-post"))).scalar_one()
-        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
-
         amenities = (
-            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))).scalars().all()
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route_id))).scalars().all()
         )
         assert len(amenities) == 1, "Exactly one NearbyAmenity row after two syncs, not a duplicate"
 
@@ -803,23 +820,27 @@ Body.
     factory = get_session_factory()
     parsed = _parse_element(_OVERPASS_CAMPSITE)
 
+    async with factory() as session:
+        result = await sync_posts(tmp_path, session)
+        await session.commit()
+    route_id = result.amenity_route_ids[0]
+
     with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
         mock_query.return_value = [parsed]
         async with factory() as session:
-            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+            await sync_route_amenities(session, route_id)
             await session.commit()
         async with factory() as session:
-            await sync_posts(tmp_path, session, enable_amenity_discovery=True)
+            await sync_route_amenities(session, route_id)
             await session.commit()
 
     assert mock_query.await_count == 1, "second sync within the cooldown window must not query Overpass again"
 
     async with factory() as session:
-        post = (await session.execute(select(Post).where(Post.slug == "cooldown-amenity-post"))).scalar_one()
-        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+        route = await session.get(Route, route_id)
 
         assert route.amenities_synced_at is not None
         amenities = (
-            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))).scalars().all()
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route_id))).scalars().all()
         )
         assert len(amenities) == 1, "the cooldown-skipped sync must leave the first sync's row untouched"
