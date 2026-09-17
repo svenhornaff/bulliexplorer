@@ -74,7 +74,17 @@ _INTER_INSTANCE_RETRY_DELAY_S = 1.0
 # a real dense-urban bbox (Cologne-Bonn-Ruhr) timed out against both
 # instances at 35s — cheap headroom to try before reaching for the
 # heavier Phase 2 adaptive-split fix below.
-_HTTP_TIMEOUT_S = 90.0
+# Exposed (not underscore-prefixed as far as external use goes — still
+# module-private by convention, but geo_sync.py imports it directly) so
+# any caller building its own httpx.AsyncClient to pass in via
+# ``http_client=`` uses the same timeout budget as the client this module
+# builds itself. httpx.AsyncClient() defaults to a 5s timeout when none is
+# given — a caller-supplied client that omits ``timeout=`` silently falls
+# back to that 5s default instead of the 90s budget above, which is
+# exactly what happened in production (fix_overpass_urban_density_timeout.md
+# "Root cause, corrected").
+HTTP_TIMEOUT_S = 90.0
+_HTTP_TIMEOUT_S = HTTP_TIMEOUT_S
 
 # Max times a failing bbox is split in half and retried
 # (fix_overpass_urban_density_timeout.md Phase 2). Capped at 1 — split

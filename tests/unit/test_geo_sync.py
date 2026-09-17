@@ -17,9 +17,11 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from shapely.geometry import LineString, Point
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.services.geo_sync as _geo_module
 from app.models.post_schema import PoiFrontmatter
+from app.models.route import Route
 from app.services.geo_sync import (  # noqa: PLC2701
     _amenity_query_bboxes,
     _buffered_bbox,
@@ -29,7 +31,9 @@ from app.services.geo_sync import (  # noqa: PLC2701
     _resolve_gpx_path,
     _resolve_poi_location,
     _resolve_poi_location_with_geocoding,
+    sync_amenities,
 )
+from app.services.overpass import HTTP_TIMEOUT_S
 
 # Minimal valid GPX with two track points and elevation/timestamp data.
 # Distance ≈ 11.13 km (straight-line Haversine between the two points).
@@ -622,3 +626,75 @@ def test_amenity_query_bboxes_chunks_are_geographically_local():
     for south, west, north, east in bboxes:
         assert (north - south) < overall_span
         assert (east - west) < overall_span
+
+
+# ---------------------------------------------------------------------------
+# sync_amenities — default httpx.AsyncClient must carry HTTP_TIMEOUT_S
+#
+# Regression test for fix_overpass_urban_density_timeout.md's corrected
+# root cause: sync_amenities is the only real caller that builds its own
+# client and passes it into overpass.query_nearby_amenities(). httpx's own
+# AsyncClient() defaults to a 5s timeout when none is given, which
+# silently undercut the intended 90s (HTTP_TIMEOUT_S) budget for every
+# production sync, before and after the Phase 1 "fix" — that constant only
+# ever applied on the http_client=None branch *inside* overpass.py itself,
+# never to a client built by a caller.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_sync_amenities_default_client_uses_overpass_http_timeout():
+    """When sync_amenities builds its own client (no http_client passed),
+    that client's timeout must match overpass.HTTP_TIMEOUT_S — not
+    httpx's own 5s default.
+    """
+    route = Route(id=1, name="Test Route")
+    linestring = LineString([(8.0, 48.0), (8.1, 48.1)])
+    fake_session = AsyncMock(spec=AsyncSession)
+
+    seen_clients: list[httpx.AsyncClient | None] = []
+
+    async def _fake_query_nearby_amenities(south, west, north, east, *, http_client=None, **kwargs):
+        seen_clients.append(http_client)
+        # Return None (failure) to short-circuit before any DB access —
+        # this test only cares about how the client was constructed.
+        return None
+
+    with patch(
+        "app.services.geo_sync.query_nearby_amenities",
+        side_effect=_fake_query_nearby_amenities,
+    ):
+        await sync_amenities(session=fake_session, route=route, linestring=linestring)
+
+    assert seen_clients, "query_nearby_amenities was never called"
+    client = seen_clients[0]
+    assert client is not None
+    assert client.timeout.read == HTTP_TIMEOUT_S
+    assert client.timeout.connect == HTTP_TIMEOUT_S
+    await client.aclose()
+
+
+@pytest.mark.unit
+async def test_sync_amenities_passed_in_client_is_not_overridden():
+    """When a caller passes its own http_client, sync_amenities must use
+    it as-is (not silently rewrap it) — only the http_client=None default
+    path needs the HTTP_TIMEOUT_S fix.
+    """
+    route = Route(id=1, name="Test Route")
+    linestring = LineString([(8.0, 48.0), (8.1, 48.1)])
+    fake_session = AsyncMock(spec=AsyncSession)
+
+    async with httpx.AsyncClient(timeout=5.0) as caller_client:
+        seen_clients: list[httpx.AsyncClient | None] = []
+
+        async def _fake_query_nearby_amenities(south, west, north, east, *, http_client=None, **kwargs):
+            seen_clients.append(http_client)
+            return None
+
+        with patch(
+            "app.services.geo_sync.query_nearby_amenities",
+            side_effect=_fake_query_nearby_amenities,
+        ):
+            await sync_amenities(session=fake_session, route=route, linestring=linestring, http_client=caller_client)
+
+        assert seen_clients == [caller_client]

@@ -50,7 +50,7 @@ from app.models.nearby_amenity import NearbyAmenity
 from app.models.point_of_interest import PointOfInterest
 from app.models.post_schema import PoiFrontmatter, RouteFrontmatter
 from app.models.route import Route
-from app.services.overpass import AmenityResult, query_nearby_amenities
+from app.services.overpass import HTTP_TIMEOUT_S, AmenityResult, query_nearby_amenities
 
 logger = logging.getLogger(__name__)
 
@@ -413,7 +413,12 @@ async def sync_amenities(
     _close_client = False
     client = http_client
     if client is None:
-        client = httpx.AsyncClient()
+        # Must match overpass.py's own timeout budget — httpx.AsyncClient()
+        # defaults to a 5s timeout when none is given, which silently
+        # undercut the 90s Phase 1 fix for every real sync (this module is
+        # the only caller that passes a client in). See
+        # fix_overpass_urban_density_timeout.md "Root cause, corrected".
+        client = httpx.AsyncClient(timeout=HTTP_TIMEOUT_S)
         _close_client = True
 
     try:

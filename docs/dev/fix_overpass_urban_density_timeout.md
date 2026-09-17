@@ -248,14 +248,70 @@ pin these down):
   "Left over" bullet.
 
 **Left over**
-- The live resync check above. Once run: confirm via
-  `SELECT route_id, COUNT(*) FROM nearby_amenities WHERE route_id = <dream-of-north's id>;`
-  showing a non-zero count, and the "Show nearby services" checkbox
-  appearing on the live page. If the Rhineland chunk still fails even
-  after both the timeout increase and the split (i.e. even a halved
-  bbox is still too dense), that's the signal this doc's "explicitly out
-  of scope" items below may need revisiting — not expected, but worth
-  checking for before assuming Phase 2 fully closes this out.
+- The live resync check above, blocked on the fix below actually being
+  correct in production traffic, not just in this doc's fixture tests.
+
+## Root cause, corrected (post-deploy log review)
+
+A live production log dump after Phase 1+2 shipped showed the fix hadn't
+actually taken effect: **every** `ReadTimeout` in the logs — both
+instances, both the original Rhineland bbox and both of its split
+halves, and even Feldberg's previously-fast rural bbox on a later sync —
+fired after almost exactly 5–6 seconds, never anywhere near the 90s
+`_HTTP_TIMEOUT_S` budget Phase 1 was supposed to establish.
+
+That 5–6s figure is httpx's own built-in default timeout
+(`httpx.AsyncClient()` with no `timeout=` argument defaults to 5.0s). The
+bug: `_HTTP_TIMEOUT_S` was only ever applied on the branch inside
+`overpass.py` where `query_nearby_amenities` builds its *own* client
+(`http_client=None`). The one caller that matters in production,
+`geo_sync.py`'s `sync_amenities`, always builds its own
+`httpx.AsyncClient()` first (with no `timeout=`) and passes it in via
+`http_client=`. `query_nearby_amenities` never overrides a client that's
+handed to it — by design, so callers can inject mock transports for
+testing — so that caller-built client silently ran at httpx's 5s default
+the entire time, before *and* after the Phase 1 change landed. Raising
+`_HTTP_TIMEOUT_S` never touched real traffic at all.
+
+This also fully explains the two symptoms that looked like they
+contradicted the original density theory:
+- **Splitting "not helping"** — both halves failed for the same reason
+  the whole bbox did: a 5s budget, not because the density theory was
+  wrong or splitting once wasn't enough.
+- **Feldberg failing too, despite being fast and rural** — not evidence
+  Overpass was having a service-wide bad day. A 5s timeout is simply
+  tight enough that even a normally-fast query can occasionally miss it;
+  it isn't, and never was, the generous 90s margin Phase 1 intended.
+
+The original density diagnosis for the Rhineland bbox specifically is
+still plausible and untested against a real timeout budget — this just
+means Phase 1 and Phase 2 haven't actually been exercised against
+production traffic yet, despite being fully covered by fixture tests
+(which always inject their own client with an explicit timeout, so they
+never exposed this gap).
+
+**Fix**: `geo_sync.py` now imports `overpass.HTTP_TIMEOUT_S` (renamed from
+the module-private `_HTTP_TIMEOUT_S`, kept as an internal alias for
+existing in-module references) and passes
+`httpx.AsyncClient(timeout=HTTP_TIMEOUT_S)` on the `http_client=None`
+default-construction path, so the one production caller's client budget
+matches what `overpass.py` intends. The caller-injected-client path
+(tests, and any future caller) is untouched — an explicitly passed-in
+client's timeout is still the caller's own responsibility, unchanged.
+
+**Testing**: two new unit tests in `tests/unit/test_geo_sync.py` —
+`test_sync_amenities_default_client_uses_overpass_http_timeout` asserts
+the client `sync_amenities` builds internally has both `timeout.read` and
+`timeout.connect` equal to `HTTP_TIMEOUT_S` (not httpx's 5s default), and
+`test_sync_amenities_passed_in_client_is_not_overridden` confirms an
+explicitly passed-in client is used as-is, unmodified. `make ci`: 263
+tests passed, 93.25% coverage, security checks clean.
+
+**Still not verified live** — same constraint as Phase 3 above: this
+sandbox has no access to production Overpass egress. The next live
+resync of `dream-of-north` is the first one that will actually run
+against the intended 90s budget; only then does the original density
+theory get a real test.
 
 ## Explicitly out of scope
 
