@@ -44,6 +44,14 @@ campsite/route data *directly* through it**, since that's the first time
 the database holds anything that doesn't also exist in git. Do it before
 that day, not necessarily before this one.
 
+> **Update (`docs/dev/review_17SEP2026.md`)**: this reasoning held at the
+> time it was written, but the calculus has since shifted independent of
+> SQLAdmin — `nearby_amenities` (added by `gis_cycling_upgrade.md` Phase
+> 4, after this doc) is 15k+ rows re-derived by calling a flaky public
+> API (Overpass), not by parsing local git-tracked files. "Everything is
+> re-derivable" no longer fully holds, so Phase 4 below was implemented
+> ahead of the SQLAdmin trigger, not deferred until it.
+
 **CI/CD — lowest urgency at solo scale, and here's the reasoning, not just
 the verdict.** `Makefile`'s `deploy: ci` already makes it structurally
 impossible to run `make deploy` without lint/test/security passing first —
@@ -187,34 +195,99 @@ step the user needs to enable.
   and enable Dependabot alerts + security updates.
 - Wait for the first weekly run or check Insights → Dependency graph →
   Dependabot to confirm it picked up the config.
-- Phase 4 (backup verification) is next but lower urgency — only becomes
-  critical once SQLAdmin ships and campsite/route data is entered
-  directly into the DB.
+- Phase 4 (backup verification) is implemented — see that phase below.
 
-### Phase 4 — Backup verification (do before SQLAdmin ships, not before this)
+
+
+### Phase 4 — Backup verification
+
+> Originally scoped "do before SQLAdmin ships" — re-triggered instead by
+> `docs/dev/review_17SEP2026.md`'s tech-debt register ("No DB backups"):
+> `nearby_amenities` is now 15k+ rows expensive to re-derive against a
+> flaky public API (Overpass), so "everything is re-derivable from git +
+> OSM" no longer fully holds, independent of whether SQLAdmin ever ships
+> (per `buckets.md` bucket #6, it's now superseded and isn't going to).
 
 **Scope**
-- Small container or host cron running nightly:
+- [x] Host cron running nightly (not a container — "small, no new
+  services" per the review):
   ```bash
   docker compose -f docker-compose.prod.yml exec -T db \
     pg_dump -U postgres bulliexplorer | gzip > backup-$(date +%F).sql.gz
   ```
-- Push to Cloudflare R2 via `boto3` (already a dependency, already
-  planned for media storage) — reuse the same credentials/bucket setup
-  rather than standing up a separate one.
-- Retention: keep the last 14 daily backups, delete older ones on upload
-  (avoid unbounded R2 storage growth).
+  implemented as `scripts/backup_db.py` (`make backup`), not raw shell —
+  same dump-via-`docker-compose-exec` approach, but with structured
+  logging and the retention step below built in rather than left as a
+  follow-up.
+- [x] Push to Cloudflare R2 via `boto3` (already a dependency, already
+  planned for media storage, previously unused anywhere in the
+  codebase) — reuses the same `s3_*` settings/credentials already
+  wired for media storage rather than standing up a separate bucket/
+  credential pair.
+- [x] Retention: keep the last 14 daily backups, delete older ones after
+  each successful upload (avoid unbounded R2 storage growth) —
+  `select_keys_to_delete()`/`prune_old_backups()`.
 
 **Done when**
-- A real backup file lands in R2 after a manual trigger.
-- **Actually test a restore** — into a throwaway local Postgres, not the
-  production one:
+- [ ] A real backup file lands in R2 after a manual trigger (`make
+  backup` on the production host). **Not verified from this sandbox**
+  — no production SSH access or real R2 credentials available here;
+  this is the one remaining manual step, tracked explicitly rather than
+  marked done on faith.
+- [ ] **Actually test a restore** — into a throwaway local Postgres, not
+  the production one:
   ```bash
-  gunzip -c backup-2026-XX-XX.sql.gz | psql -U postgres bulliexplorer_restore_test
+  gunzip -c backup-2026-XX-XX.sql.gz | docker compose exec -T db psql -U postgres bulliexplorer_restore_test
   ```
   A backup that's never been restored isn't verified, it's just a file
   that might be a backup — this step is the actual point of the phase,
-  not the upload.
+  not the upload. **Not verified from this sandbox**, same reason as
+  above.
+- [x] The script's own logic (dump invocation, retention selection,
+  upload, credential-missing guard) is covered by unit tests with
+  `boto3`/`subprocess` mocked — the part that *can* be verified without
+  live infrastructure.
+
+**Left over**
+- Install the crontab entry on the production host (see
+  `docs/dev/deployment.md` §6 "Database backups") and run the restore
+  test once, for real, against a throwaway local Postgres — both
+  require production/R2 access this environment doesn't have.
+
+**Summary**
+Added `scripts/backup_db.py`: dumps the `db` container via `docker
+compose exec -T db pg_dump`, gzips in memory, uploads to R2 as
+`backups/backup-YYYY-MM-DD.sql.gz` via `boto3` (reusing the `s3_*`
+settings already declared in `app/core/config.py` for media storage but
+never previously called from anywhere in the codebase), then prunes
+any backups beyond the newest 14 by key (lexicographic sort on the
+date-formatted key name, no date parsing needed). Aborts loudly
+(`sys.exit(1)`) rather than silently no-op-ing when R2 credentials
+aren't configured — a backup job that quietly does nothing looks
+identical to success in a cron mailbox nobody reads closely. Wired up
+as `make backup` and a documented host crontab entry (`docs/dev/
+deployment.md` §6) running nightly at 03:00 — a host cron entry, not a
+new docker-compose service, per the review's "small, no new services"
+scoping.
+
+**Testing**: `tests/unit/test_backup_db.py` — 10 tests, `subprocess.run`
+and `boto3.client` both mocked (AGENTS.md: tests must pass with no
+real R2 credentials, mock boto3/S3 calls). Covers the retention
+selection at each boundary (under/at/over the 14-backup limit) as a
+pure function with no mocking at all, `pg_dump` failure propagation
+(`CalledProcessError` isn't swallowed), the credential-missing abort
+path, and the full upload+prune orchestration. The two genuinely
+unverifiable-from-here pieces — a real R2 upload landing, and an
+actual restore succeeding — are called out explicitly above as open
+"Done when" items rather than checked off without evidence.
+
+`make ci`: 318 passed, 95.93% coverage, security checks clean (`scripts/`
+added to `SRC`/pyright's `include` so it's held to the same lint/type
+bar as `app/`).
+
+**Files touched**: `scripts/backup_db.py` (new),
+`tests/unit/test_backup_db.py` (new), `Makefile`, `pyproject.toml`,
+`docs/dev/deployment.md`.
 
 ### Phase 5 — CI/CD (GitHub Actions)
 
@@ -252,8 +325,9 @@ deliberately not wired in — stays `make deploy` from the local machine.
   trigger automatically and show a green check.
 - Optionally push a deliberately broken commit to a branch to confirm
   the red-check path works, then revert.
-- Phase 4 (backup verification) is skipped for now; revisit before
-  SQLAdmin ships.
+- Phase 4 (backup verification) is implemented as of
+  `docs/dev/review_17SEP2026.md`'s housekeeping batch — see that phase
+  above for what's done vs. still requiring production access.
 
 ---
 

@@ -71,7 +71,7 @@ quote-style = "double"
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "basic"
-include = ["app"]
+include = ["app", "scripts"]
 exclude = ["tests", "alembic"]
 
 # ── SAST ──────────────────────────────────────────────────────────────────

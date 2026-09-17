@@ -133,8 +133,8 @@ anywhere.
 | R2 API token possibly still Admin R&W | Cloudflare dashboard | Left over from a debugging detour (`media_storage_r2.md` housekeeping); should be Object R&W scoped to the one bucket. |
 | Orphan R2 test object | R2 bucket | Tracked in `media_storage_r2.md`; delete whenever convenient. |
 | GitHub PAT rotation | — | Tracked earlier; owner has explicitly deferred. Listed for completeness only. |
-| No DB backups | bucket #7 | Still defensible (everything re-derivable from git + OSM) but the calculus shifted: `nearby_amenities` is now 15k+ rows that are *expensive* to re-derive against a flaky public API. Worth a periodic `pg_dump` to R2 — small, no new services. |
-| `docs/dev/` sprawl | 22 files | Six `fix_*.md` docs, one documented false lead, one ambiguously-named `issues_phase4.md`. A short `docs/dev/README.md` index (active / historical / superseded) would keep the culture's value without the navigation cost. |
+| ~~No DB backups~~ — 🚧 scripted, restore untested | bucket #7 | **Implemented** — see "Housekeeping batch" below. `scripts/backup_db.py` + host crontab, 14-day retention, unit-tested. Still open: installing the crontab on the real production host and running one real restore test — both need production/R2 access this environment doesn't have. |
+| ~~`docs/dev/` sprawl~~ — ✅ done | 22 files | **Implemented** — see "Housekeeping batch" below. `docs/dev/README.md` added (active / historical / documented-false-lead / config groupings). |
 
 ## Architecture anti-patterns — named honestly, with the defense where one exists
 
@@ -343,3 +343,285 @@ needed to change, only the implementation underneath them.
 `make ci`: 305 passed, 95.89% coverage, security checks clean.
 
 **Files touched**: `app/routes/internal.py`, `templates/post.html`.
+
+### F6 — Docker log rotation
+
+**Done when**
+- [x] `docker-compose.prod.yml`'s `app` service has an explicit `logging`
+  block (`driver: json-file`, `max-size: "10m"`, `max-file: "5"`) instead
+  of relying on the Docker daemon's unbounded defaults.
+- [x] The YAML change alone doesn't need `make ci` (no Python/JS touched)
+  but must still parse — verified with `python3 -c "import yaml;
+  yaml.safe_load(open('docker-compose.prod.yml'))"`.
+
+**Summary**: Added a `logging` block to the `app` service in
+`docker-compose.prod.yml` — `json-file` driver, `max-size: "10m"`,
+`max-file: "5"` (50MB rolling cap total). No `db`/`caddy` service change —
+the finding was specifically about the app's own log volume (Overpass
+warnings are the high-volume case named in the finding); `db`/`caddy` log
+at a much lower, unremarkable rate. Directly addresses both symptoms in
+the finding: unbounded growth risk on the 4GB host, and the unexplained
+missing 08:46-08:48 log window from an earlier investigation (a future
+investigation now has a known, bounded log retention window instead of an
+unexplained gap).
+
+**Testing**: no test suite covers Docker Compose YAML (nothing in this
+project exercises `docker-compose.prod.yml` under pytest — it's deploy
+configuration, not application code). Verified by parsing the file with
+PyYAML directly (`yaml.safe_load`) to confirm it's still valid YAML, and
+by diffing against `git show HEAD:docker-compose.prod.yml` to confirm the
+two pre-existing lint findings on this file (a long line in the
+healthcheck command, no trailing newline at EOF) predate this change and
+aren't newly introduced.
+
+**Files touched**: `docker-compose.prod.yml`.
+
+### F4 — Extract `templates/post.html`'s inline JS to `static/js/post-map.js`
+
+**Done when**
+- [x] All post-map behavior code (route rendering, curated-POI markers,
+  the clustered amenity overlay, runtime icon-canvas generation, popup
+  builders, the theme-swap `transformStyle` carry-over, the full-screen
+  modal) moves out of `templates/post.html`'s inline `<script>` into a
+  new plain `static/js/post-map.js` — no bundler, one script file,
+  consistent with the project's no-build-step architecture.
+- [x] `templates/post.html` keeps a small inline `<script>` block that
+  only sets data (`window.BULLIEXPLORER_MAP_DATA = { routeGeojson,
+  poisGeojson, amenitiesGeojsonUrl, tilesUrl }`) via the existing
+  `|tojson` filter — data belongs in the page, behavior doesn't — then
+  loads `static/js/post-map.js` via a normal `<script src>` tag, after
+  the existing vendor `<script>` tags.
+- [x] `static/js/post-map.js` contains zero Jinja templating — reads its
+  input exclusively from `window.BULLIEXPLORER_MAP_DATA`, so the browser
+  can cache it across page loads/posts instead of re-downloading
+  identical behavior code with every HTML response.
+- [x] `djlint templates/ --check` (the CI-gating template linter) stays
+  clean, and the extracted file has no JS syntax errors — verified with
+  `node -c static/js/post-map.js` (this file, unlike the inline block it
+  replaced, has no Jinja placeholders to substitute first — it's now
+  parseable by a plain JS tool directly, which is itself part of the
+  point of this fix).
+- [x] `make ci` green — existing tests that asserted on inlined JS
+  behavior code (`function cyclingLayers(flavor)`, `kind_detail`
+  filters, etc.) updated to read `static/js/post-map.js` directly
+  instead of the post-detail HTML response; tests that only asserted on
+  *data* (`routeGeojson`/`poisGeojson` values, `FeatureCollection`,
+  `LineString`) continue to check the HTML response, since that data
+  legitimately still lives there.
+
+**Summary**: Extracted ~750 lines of inline JS from
+`templates/post.html` into `static/js/post-map.js`, verbatim in
+behavior — no logic changes, purely a move. The only edits inside the
+moved code were the four data-injection lines at the top, which now read
+from `window.BULLIEXPLORER_MAP_DATA` (set by the small inline block that
+remains in `post.html`) instead of Jinja `{{ ... | tojson }}`
+placeholders directly. `templates/post.html` dropped from 819 to 87
+lines. The new file is loaded via a plain `<script src="/static/js/
+post-map.js"></script>` tag positioned after the vendor scripts
+(`maplibre-gl.js`, `pmtiles.js`, `basemaps.js`) and after the small data
+block, same load order as before. `StaticFiles`'s existing `no-cache`
+`Cache-Control` header (set by `app/main.py`'s `_static_cache_headers`
+middleware for everything under `/static/`) already applies to this new
+file with no further change needed — a conditional GET on every request,
+but a 304 (not a full re-download) for an unchanged file, which this file
+now structurally can be across pages/posts since it carries no
+per-request data.
+
+Both pure-function concerns named in the original finding — testability
+and cacheability — are addressed structurally by the move itself; no new
+unit tests were added for the newly-extractable pure functions
+(`escapeHtml`, `buildAmenityPopupHtml`, phone parsing) in this commit,
+since this fix's scope was the extraction, not a follow-on JS test
+suite/runner (this project has no JS test runner — adding one is a
+bigger decision than this fix, and out of scope here).
+
+**Testing**: `djlint templates/ --check` stays clean. `node -c
+static/js/post-map.js` confirms the extracted file is syntactically
+valid plain JS with zero parse errors (no Jinja substitution needed
+first, unlike every prior phase's inline-script verification in this
+project's other `fix_*.md` docs — a direct, permanent improvement in
+how verifiable this code is, not just a one-time check). Two unit tests
+that asserted on now-moved JS content (`test_post_with_route_and_tiles_
+includes_cycling_layers`, `test_post_with_route_and_tiles_cycling_layers_
+use_kind_detail`) were rewritten to read `static/js/post-map.js`
+directly instead of the post-detail HTML response (renamed
+`test_post_map_js_includes_cycling_layers`/`test_post_map_js_cycling_
+layers_use_kind_detail`); the geojson-inlining tests were updated to
+assert on the new `BULLIEXPLORER_MAP_DATA`/`routeGeojson`/`poisGeojson`
+keys instead of the old `ROUTE_GEOJSON`/`POIS_GEOJSON` const names, and
+a new assertion confirms `/static/js/post-map.js` is referenced.
+Same "not meaningfully unit-testable" reasoning as every other
+MapLibre-rendering phase in this project's docs applies to actual
+browser/runtime behavior — this fix doesn't change that, it only
+changes where the code lives and how testable its non-map-runtime parts
+(syntax, presence of expected functions/filters) are.
+
+`make ci`: 308 passed, 95.93% coverage, security checks clean.
+
+**Files touched**: `templates/post.html`, `static/js/post-map.js`
+(new), `tests/unit/test_templates.py`.
+
+### F5 — Postgres advisory lock around the startup content sync
+
+**Done when**
+- [x] `app/core/db.py` gains two small, framework-free helpers —
+  `try_acquire_advisory_lock(session, key)` (wraps
+  `pg_try_advisory_lock`, non-blocking, returns a `bool`) and
+  `release_advisory_lock(session, key)` (wraps `pg_advisory_unlock`) —
+  reusable Postgres primitives, not specific to the startup-sync use
+  case.
+- [x] `app/main.py`'s lifespan wraps the existing `sync_posts` call: the
+  worker that wins `try_acquire_advisory_lock` runs the real sync and
+  releases the lock in a `finally` after commit; a worker that doesn't
+  win logs and skips straight through with an empty `SyncResult()` — no
+  amenity-discovery task gets (redundantly) scheduled by the losing
+  worker either, since `SyncResult()`'s default `amenity_route_ids` is
+  empty.
+- [x] The lock key is a single fixed module-level constant
+  (`_STARTUP_SYNC_LOCK_KEY`) — one lock, scoped to "has *a* worker
+  already run startup sync", not per-route/per-post (there's exactly one
+  thing being deduplicated across workers: the whole startup sync call).
+- [x] `make ci` green, plus new integration tests (real Postgres
+  required — advisory locks are a genuine server-side primitive, not
+  mockable meaningfully) proving: (a) the low-level helpers' actual lock/
+  blocked/release/reacquire semantics, (b) a lifespan skips `sync_posts`
+  entirely when the lock is already held by another connection, and (c)
+  a lifespan that wins the lock releases it afterward — not leaked, so a
+  subsequent acquire attempt succeeds.
+
+**Summary**: `app/core/db.py` gained `try_acquire_advisory_lock`/
+`release_advisory_lock`, thin wrappers around `pg_try_advisory_lock`/
+`pg_advisory_unlock` executed via the existing `AsyncSession`. Both are
+session-scoped (not transaction-scoped, per Postgres's own two lock
+flavors) — deliberate, since the lock needs to be held across the whole
+sync-and-commit sequence, then explicitly released, rather than
+auto-released at a `COMMIT` that happens partway through. `app/main.py`'s
+lifespan now acquires `_STARTUP_SYNC_LOCK_KEY` on the same session used
+for `sync_posts`, before calling it: on success, runs the sync, commits,
+then releases the lock in a `finally` (so a failed sync still releases,
+rather than leaking the lock on the next deploy); on failure to acquire,
+logs `"Startup sync lock held by another worker — skipping"` and
+continues with an empty `SyncResult()` — the rest of the lifespan
+(amenity-discovery scheduling, the `yield`, shutdown) proceeds
+identically either way, just with nothing new to schedule on the losing
+worker.
+
+This directly closes both consequences named in the finding: with two
+`uvicorn --workers 2` processes racing on startup, only one now performs
+the actual parse/upsert work (no more double parsing/double upserts
+racing the same rows), and the amenity-sync cooldown check downstream
+only ever sees `amenities_synced_at` written once per deploy, closing the
+small race window where both workers could read a stale value before
+either committed.
+
+**Explicitly not changed**: the module-level `_last_overpass_time` rate
+limiter in `geo_sync.py` (named in the review's anti-patterns section as
+related but distinct) — F5 makes the *startup* sync single-worker, which
+is the scope this fix targeted, but amenity discovery scheduled from
+that sync still runs as its own background task and could still
+theoretically run in more than one worker's process space if
+`enable_amenity_discovery` triggers it from more than one place in the
+future. Per-process rate limiting remains a known, now-more-clearly-
+scoped limitation, not silently fixed by this change — worth documenting
+explicitly rather than leaving it implied.
+
+**Testing**: `tests/integration/test_startup_sync_lock_integration.py`
+(new, requires the PostGIS container) — three tests: the raw lock
+helpers' acquire/blocked/release/reacquire cycle against two real
+connections; a lifespan skipping `sync_posts` (patched, asserted
+`not_called()`) when another connection already holds the lock; a
+lifespan that completes a (patched) sync and is confirmed to have
+released the lock afterward by successfully reacquiring it in a fresh
+session. No unit-level (mocked-DB) test was added for the lock helpers
+themselves — `pg_try_advisory_lock`/`pg_advisory_unlock` are genuine
+Postgres server-side primitives with no meaningful mock; the integration
+tests are the real coverage here, consistent with AGENTS.md's testing
+split (`tests/unit/` — no DB; `tests/integration/` — needs Postgres).
+
+`make ci`: 308 passed (was 305), 95.93% coverage, security checks clean.
+
+**Files touched**: `app/core/db.py`, `app/main.py`,
+`tests/integration/test_startup_sync_lock_integration.py` (new).
+
+### Housekeeping batch — backup cron + docs index
+
+**Done when**
+- [x] A backup script exists that dumps the production `db` container,
+  gzips it, and uploads it to R2 with 14-day retention — reusing the
+  `s3_*` settings/`boto3` dependency already in place for media storage
+  rather than introducing new config or a new dependency.
+- [x] Scheduled via a host crontab entry, documented in
+  `docs/dev/deployment.md` — explicitly **not** a new docker-compose
+  service, per the review's "small, no new services" framing for this
+  item.
+- [x] The script's own logic (retention selection, dump invocation,
+  upload, credential-missing guard) is unit-tested with `boto3`/
+  `subprocess` mocked — the part verifiable without production/R2
+  access.
+- [x] A `docs/dev/README.md` index exists, grouping the (at the time of
+  this review) 22+ files under `docs/dev/` into active reference /
+  historical (implemented, kept as the record of why) / documented
+  false leads / config, so a future reader doesn't need to open every
+  file to find the one they need.
+- [x] `make ci` green with the new script + tests included in the
+  linted/type-checked surface (`scripts/` added to `Makefile`'s `SRC`
+  and `pyproject.toml`'s `[tool.pyright]` `include`).
+- [ ] **Explicitly not achievable from this sandbox**: a real backup
+  file actually landing in R2 on the production host, and one real
+  restore test against a throwaway local Postgres — both require
+  production SSH access and live R2 credentials that don't exist in
+  this environment. Tracked as an open item in `docs/dev/
+  monitoring_ops.md` Phase 4 and `docs/dev/buckets.md` bucket #7, not
+  silently checked off.
+
+**Summary**: Two independent, low-urgency items from the review's
+housekeeping batch, done together as planned:
+
+1. **Backup cron** — `scripts/backup_db.py` dumps the `db` service via
+   `docker compose exec -T db pg_dump`, gzips the output in memory,
+   uploads to R2 as `backups/backup-YYYY-MM-DD.sql.gz` via `boto3`
+   (reusing `s3_endpoint_url`/`s3_access_key`/`s3_secret_key`/
+   `s3_bucket` — declared in `app/core/config.py` for media storage back
+   in `media_storage_r2.md`, but never actually called from anywhere in
+   the codebase until now, since media uploads ended up going
+   browser-to-R2 directly via Sveltia instead), then prunes any backups
+   beyond the newest 14 (plain lexicographic sort on the date-formatted
+   key — correct without parsing dates back out, since the key format
+   sorts in date order by construction). Aborts loudly
+   (`sys.exit(1)`) rather than silently no-op-ing when R2 credentials
+   aren't configured, so a misconfigured cron entry fails visibly
+   instead of looking identical to a successful no-op. Exposed as
+   `make backup`; a host crontab entry (03:00 nightly) documented in
+   `docs/dev/deployment.md` §6, deliberately not a new docker-compose
+   service. Full phase write-up (scope/done-when/left-over) lives in
+   `docs/dev/monitoring_ops.md` Phase 4, which this also un-gates from
+   its original "before SQLAdmin ships" trigger — that trigger no
+   longer applies (`buckets.md` bucket #6: SQLAdmin is superseded, not
+   shipping), and this review's own tech-debt finding re-triggers the
+   work independent of it.
+2. **Docs index** — `docs/dev/README.md` groups every existing file into
+   active reference, historical-but-still-the-record-of-why, documented
+   false leads, and non-prose config, with a one-line note on what each
+   is for. Framed explicitly as something that goes stale exactly as
+   fast as any other doc if new files aren't added to it in the same
+   change — not a one-time artifact.
+
+**Testing**: `tests/unit/test_backup_db.py` — 10 tests. `select_keys_to_
+delete()` (the retention logic) is tested as a pure function with no
+mocking at all, at each boundary (under/exactly-at/over the 14-backup
+limit). `dump_database()`, `prune_old_backups()`, and `run_backup()` are
+tested with `subprocess.run`/`boto3.client` mocked (AGENTS.md: tests
+must pass with no real R2 credentials, must mock boto3/S3 calls) —
+covering a failed `pg_dump` propagating rather than being swallowed, the
+credential-missing abort path, and the full upload-then-prune
+orchestration calling both with the right arguments. The docs index has
+no automated test (it's prose, matching every other `docs/dev/*.md` file
+in this project) — correctness here means every existing file appearing
+in exactly one section, checked manually against `ls docs/dev/`.
+
+`make ci`: 318 passed (was 308), 95.93% coverage, security checks clean.
+
+**Files touched**: `scripts/backup_db.py` (new),
+`tests/unit/test_backup_db.py` (new), `docs/dev/README.md` (new),
+`Makefile`, `pyproject.toml`, `docs/dev/deployment.md`,
+`docs/dev/monitoring_ops.md`, `docs/dev/buckets.md`.

@@ -1,4 +1,4 @@
-SRC := app tests
+SRC := app scripts tests
 REMOTE := brooklyn@62.238.122.200
 SSH_KEY := ~/.ssh/bulliexplorer_hetzner
 SSH := ssh -i $(SSH_KEY)
@@ -66,6 +66,10 @@ async def run(): \
         await s.commit(); \
         print(counts); \
 asyncio.run(run())"
+
+.PHONY: backup
+backup: ## Nightly Postgres backup to R2 (docs/dev/monitoring_ops.md Phase 4) — also the host crontab entry
+	uv run python scripts/backup_db.py
 
 .PHONY: db-revision
 db-revision: ## Autogenerate a new migration — usage: make db-revision m="add campsite table"

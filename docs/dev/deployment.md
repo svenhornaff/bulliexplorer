@@ -431,6 +431,53 @@ ssh -i ~/.ssh/bulliexplorer_hetzner brooklyn@62.238.122.200 \
     'cd ~/bulliexplorer && docker compose -f docker-compose.prod.yml exec db psql -U postgres bulliexplorer'
 ```
 
+### Database backups
+
+Nightly `pg_dump` → Cloudflare R2, with 14-day retention — housekeeping
+item from `docs/dev/review_17SEP2026.md` ("No DB backups"), full
+scope/verification write-up in `docs/dev/monitoring_ops.md` Phase 4.
+`scripts/backup_db.py` reuses the `s3_*` env vars/`boto3` dependency
+already in place for media storage (`docs/dev/media_storage_r2.md`) —
+no new secrets, no new dependency. A host crontab entry, not a new
+docker-compose service ("small, no new services" per the review):
+
+```bash
+ssh -i ~/.ssh/bulliexplorer_hetzner brooklyn@62.238.122.200
+crontab -e
+# Add:
+0 3 * * * cd /home/brooklyn/bulliexplorer && /home/brooklyn/.local/bin/uv run python scripts/backup_db.py >> /var/log/bulliexplorer-backup.log 2>&1
+```
+
+Manual trigger (also what the cron entry runs) — from the server, in
+the project directory:
+
+```bash
+make backup
+```
+
+Verify a backup landed:
+
+```bash
+ssh -i ~/.ssh/bulliexplorer_hetzner brooklyn@62.238.122.200 \
+    'cd ~/bulliexplorer && uv run python -c "
+from app.core.config import get_settings; import boto3
+s = get_settings()
+c = boto3.client(\"s3\", endpoint_url=s.s3_endpoint_url, aws_access_key_id=s.s3_access_key, aws_secret_access_key=s.s3_secret_key)
+print([o[\"Key\"] for o in c.list_objects_v2(Bucket=s.s3_bucket, Prefix=\"backups/\").get(\"Contents\", [])])
+"'
+```
+
+**Restore test — do this once before relying on the cron job**, into a
+throwaway local Postgres, never against production:
+
+```bash
+# Pull one backup down, then locally:
+gunzip -c backup-2026-XX-XX.sql.gz | docker compose exec -T db psql -U postgres bulliexplorer_restore_test
+```
+
+A backup that's never been restored isn't verified, it's just a file
+that might be a backup.
+
 ### Rollback
 
 ```bash
@@ -448,7 +495,7 @@ docker compose -f docker-compose.prod.yml exec app alembic downgrade -1
 | **GitHub Actions CI/CD** | When manual `make deploy` gets tedious — auto-build image on push to `main`, deploy via SSH or Docker registry pull |
 | **Docker registry (GHCR)** | Push built images to GitHub Container Registry instead of building on the server — faster deploys, smaller attack surface |
 | **Cloudflare proxy** | Orange-cloud the DNS through Cloudflare for WAF/DDoS/edge caching — flip the switch in Route 53 or move nameservers |
-| **Automated backups** | `pg_dump` → R2 cron container (already in the tech concept) |
+| ~~**Automated backups**~~ | ✅ Done — see "Database backups" above (`scripts/backup_db.py` + host crontab, not a container). **Still outstanding**: the one-time restore test against a throwaway local Postgres, and confirming the cron entry is actually installed on the production host — neither could be done from this sandbox (no production SSH/R2 access here). |
 | **UptimeRobot** | Monitor `https://bulliexplorer.com/health` — free tier, already planned |
 | **Sentry** | Error tracking — add `sentry-sdk[fastapi]` once there's real traffic |
 | **Zero-downtime deploys** | Blue-green or rolling update via Docker Compose profiles |
