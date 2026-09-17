@@ -9,16 +9,51 @@ isolation, cancellation), no DB, no network.
 from __future__ import annotations
 
 import asyncio
+from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.background_sync import (
+    SessionFactory,
     cancel_amenity_sync_tasks,
     schedule_amenity_sync,
     sync_amenities_for_routes,
 )
+
+
+def _unused_session_factory() -> SessionFactory:
+    """A session factory for tests where sync_amenities_for_routes is
+    mocked out entirely, so session_factory is never actually called —
+    the callable itself just needs to satisfy SessionFactory's type,
+    not do anything real. Raising if it *is* somehow called makes that
+    assumption self-checking rather than a silent gap.
+    """
+
+    def _factory() -> AbstractAsyncContextManager[AsyncSession]:
+        raise AssertionError("session_factory should not be called when the driver is mocked out")
+
+    return _factory
+
+
+def _fake_session_factory(fake_session_cls: type) -> SessionFactory:
+    """Wraps a test's plain async-context-manager fake class so its
+    return type satisfies SessionFactory for pyright, via a single
+    explicit cast rather than a same-line ignore — the fake genuinely
+    does implement everything sync_amenities_for_routes actually calls
+    on it (__aenter__/__aexit__/commit), it just isn't literally an
+    AsyncSession instance, which is all the real type mismatch is
+    about.
+    """
+
+    def _factory() -> AbstractAsyncContextManager[AsyncSession]:
+        return cast("AbstractAsyncContextManager[AsyncSession]", fake_session_cls())
+
+    return _factory
+
 
 # ---------------------------------------------------------------------------
 # sync_amenities_for_routes — the actual per-route loop
@@ -44,13 +79,10 @@ async def test_sync_amenities_for_routes_calls_each_route_in_its_own_session():
         async def commit(self):
             self.committed = True
 
-    def _factory():
-        return _FakeSession()
-
     with patch(
         "app.services.background_sync.sync_route_amenities", new_callable=AsyncMock
     ) as mock_sync_route_amenities:
-        await sync_amenities_for_routes(_factory, [1, 2, 3])
+        await sync_amenities_for_routes(_fake_session_factory(_FakeSession), [1, 2, 3])
 
     assert len(sessions_opened) == 3
     assert all(getattr(s, "committed", False) for s in sessions_opened)
@@ -76,9 +108,6 @@ async def test_sync_amenities_for_routes_isolates_one_routes_failure():
         async def commit(self):
             pass
 
-    def _factory():
-        return _FakeSession()
-
     async def _fake_sync_route_amenities(session, route_id, **kwargs):
         if route_id == 2:
             raise RuntimeError("Overpass exploded")
@@ -87,7 +116,7 @@ async def test_sync_amenities_for_routes_isolates_one_routes_failure():
         "app.services.background_sync.sync_route_amenities",
         side_effect=_fake_sync_route_amenities,
     ) as mock_sync_route_amenities:
-        await sync_amenities_for_routes(_factory, [1, 2, 3])
+        await sync_amenities_for_routes(_fake_session_factory(_FakeSession), [1, 2, 3])
 
     # All three routes were attempted despite route 2 raising.
     assert mock_sync_route_amenities.await_count == 3
@@ -110,9 +139,6 @@ async def test_sync_amenities_for_routes_propagates_cancellation():
         async def commit(self):
             pass
 
-    def _factory():
-        return _FakeSession()
-
     async def _fake_sync_route_amenities(session, route_id, **kwargs):
         raise asyncio.CancelledError
 
@@ -123,7 +149,7 @@ async def test_sync_amenities_for_routes_propagates_cancellation():
         ),
         pytest.raises(asyncio.CancelledError),
     ):
-        await sync_amenities_for_routes(_factory, [1])
+        await sync_amenities_for_routes(_fake_session_factory(_FakeSession), [1])
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +161,7 @@ async def test_sync_amenities_for_routes_propagates_cancellation():
 async def test_schedule_amenity_sync_returns_none_for_empty_route_ids():
     """No point creating a task with nothing to do."""
     state = SimpleNamespace()
-    task = schedule_amenity_sync(state, lambda: None, [], task_name="test")
+    task = schedule_amenity_sync(state, _unused_session_factory(), [], task_name="test")
     assert task is None
     assert not hasattr(state, "amenity_sync_tasks") or not state.amenity_sync_tasks
 
@@ -152,7 +178,7 @@ async def test_schedule_amenity_sync_registers_task_on_state():
         await asyncio.sleep(0)
 
     with patch("app.services.background_sync.sync_amenities_for_routes", side_effect=_fake_driver):
-        task = schedule_amenity_sync(state, lambda: None, [1, 2], task_name="test_task")
+        task = schedule_amenity_sync(state, _unused_session_factory(), [1, 2], task_name="test_task")
         assert task is not None
         assert task in state.amenity_sync_tasks
         await task
@@ -173,8 +199,8 @@ async def test_schedule_amenity_sync_multiple_calls_dont_drop_references():
         await asyncio.sleep(0.01)
 
     with patch("app.services.background_sync.sync_amenities_for_routes", side_effect=_fake_driver):
-        task_a = schedule_amenity_sync(state, lambda: None, [1], task_name="a")
-        task_b = schedule_amenity_sync(state, lambda: None, [2], task_name="b")
+        task_a = schedule_amenity_sync(state, _unused_session_factory(), [1], task_name="a")
+        task_b = schedule_amenity_sync(state, _unused_session_factory(), [2], task_name="b")
         assert task_a is not None
         assert task_b is not None
         assert task_a in state.amenity_sync_tasks
@@ -198,7 +224,7 @@ async def test_schedule_amenity_sync_logs_unhandled_exception(caplog):
         patch("app.services.background_sync.sync_amenities_for_routes", side_effect=_fake_driver),
         caplog.at_level("ERROR"),
     ):
-        task = schedule_amenity_sync(state, lambda: None, [1], task_name="failing_task")
+        task = schedule_amenity_sync(state, _unused_session_factory(), [1], task_name="failing_task")
         assert task is not None
         with pytest.raises(RuntimeError):
             await task
