@@ -49,7 +49,7 @@ class _PerUrlTransport(httpx.AsyncBaseTransport):
     instances were actually hit.
     """
 
-    def __init__(self, responses: dict[str, dict | Exception]) -> None:
+    def __init__(self, responses: dict[str, dict | Exception | tuple[int, dict]]) -> None:
         self._responses = responses
         self.requests: list[httpx.Request] = []
 
@@ -58,6 +58,9 @@ class _PerUrlTransport(httpx.AsyncBaseTransport):
         outcome = self._responses[str(request.url)]
         if isinstance(outcome, Exception):
             raise outcome
+        if isinstance(outcome, tuple):
+            status_code, payload = outcome
+            return httpx.Response(status_code, json=payload)
         return httpx.Response(200, json=outcome)
 
 
@@ -74,7 +77,7 @@ class _PerUrlAndBboxTransport(httpx.AsyncBaseTransport):
     given bbox at all raises on unmatched lookups instead).
     """
 
-    def __init__(self, responses: dict[tuple[str, str], dict | Exception]) -> None:
+    def __init__(self, responses: dict[tuple[str, str], dict | Exception | tuple[int, dict]]) -> None:
         self._responses = responses
         self.requests: list[httpx.Request] = []
 
@@ -89,6 +92,9 @@ class _PerUrlAndBboxTransport(httpx.AsyncBaseTransport):
             if expected_url == url and bbox_substring in body:
                 if isinstance(outcome, Exception):
                     raise outcome
+                if isinstance(outcome, tuple):
+                    status_code, payload = outcome
+                    return httpx.Response(status_code, json=payload)
                 return httpx.Response(200, json=outcome)
         raise AssertionError(f"no mocked response for url={url!r} body={body!r}")
 
@@ -579,3 +585,81 @@ async def test_query_nearby_amenities_healthy_chunk_never_triggers_split():
         results = await query_nearby_amenities(*_FULL_BBOX, http_client=client)
     assert results is not None
     assert len(transport.requests) == 1  # no split, no mirror, no half queries
+
+
+# ---------------------------------------------------------------------------
+# query_nearby_amenities — explicit 429 signal (Phase 4,
+# fix_overpass_urban_density_timeout.md "New finding: 429 under
+# cumulative load")
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_result_meta_reports_rate_limited_on_429():
+    """A real HTTP 429 from an instance must be distinguishable from any
+    other failure via result_meta["rate_limited"] — the caller
+    (geo_sync.sync_amenities) needs this specific signal to trigger an
+    extended backoff before its next chunk, not just "this bbox failed"
+    (which the mirror fallback already retries with no extra delay).
+    """
+    primary, mirror = _OVERPASS_URLS
+    transport = _PerUrlTransport(
+        {
+            primary: (429, {"error": "rate limited"}),
+            mirror: {"elements": [_CAMPSITE_NODE]},
+        }
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        meta: dict = {}
+        results = await query_nearby_amenities(1.0, 2.0, 3.0, 4.0, http_client=client, result_meta=meta)
+    assert results is not None  # the mirror still answered
+    assert meta["rate_limited"] is True
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_result_meta_false_on_non_429_failure():
+    """A plain timeout, connection error, or non-429 HTTP error must NOT
+    set rate_limited — only a real 429 should trigger the Phase 4
+    extended backoff; every other failure already has its own handling
+    (instance fallback, bbox splitting) that a longer wait wouldn't
+    improve."""
+    transport = _JsonTransport({"error": "bad request"}, status_code=400)
+    async with httpx.AsyncClient(transport=transport) as client:
+        meta: dict = {}
+        results = await query_nearby_amenities(1.0, 2.0, 3.0, 4.0, http_client=client, result_meta=meta)
+    assert results is None
+    assert meta["rate_limited"] is False
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_result_meta_false_on_healthy_primary():
+    """No regression to the common (healthy) case — rate_limited must be
+    False when nothing went wrong at all."""
+    transport = _JsonTransport({"elements": []})
+    async with httpx.AsyncClient(transport=transport) as client:
+        meta: dict = {}
+        await query_nearby_amenities(1.0, 2.0, 3.0, 4.0, http_client=client, result_meta=meta)
+    assert meta["rate_limited"] is False
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_rate_limited_reported_even_when_split_eventually_succeeds():
+    """A 429 on the ORIGINAL (pre-split) bbox must still be reported even
+    if the split-and-retry path that follows ultimately succeeds —
+    geo_sync.py needs to know a real rate limit was hit at all during
+    this bbox's resolution, not just whether the final answer arrived.
+    """
+    primary, mirror = _OVERPASS_URLS
+    transport = _PerUrlAndBboxTransport(
+        {
+            (primary, _FULL_BBOX_STR): (429, {"error": "rate limited"}),
+            (mirror, _FULL_BBOX_STR): httpx.ReadTimeout("timed out"),
+            (primary, _HALF_A_STR): {"elements": [_CAMPSITE_NODE]},
+            (primary, _HALF_B_STR): {"elements": [_FUEL_WAY]},
+        }
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        meta: dict = {}
+        results = await query_nearby_amenities(*_FULL_BBOX, http_client=client, result_meta=meta)
+    assert results is not None
+    assert meta["rate_limited"] is True

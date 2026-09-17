@@ -138,6 +138,20 @@ _last_geocode_time: float = 0.0
 _MIN_OVERPASS_INTERVAL: float = 1.0
 _last_overpass_time: float = 0.0
 
+# Extended backoff before the NEXT chunk in a sync run, triggered only by
+# an explicit HTTP 429 from Overpass (fix_overpass_urban_density_timeout.md
+# Phase 4) — distinct from _MIN_OVERPASS_INTERVAL above, which paces
+# request *frequency* and is already applied on every chunk regardless.
+# Observed in production: three large, dense-area chunks in a row (each
+# returning thousands of features) tripped a 429 even though the 1 req/s
+# pace was respected throughout — a cumulative-load throttle, not a
+# frequency one. 45s sits between the two general public-API backoff
+# conventions (RFC 6585 doesn't mandate a value, and no Retry-After header
+# was present in the observed 429) — long enough to plausibly clear a
+# short abuse-protection window, short enough not to make a large route's
+# sync impractically slow if it recurs a few times in one run.
+_RATE_LIMIT_BACKOFF_S: float = 45.0
+
 # Buffer padding (km) around each query bbox — an "along-route service
 # corridor" scale (water/fuel/camping a touring cyclist might detour a
 # short way for), not "somewhere in the region".
@@ -431,11 +445,25 @@ async def sync_amenities(
         # the next sync_amenities() call (a local variable, not module
         # state) — "for the rest of this sync run", not permanently.
         preferred_start = 0
+        # Set once this sync run actually observes a 429 (see
+        # _RATE_LIMIT_BACKOFF_S above) — sync-run-scoped, same pattern as
+        # preferred_start, not module state: a rate limit hit during one
+        # sync shouldn't extend the wait for an unrelated later sync.
+        rate_limited_this_run = False
         for south, west, north, east in bboxes:
             loop = asyncio.get_running_loop()
-            elapsed = loop.time() - _last_overpass_time
-            if elapsed < _MIN_OVERPASS_INTERVAL:
-                await asyncio.sleep(_MIN_OVERPASS_INTERVAL - elapsed)
+            if rate_limited_this_run:
+                logger.warning(
+                    "received 429, backing off %.0fs before next chunk (route_id=%d)",
+                    _RATE_LIMIT_BACKOFF_S,
+                    route.id,
+                )
+                await asyncio.sleep(_RATE_LIMIT_BACKOFF_S)
+                rate_limited_this_run = False
+            else:
+                elapsed = loop.time() - _last_overpass_time
+                if elapsed < _MIN_OVERPASS_INTERVAL:
+                    await asyncio.sleep(_MIN_OVERPASS_INTERVAL - elapsed)
             _last_overpass_time = loop.time()
 
             result_meta: dict = {}
@@ -445,6 +473,8 @@ async def sync_amenities(
             served_index = result_meta.get("served_index")
             if served_index is not None:
                 preferred_start = served_index
+            if result_meta.get("rate_limited"):
+                rate_limited_this_run = True
             if chunk_results is None:
                 # One chunk failed — the overall answer is incomplete.
                 # Preserve whatever amenities already exist rather than

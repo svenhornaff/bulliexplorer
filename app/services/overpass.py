@@ -184,10 +184,16 @@ async def query_nearby_amenities(
         still down on every single chunk.
     result_meta:
         Optional dict this call mutates in place with
-        ``{"served_index": int | None}`` — the ``_OVERPASS_URLS`` index
-        that actually served the response, or ``None`` if every instance
-        failed. Kept out of the return type itself so existing callers
-        checking ``results is None`` / ``results == []`` are unaffected.
+        ``{"served_index": int | None, "rate_limited": bool}`` —
+        ``served_index`` is the ``_OVERPASS_URLS`` index that actually
+        served the response, or ``None`` if every instance failed;
+        ``rate_limited`` is ``True`` if *any* attempt made while
+        answering this bbox (across instance fallback and any split
+        retries) received an explicit HTTP 429, even if a later attempt
+        ultimately succeeded — see
+        ``docs/dev/fix_overpass_urban_density_timeout.md`` Phase 4. Kept
+        out of the return type itself so existing callers checking
+        ``results is None`` / ``results == []`` are unaffected.
 
     Returns
     -------
@@ -200,12 +206,18 @@ async def query_nearby_amenities(
         client = httpx.AsyncClient(headers={"User-Agent": _OVERPASS_UA}, timeout=_HTTP_TIMEOUT_S)
         _close_client = True
 
+    # Single-element mutable container, not a plain bool, so every nested
+    # call (instance fallback, both branches of a split, recursively) can
+    # set it in place without each one needing to return and merge a
+    # separate rate-limited flag alongside (results, served_index).
+    rate_limited = [False]
     try:
         results, served_index = await _query_bbox_with_split(
-            south, west, north, east, client, start_index=start_index, split_depth=0
+            south, west, north, east, client, start_index=start_index, split_depth=0, rate_limited=rate_limited
         )
         if result_meta is not None:
             result_meta["served_index"] = served_index
+            result_meta["rate_limited"] = rate_limited[0]
         return results
     finally:
         if _close_client:
@@ -221,6 +233,7 @@ async def _query_bbox_with_split(
     *,
     start_index: int,
     split_depth: int,
+    rate_limited: list[bool],
 ) -> tuple[list[AmenityResult] | None, int | None]:
     """Try every instance for one bbox; split-and-retry once on total failure.
 
@@ -253,7 +266,9 @@ async def _query_bbox_with_split(
     failure (this bbox, and any split attempted for it, never got a
     trustworthy answer).
     """
-    results, served_index = await _query_one_bbox_all_instances(south, west, north, east, client, start_index)
+    results, served_index = await _query_one_bbox_all_instances(
+        south, west, north, east, client, start_index, rate_limited
+    )
     if results is not None:
         return results, served_index
 
@@ -268,8 +283,12 @@ async def _query_bbox_with_split(
     # them — run concurrently so a split doesn't double the wall-clock
     # cost of the already-slow failure path.
     (result_a, idx_a), (result_b, idx_b) = await asyncio.gather(
-        _query_bbox_with_split(s1, w1, n1, e1, client, start_index=start_index, split_depth=split_depth + 1),
-        _query_bbox_with_split(s2, w2, n2, e2, client, start_index=start_index, split_depth=split_depth + 1),
+        _query_bbox_with_split(
+            s1, w1, n1, e1, client, start_index=start_index, split_depth=split_depth + 1, rate_limited=rate_limited
+        ),
+        _query_bbox_with_split(
+            s2, w2, n2, e2, client, start_index=start_index, split_depth=split_depth + 1, rate_limited=rate_limited
+        ),
     )
     if result_a is None or result_b is None:
         return None, None
@@ -296,11 +315,18 @@ async def _query_one_bbox_all_instances(
     east: float,
     client: httpx.AsyncClient,
     start_index: int,
+    rate_limited: list[bool],
 ) -> tuple[list[AmenityResult] | None, int | None]:
     """Try every ``_OVERPASS_URLS`` instance, in ``start_index`` order.
 
     Returns ``(results, served_index)`` on the first instance to answer
-    successfully, or ``(None, None)`` if every instance fails.
+    successfully, or ``(None, None)`` if every instance fails. Sets
+    ``rate_limited[0] = True`` in place if any attempt got an explicit
+    HTTP 429 — recorded regardless of whether a later attempt (a
+    different instance) went on to succeed, since the caller
+    (``geo_sync.py``) needs to know a real rate limit was hit at all to
+    back off before its *next* chunk, not just whether this one
+    ultimately got an answer.
     """
     query = _build_query(south, west, north, east)
     payload = None
@@ -311,7 +337,11 @@ async def _query_one_bbox_all_instances(
             # Only paces the failure-recovery path — a healthy
             # first attempt never sleeps here.
             await asyncio.sleep(_INTER_INSTANCE_RETRY_DELAY_S)
-        payload = await _query_one_instance(client, _OVERPASS_URLS[idx], query, south, west, north, east)
+        payload, was_rate_limited = await _query_one_instance(
+            client, _OVERPASS_URLS[idx], query, south, west, north, east
+        )
+        if was_rate_limited:
+            rate_limited[0] = True
         if payload is not None:
             served_index = idx
             break
@@ -370,7 +400,7 @@ async def _query_one_instance(
     west: float,
     north: float,
     east: float,
-) -> dict | None:
+) -> tuple[dict | None, bool]:
     """POST one query to one Overpass instance; ``None`` on any failure.
 
     Failure includes a 200 response carrying a ``remark`` — Overpass's own
@@ -378,6 +408,18 @@ async def _query_one_instance(
     timeout or resource limit) — treated the same as a hard failure so
     the caller never silently trusts an incomplete answer, whether it
     came from the primary or a fallback mirror.
+
+    Returns
+    -------
+    A tuple of ``(payload, was_rate_limited)``. ``was_rate_limited`` is
+    ``True`` only for an explicit HTTP 429 from this specific instance —
+    distinct from every other failure (timeouts, other 5xx, connection
+    errors), which all stay on the existing retry/split/give-up path
+    unchanged (``docs/dev/fix_overpass_urban_density_timeout.md`` Phase
+    4). A 429 is the one signal precise enough to justify a
+    disproportionately long backoff before the *next* chunk in the same
+    sync run — everything else already has its own handling (instance
+    fallback, bbox splitting) that a longer wait wouldn't improve.
     """
     try:
         resp = await client.post(
@@ -396,7 +438,20 @@ async def _query_one_instance(
         )
         resp.raise_for_status()
         payload = resp.json()
-    except Exception as exc:  # noqa: BLE001 — any network/HTTP/parse failure is non-fatal
+    except httpx.HTTPStatusError as exc:
+        was_rate_limited = exc.response.status_code == 429
+        logger.warning(
+            "Overpass request to %s failed for bbox (%s,%s,%s,%s): %s: %s",
+            url,
+            south,
+            west,
+            north,
+            east,
+            type(exc).__name__,
+            exc,
+        )
+        return None, was_rate_limited
+    except Exception as exc:  # noqa: BLE001 — any other network/parse failure is non-fatal
         # Some httpx exceptions (e.g. a bare ReadTimeout/ConnectError from
         # an underlying anyio timeout) stringify to "" — %s alone then logs
         # an empty, undiagnosable message. Always include the exception's
@@ -412,16 +467,16 @@ async def _query_one_instance(
             type(exc).__name__,
             exc,
         )
-        return None
+        return None, False
 
     remark = payload.get("remark")
     if remark:
         logger.warning(
             "Overpass (%s) returned a remark for bbox (%s,%s,%s,%s): %s", url, south, west, north, east, remark
         )
-        return None
+        return None, False
 
-    return payload
+    return payload, False
 
 
 def _parse_element(element: dict) -> AmenityResult | None:

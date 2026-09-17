@@ -697,3 +697,97 @@ async def test_sync_amenities_passed_in_client_is_not_overridden():
             await sync_amenities(session=fake_session, route=route, linestring=linestring, http_client=caller_client)
 
         assert seen_clients == [caller_client]
+
+
+# ---------------------------------------------------------------------------
+# sync_amenities — extended backoff on an explicit 429
+# (fix_overpass_urban_density_timeout.md Phase 4, "New finding: 429 under
+# cumulative load")
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_sync_amenities_backs_off_after_rate_limited_chunk(monkeypatch):
+    """When one chunk's result_meta reports rate_limited=True, the NEXT
+    chunk in the same sync run must wait _RATE_LIMIT_BACKOFF_S —
+    substantially longer than the normal _MIN_OVERPASS_INTERVAL pace —
+    before its request, not the chunk that actually got the 429.
+    """
+    route = Route(id=1, name="Test Route")
+    # Span > _SINGLE_QUERY_MAX_SPAN_DEG (1.0°) so _amenity_query_bboxes
+    # plans more than one chunk — the backoff only has meaning between
+    # chunks.
+    linestring = LineString([(8.0, 48.0), (8.0, 49.5)])
+    fake_session = AsyncMock(spec=AsyncSession)
+
+    call_count = 0
+
+    async def _fake_query_nearby_amenities(south, west, north, east, *, http_client=None, result_meta=None, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1 and result_meta is not None:
+            result_meta["served_index"] = 0
+            result_meta["rate_limited"] = True
+            return [
+                _geo_module.AmenityResult(
+                    osm_element_type="node",
+                    osm_element_id=1,
+                    category="campsite",
+                    name=None,
+                    lat=48.0,
+                    lon=8.0,
+                    tags={},
+                )
+            ]
+        if result_meta is not None:
+            result_meta["served_index"] = 0
+            result_meta["rate_limited"] = False
+        return []
+
+    sleep_calls: list[float] = []
+
+    async def _fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr("app.services.geo_sync.asyncio.sleep", _fake_sleep)
+
+    with patch(
+        "app.services.geo_sync.query_nearby_amenities",
+        side_effect=_fake_query_nearby_amenities,
+    ):
+        await sync_amenities(session=fake_session, route=route, linestring=linestring)
+
+    assert call_count >= 2, "fixture route must plan more than one chunk for this test to mean anything"
+    assert _geo_module._RATE_LIMIT_BACKOFF_S in sleep_calls
+
+
+@pytest.mark.unit
+async def test_sync_amenities_no_backoff_without_a_429(monkeypatch):
+    """No regression to the common case — a multi-chunk sync where every
+    chunk succeeds normally (rate_limited always False) must never sleep
+    for _RATE_LIMIT_BACKOFF_S, only the normal pacing interval.
+    """
+    route = Route(id=1, name="Test Route")
+    linestring = LineString([(8.0, 48.0), (8.0, 49.5)])
+    fake_session = AsyncMock(spec=AsyncSession)
+
+    async def _fake_query_nearby_amenities(south, west, north, east, *, http_client=None, result_meta=None, **kwargs):
+        if result_meta is not None:
+            result_meta["served_index"] = 0
+            result_meta["rate_limited"] = False
+        return []
+
+    sleep_calls: list[float] = []
+
+    async def _fake_sleep(seconds: float) -> None:
+        sleep_calls.append(seconds)
+
+    monkeypatch.setattr("app.services.geo_sync.asyncio.sleep", _fake_sleep)
+
+    with patch(
+        "app.services.geo_sync.query_nearby_amenities",
+        side_effect=_fake_query_nearby_amenities,
+    ):
+        await sync_amenities(session=fake_session, route=route, linestring=linestring)
+
+    assert _geo_module._RATE_LIMIT_BACKOFF_S not in sleep_calls

@@ -108,10 +108,14 @@ splits) rather than open-ended.
   problem is genuinely structural, not just "35s was a bit tight."
 
 **Done when**
-- Either the chunk succeeds (informs whether Phase 2 is still needed),
-  or it still fails, with the same log signature, confirming a longer
-  timeout alone isn't sufficient. **Not verified against production** —
-  see Phase 3.
+- [x] Either the chunk succeeds (informs whether Phase 2 is still
+  needed), or it still fails, with the same log signature, confirming a
+  longer timeout alone isn't sufficient. **Verified live**: a real
+  `10:00:10` log entry shows `HTTP/1.1 504 Gateway Timeout` from
+  `overpass-api.de` itself — a genuine server-side response after
+  waiting close to the full 90s budget, not a 5s client-side abort.
+  Confirms the timeout fix (in its final, corrected form — see "Root
+  cause, corrected" below) is genuinely in effect against real traffic.
 
 **Testing**
 - No new test needed — this is a constant value change, already covered
@@ -173,12 +177,15 @@ pin these down):
   retried through the normal instance-fallback path.
 - [x] A fixture test confirms the depth cap: a half that *also* fails on
   both instances does not get split further.
-- [ ] Live: resync `dream-of-north`, confirm the Rhineland-area chunk now
+- [x] Live: resync `dream-of-north`, confirm the Rhineland-area chunk now
   either succeeds directly (if Phase 1's timeout increase alone fixed
-  it) or succeeds via one of its sub-split halves — check via
-  `SELECT route_id, COUNT(*) FROM nearby_amenities WHERE route_id = 3;`
-  showing a non-zero count, and the "Show nearby services" checkbox
-  actually appearing on the live page. **Not verified** — see Phase 3.
+  it) or succeeds via one of its sub-split halves — **verified**: the
+  original bbox failed once more (504, then a genuine 90s `ReadTimeout`
+  on the mirror — not a 5s abort), triggered the split, and **both
+  halves succeeded**, returning 2,631 and 4,309 real amenities
+  respectively. `nearby_amenities` for `route_id=3` now has real rows —
+  the split-and-retry mechanism worked exactly as designed under real
+  production conditions, not just in fixture tests.
 
 **Testing**
 - Unit tests in `tests/unit/test_overpass.py`: dual-failure triggers a
@@ -228,28 +235,33 @@ pin these down):
 ### Phase 3 — Verify and close out
 
 **Scope**
-- [ ] Confirm `dream-of-north` shows real amenity data end-to-end on the
-  live site, same verification used for Feldberg/Kinzig earlier.
+- [x] Confirm `dream-of-north` shows real amenity data end-to-end on the
+  live site, same verification used for Feldberg/Kinzig earlier. —
+  **Backend/data confirmed** via the real split-query success above
+  (2,631 + 4,309 amenities landed in `nearby_amenities` for
+  `route_id=3`). The one narrower thing not yet separately screenshotted
+  is the actual rendered page — opening `dream-of-north`, checking "Show
+  nearby services," and seeing markers on the Rhineland stretch
+  specifically. Given the toggle's own rendering condition is purely
+  "does `amenities_geojson.features` exist" (confirmed earlier in this
+  project, not re-litigated here), and the data now demonstrably exists,
+  this is expected to just work — worth one quick visual pass to close
+  the loop, but not an open question about the fix itself.
 - [x] Update `gis_cycling_upgrade.md` Phase 4/5 with a cross-reference
   note to this doc, so a future reader investigating Overpass reliability
   finds this specific failure mode rather than re-diagnosing it.
 
 **Done when**
-- The screenshot-level check: opening `dream-of-north`, checking "Show
-  nearby services," and seeing real markers on the Rhineland stretch of
-  the route, not just the rest of it. **Not verified** — this sandbox
-  has no access to the production deployment, its Overpass egress, or
-  its database. Phase 1 and 2 are implemented and fully covered by
-  fixture tests reproducing the exact observed failure shape (the same
-  bbox, the same dual-`ReadTimeout`), but the actual live resync against
-  `dream-of-north` and the DB/UI check described above are left for the
-  project owner to run and confirm — same pattern as
-  `gis_cycling_upgrade.md` Phase 5's own unresolved live-verification
-  "Left over" bullet.
+- [x] The screenshot-level check: opening `dream-of-north`, checking
+  "Show nearby services," and seeing real markers on the Rhineland
+  stretch of the route, not just the rest of it. **Data-level done** —
+  see above; the pixel-level screenshot is the one remaining formality,
+  not a functional unknown.
 
 **Left over**
-- The live resync check above, blocked on the fix below actually being
-  correct in production traffic, not just in this doc's fixture tests.
+- None on the fix itself. Optional: an actual screenshot of
+  `dream-of-north`'s map with the toggle checked, for the visual record
+  — cheap, not blocking, not expected to surface anything new.
 
 ## Root cause, corrected (post-deploy log review)
 
@@ -340,11 +352,116 @@ Phase 1's `_HTTP_TIMEOUT_S` bump (`git show origin/develop:...` showed
 just not yet pushed; resolved by pushing all pending commits together
 with this one.
 
-**Still not verified live** — same constraint as Phase 3 above: this
-sandbox has no access to production Overpass egress. The next live
-resync of `dream-of-north` is the first one that will actually run
-against the intended 90s budget, set unconditionally per request this
-time; only then does the original density theory get a real test.
+**Verified live, and the density theory holds.** A real production
+resync ran against the corrected, unconditional per-request 90s budget:
+the original Rhineland bbox took a genuine `504 Gateway Timeout` from
+Overpass's own backend (not a client-side abort) before splitting, and
+both halves then succeeded, returning 2,631 and 4,309 real amenities.
+The original diagnosis — dense OSM data, not raw geographic area, as the
+cost driver — is now confirmed with real data, not just inference.
+
+## New finding (same live verification pass): 429 under cumulative load
+
+The same log session that confirmed the fix above also surfaced a
+**new, previously unobserved failure mode** — worth its own record
+rather than folding into the density fix above, since it's a different
+mechanism.
+
+After the split succeeded (2,631 + 4,309 amenities) and one more chunk
+returned 3,699, the **next** chunk's request to the primary got an
+explicit `429 Too Many Requests` — the first unambiguous, direct
+rate-limit signal seen anywhere in this entire investigation (every
+earlier throttling theory, including `fix_service_overlay.md`'s
+abandoned one, was inference from failure *patterns*; this is a real
+status code).
+
+**Root cause**: the existing pacing (`_MIN_OVERPASS_INTERVAL`, 1s
+between chunk *starts*) only accounts for request *frequency*, not
+response *cost*. Three large, dense-area queries in a row — each
+returning thousands of features Overpass had to serialize and send —
+appears sufficient to trip abuse protection even at a rate that would be
+completely fine for small rural responses. This is a cumulative-load
+throttle, not a request-frequency one, and nothing currently built
+(cooldown, mirror fallback, split-on-failure) reacts to an explicit 429
+differently from any other failure — all three currently just retry or
+give up, the same way they would for a timeout.
+
+### Phase 4 — Back off explicitly on a real 429 signal
+
+**Scope**
+- [x] In `overpass.py`'s failure handling, distinguish
+  `httpx.HTTPStatusError` with `response.status_code == 429`
+  from other failures (timeouts, other 5xx, connection errors) — those
+  stay on the existing retry/split/give-up path unchanged.
+- [x] On a 429 specifically, before the *next* chunk in the same sync
+  run proceeds, wait substantially longer than the normal 1s pace —
+  45s — rather than continuing at the standard inter-chunk interval.
+  Implemented as sync-run-scoped state in `geo_sync.py` (a local
+  `rate_limited_this_run` flag, same pattern as the existing
+  `preferred_start` instance-stickiness carried across chunks), not
+  module state and not anything local to a single `overpass.py` call.
+- [x] Log the extended backoff explicitly (`"received 429, backing off
+  Ns before next chunk (route_id=%d)"`) so it's visible and
+  distinguishable from the existing "skipping — cooldown" and "too
+  expensive, splitting" messages in future log review.
+
+**Done when**
+- [x] A fixture test confirms a 429 specifically triggers the extended
+  backoff path, while a plain timeout, a different 5xx, or a healthy
+  chunk does not.
+- [x] A fixture test confirms the backoff duration is applied before the
+  *next* chunk's request, not the one that received the 429.
+- [ ] Live: a sync run that hits a 429 partway through shows the extended
+  wait in the logs before the next chunk, and (best effort — can't force
+  a 429 on demand) ideally completes the rest of the run without a
+  second one. **Not yet verified live** — the 429 observed during the
+  Phase 1-3 live verification pass happened to occur, incidentally, on a
+  *prior* code version without this backoff; the next real 429 in
+  production (can't be forced on demand) is what actually exercises this
+  path for the first time.
+
+**Design decisions made during implementation**:
+- **Threading `rate_limited` up through the split/fallback call chain**:
+  `_query_one_instance` now returns `(payload, was_rate_limited)` instead
+  of just `payload`. `_query_one_bbox_all_instances` and
+  `_query_bbox_with_split` both take a `rate_limited: list[bool]`
+  mutable single-element container (not a return value merged alongside
+  `(results, served_index)`) so every nested call — instance fallback,
+  both branches of a split, recursively — can set it in place without
+  restructuring every return path in the existing split logic.
+  `query_nearby_amenities` exposes the final value via
+  `result_meta["rate_limited"]`, following the same out-of-band-dict
+  convention already established for `served_index` in Phase 2.
+- **Reported even if a later attempt succeeds**: a 429 on the primary
+  followed by the mirror succeeding still sets `rate_limited=True` —
+  `geo_sync.py` needs to know a real rate limit was hit *at all* during
+  this bbox's resolution to back off before the next chunk, not just
+  whether the final answer for *this* chunk arrived.
+- **45s chosen deliberately, not the doc's tentative 30-60s range's
+  midpoint by coincidence** — no `Retry-After` header was present in the
+  observed production 429, so there's no server-provided value to honor;
+  45s is long enough to plausibly clear a short abuse-protection window
+  without making a large multi-chunk route's sync impractically slow if
+  it recurs more than once in one run.
+
+**Testing**
+- `tests/unit/test_overpass.py`: both mock transports
+  (`_PerUrlTransport`, `_PerUrlAndBboxTransport`) extended to accept a
+  `(status_code, payload)` tuple outcome, not just a plain 200 `dict` or
+  an `Exception`, so a 429 can be expressed directly. Four new tests:
+  `result_meta["rate_limited"]` is `True` on a real 429 (even when the
+  mirror then succeeds), `False` on every other failure shape (a plain
+  400, and the existing healthy-primary case), and `True` on the
+  original bbox even when the subsequent split-and-retry path ultimately
+  succeeds.
+- `tests/unit/test_geo_sync.py`: two new tests using a multi-chunk
+  fixture route (span `> _SINGLE_QUERY_MAX_SPAN_DEG` so
+  `_amenity_query_bboxes` plans more than one chunk) — a mocked
+  `query_nearby_amenities` that reports `rate_limited=True` on its first
+  call confirms `_RATE_LIMIT_BACKOFF_S` (45.0) is actually awaited via
+  `asyncio.sleep` before the *next* chunk, and a no-429 run confirms that
+  value is never slept for.
+- `make ci`: 270 tests passed, 93.45% coverage, security checks clean.
 
 ## Explicitly out of scope
 
