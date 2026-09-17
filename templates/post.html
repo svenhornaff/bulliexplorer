@@ -252,7 +252,103 @@ Vendor JS loaded last — only on posts that actually render a map. #}
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }));
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }));
 
+    // ── Nearby-amenity overlay: clustered GeoJSON source + GL layers ──────
+    // (fix_amenity_overlay_performance.md) Scoped to color-coded circles,
+    // not per-category icons — MapLibre's native icon-image layers need a
+    // sprite sheet, new asset-generation infra this fix doesn't need to
+    // solve the actual problem (performance). A cluster of 50 mixed
+    // amenities needs a count bubble, not 50 different glyphs anyway.
+    // Curated POI markers (buildCategoryMarkerElement, above) are
+    // untouched — single digits to low dozens per post, genuinely fine as
+    // DOM markers at that scale.
+    var AMENITIES_SOURCE_ID = "amenities";
+    var AMENITIES_LAYER_IDS = ["amenities-clusters", "amenities-cluster-count", "amenities-unclustered"];
+
+    // Builds the ['match', ['get', 'category'], cat1, colour1, cat2, ...,
+    // fallback] expression MapLibre's `circle-color` paint property
+    // expects, from the same CATEGORY_COLOURS map the DOM-marker POI
+    // pins above already use — same visual language, zero new assets.
+    function categoryColorExpression() {
+      var expr = ["match", ["get", "category"]];
+      Object.keys(CATEGORY_COLOURS).forEach(function (category) {
+        if (category === "other") return; // fallback value, added last below
+        expr.push(category, CATEGORY_COLOURS[category]);
+      });
+      expr.push(CATEGORY_COLOURS.other);
+      return expr;
+    }
+
+    // Adds the amenities source + its three layers (idempotent — a no-op
+    // if the source already exists, since this is also called after a
+    // theme-swap setStyle() where addSource() would otherwise throw on
+    // an id that's already present from transformStyle's carry-over).
+    function addAmenitiesSourceAndLayers(mapInstance, amenitiesGeojson) {
+      if (mapInstance.getSource(AMENITIES_SOURCE_ID)) return;
+
+      mapInstance.addSource(AMENITIES_SOURCE_ID, {
+        type: "geojson",
+        data: amenitiesGeojson,
+        cluster: true,
+        clusterMaxZoom: 14,
+        clusterRadius: 50,
+      });
+
+      mapInstance.addLayer({
+        id: "amenities-clusters",
+        type: "circle",
+        source: AMENITIES_SOURCE_ID,
+        filter: ["has", "point_count"],
+        layout: { visibility: "none" },
+        paint: {
+          "circle-color": "#607D8B",
+          "circle-opacity": 0.85,
+          "circle-stroke-color": "#fff",
+          "circle-stroke-width": 2,
+          // Radius scales with cluster size — small clusters stay compact,
+          // large ones (Rhineland-density corridors) read as clearly bigger.
+          "circle-radius": ["step", ["get", "point_count"], 14, 25, 18, 100, 24, 750, 30],
+        },
+      });
+      mapInstance.addLayer({
+        id: "amenities-cluster-count",
+        type: "symbol",
+        source: AMENITIES_SOURCE_ID,
+        filter: ["has", "point_count"],
+        layout: {
+          visibility: "none",
+          "text-field": "{point_count_abbreviated}",
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 12,
+        },
+        paint: { "text-color": "#fff" },
+      });
+      mapInstance.addLayer({
+        id: "amenities-unclustered",
+        type: "circle",
+        source: AMENITIES_SOURCE_ID,
+        filter: ["!", ["has", "point_count"]],
+        layout: { visibility: "none" },
+        paint: {
+          "circle-color": categoryColorExpression(),
+          "circle-opacity": 0.85,
+          "circle-radius": 7,
+          "circle-stroke-color": "#fff",
+          "circle-stroke-width": 1.5,
+        },
+      });
+    }
+
+    function setAmenitiesVisibility(mapInstance, visible) {
+      var value = visible ? "visible" : "none";
+      AMENITIES_LAYER_IDS.forEach(function (layerId) {
+        if (mapInstance.getLayer(layerId)) {
+          mapInstance.setLayoutProperty(layerId, "visibility", value);
+        }
+      });
+    }
+
     let routeLoaded = false;
+    let amenitiesVisible = false;
 
     map.on("load", function () {
       routeLoaded = true;
@@ -300,46 +396,56 @@ Vendor JS loaded last — only on posts that actually render a map. #}
           .addTo(map);
       });
 
-      // ── Nearby-amenity markers (Phase 4, gis_cycling_upgrade.md) ────────
-      // Auto-discovered, not curated — deliberately muted (smaller, lower
-      // opacity, no drop shadow) so curated POI markers stay the primary
-      // visual signal. Off by default; created but not added to the map
-      // until the "Show nearby services" toggle is checked (same plain-
-      // DOM-marker approach as POIs above, so these also survive a
-      // setStyle() theme swap for free — no re-add-after-swap logic
-      // needed, unlike the route line/casing style layers below).
-      var amenityFeatures = (AMENITIES_GEOJSON && AMENITIES_GEOJSON.features) || [];
-      var amenityMarkers = amenityFeatures.map(function (feature) {
-        var props = feature.properties;
-        var el = buildCategoryMarkerElement(props.category, props.name || props.category, 20, 0.75);
-
-        var popupHtml = "<strong>" + (props.name || props.category) + "</strong>";
-
-        return new maplibregl.Marker({ element: el })
-          .setLngLat(feature.geometry.coordinates)
-          .setPopup(new maplibregl.Popup({ offset: 12 }).setHTML(popupHtml));
-      });
+      // ── Nearby-amenity overlay (fix_amenity_overlay_performance.md) ────
+      // Auto-discovered, not curated — a clustered GeoJSON source + GL
+      // layers, NOT individual maplibregl.Marker DOM elements. Dream of
+      // North alone has 15,686 amenities; one DOM element + one Marker
+      // object per point is a well-documented MapLibre/Mapbox performance
+      // cliff well before that scale (fine for dozens, degrades sharply
+      // in the low thousands). GPU-rendered via the same pipeline already
+      // drawing the whole basemap — genuinely handles tens of thousands of
+      // points with no perceptible lag. Clustering (cluster: true) isn't a
+      // separate feature bolted on here — even instant rendering of 15,686
+      // individual points at a wide zoom would still be an unreadable
+      // solid mass; grouping into count bubbles that split apart on zoom
+      // is what actually fixes both performance AND readability together.
+      addAmenitiesSourceAndLayers(map, AMENITIES_GEOJSON);
+      setAmenitiesVisibility(map, amenitiesVisible); // off by default, same as before
 
       var amenityToggle = document.getElementById("amenity-toggle-input");
       if (amenityToggle) {
         amenityToggle.addEventListener("change", function () {
-          amenityMarkers.forEach(function (marker) {
-            if (amenityToggle.checked) {
-              marker.addTo(map);
-            } else {
-              marker.remove();
-            }
-          });
+          amenitiesVisible = amenityToggle.checked;
+          setAmenitiesVisibility(map, amenitiesVisible);
         });
       }
+
+      map.on("click", "amenities-unclustered", function (e) {
+        var feature = e.features && e.features[0];
+        if (!feature) return;
+        var props = feature.properties;
+        var popupHtml = "<strong>" + (props.name || props.category) + "</strong>";
+        new maplibregl.Popup({ offset: 12 })
+          .setLngLat(feature.geometry.coordinates)
+          .setHTML(popupHtml)
+          .addTo(map);
+      });
+      map.on("mouseenter", "amenities-unclustered", function () {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "amenities-unclustered", function () {
+        map.getCanvas().style.cursor = "";
+      });
     });
 
     // ── Live theme swap: react to the nav toggle without a page reload ────
     // map.setStyle() tears down and rebuilds every source/layer, so the
-    // route line + casing (added in the "load" handler above) have to be
-    // re-added once the new style finishes loading. POI markers are plain
-    // DOM elements attached via maplibregl.Marker, not style layers, so
-    // they survive a setStyle() call untouched — no need to re-add them.
+    // route line + casing AND the amenities source/layers (both added in
+    // the "load" handler above) have to be carried over via transformStyle
+    // below once the new style finishes loading. Curated POI markers are
+    // the one exception — plain DOM elements attached via maplibregl.
+    // Marker, not style layers, so they survive a setStyle() call
+    // untouched, no carry-over needed.
     document.addEventListener("bulliexplorer:themechange", function (event) {
       if (!routeLoaded) return; // still mid-initial-load; nothing to swap yet
       var nextFlavor = event.detail.theme === "dark" ? "dark" : "light";
@@ -369,13 +475,22 @@ Vendor JS loaded last — only on posts that actually render a map. #}
           // pattern for a setStyle() that must preserve custom content
           // (see maplibre-gl-js discussion #7240/#7346 on style.load /
           // styledata firing before a style is actually ready to mutate).
+          // Amenities (fix_amenity_overlay_performance.md) are style
+          // layers now, not plain DOM markers like the POI pins above —
+          // setStyle() tears down every source/layer, so the amenities
+          // source + its three layer ids need the exact same carry-over
+          // treatment already proven for route/route-line/route-casing.
           transformStyle: function (previousStyle, nextStyle) {
             var carried = (previousStyle && previousStyle.sources && previousStyle.sources.route)
               ? { route: previousStyle.sources.route }
               : {};
+            if (previousStyle && previousStyle.sources && previousStyle.sources[AMENITIES_SOURCE_ID]) {
+              carried[AMENITIES_SOURCE_ID] = previousStyle.sources[AMENITIES_SOURCE_ID];
+            }
+            var carriedLayerIds = ["route-casing", "route-line"].concat(AMENITIES_LAYER_IDS);
             var carriedLayers = (previousStyle && previousStyle.layers)
               ? previousStyle.layers.filter(function (l) {
-                  return l.id === "route-casing" || l.id === "route-line";
+                  return carriedLayerIds.includes(l.id);
                 })
               : [];
             return Object.assign({}, nextStyle, {
