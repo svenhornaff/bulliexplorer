@@ -92,3 +92,64 @@ def test_sentry_dsn_defaults_to_empty(monkeypatch):
 
     s = Settings(_env_file=None)  # type: ignore[call-arg]
     assert s.sentry_dsn == ""
+
+
+@pytest.mark.unit
+def test_before_send_removes_sensitive_request_data():
+    event = {
+        "request": {
+            "method": "POST",
+            "url": "https://name:password@example.org/internal/resync?token=secret#private",
+            "headers": {"Authorization": "Bearer secret", "Cookie": "session=secret", "X-Resync-Token": "secret"},
+            "data": {"gpx": "private coordinates"},
+            "env": {"REMOTE_ADDR": "192.0.2.1"},
+            "query_string": "token=secret",
+        },
+        "user": {"ip_address": "192.0.2.1"},
+        "extra": {"token": "secret"},
+        "breadcrumbs": {"values": [{"message": "private URL"}]},
+        "exception": {"values": [{"type": "RuntimeError"}]},
+    }
+    result = _sentry_before_send(event, {})
+    assert result is not None
+    assert result["request"] == {"method": "POST", "url": "https://example.org/internal/resync"}
+    assert not {"user", "extra", "breadcrumbs"} & result.keys()
+    assert result["exception"] == event["exception"]
+
+
+@pytest.mark.unit
+def test_before_send_omits_malformed_url():
+    event = {"request": {"url": "https://[broken?secret", "headers": {"Cookie": "secret"}}}
+    result = _sentry_before_send(event, {})
+    assert result is not None
+    assert result["request"] == {}
+
+
+@pytest.mark.unit
+async def test_sentry_init_minimizes_data(monkeypatch):
+    """Capture actual lifespan init options without opening a DB connection."""
+    from unittest.mock import MagicMock
+
+    import sentry_sdk
+
+    import app.main as main
+
+    monkeypatch.setenv("SENTRY_DSN", "https://public@example.org/1")
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    init = MagicMock()
+    monkeypatch.setattr(sentry_sdk, "init", init)
+
+    def stop_before_db(*args):
+        raise RuntimeError("stop before database")
+
+    monkeypatch.setattr(main, "init_engine", stop_before_db)
+    with pytest.raises(RuntimeError, match="stop before database"):
+        async with main.lifespan(main.create_app()):
+            pass
+    assert init.call_args.kwargs["send_default_pii"] is False
+    assert init.call_args.kwargs["include_local_variables"] is False
+    assert init.call_args.kwargs["max_request_body_size"] == "never"
+    assert init.call_args.kwargs["traces_sample_rate"] == 0.0
+    assert init.call_args.kwargs["before_send"] is _sentry_before_send

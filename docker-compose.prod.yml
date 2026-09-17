@@ -6,6 +6,13 @@ services:
     restart: unless-stopped
     environment:
       - APP_ENV=production
+      - LEGAL_NAME=${LEGAL_NAME:-}
+      - LEGAL_ADDRESS=${LEGAL_ADDRESS:-}
+      - LEGAL_EMAIL=${LEGAL_EMAIL:-}
+      - LEGAL_HOSTING=${LEGAL_HOSTING:-}
+      - LEGAL_LOG_RETENTION=${LEGAL_LOG_RETENTION:-}
+      - LEGAL_CLOUDFLARE_DETAILS=${LEGAL_CLOUDFLARE_DETAILS:-}
+      - LEGAL_SENTRY_DETAILS=${LEGAL_SENTRY_DETAILS:-}
       - LOG_JSON=true
       - DATABASE_URL=postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@db:5432/bulliexplorer
       - SECRET_KEY=${SECRET_KEY}

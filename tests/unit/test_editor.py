@@ -64,10 +64,12 @@ def test_index_html_exists():
 
 
 @pytest.mark.unit
-def test_index_html_loads_sveltia_cdn():
-    """index.html must load the Sveltia CMS bundle from the CDN."""
+def test_index_html_loads_local_sveltia():
+    """index.html must load the pinned Sveltia CMS bundle locally."""
     content = INDEX_HTML.read_text()
-    assert "cdn.jsdelivr.net" in content
+    assert "cdn.jsdelivr.net" not in content
+    assert "/static/vendor/sveltia-cms.js" in content
+    assert (INDEX_HTML.parents[1] / "vendor/sveltia-cms.js").stat().st_size > 100_000
     assert "sveltia-cms" in content
 
 

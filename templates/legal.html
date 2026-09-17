@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block language %}de{% endblock %}
+{% block title %}{{ title }} — BulliExplorer{% endblock %}
+{% block meta_description %}{{ title }} für BulliExplorer{% endblock %}
+{% block content %}
+    <main class="container">
+        <article class="post-body">{{ legal_html | safe }}</article>
+    </main>
+{% endblock %}

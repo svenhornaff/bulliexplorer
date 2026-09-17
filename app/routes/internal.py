@@ -144,7 +144,7 @@ async def resync(
     import app.main as main_module
 
     content_dir = main_module.BASE_DIR / "content" / "posts"
-    logger.info("Manual resync triggered from %s", request.client)
+    logger.info("Manual resync triggered")
 
     settings = get_settings()
     result = await sync_posts(content_dir, db)

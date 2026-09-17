@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     debug: bool = False
     log_json: bool = False
 
+    # Public legal contact; do not reuse a workplace address from package metadata.
+    legal_name: str = "Sven Hornaff"
+    legal_address: str = ""
+    legal_email: str = ""
+    legal_hosting: str = ""
+    legal_log_retention: str = ""
+    legal_cloudflare_details: str = ""
+    legal_sentry_details: str = ""
+
     # --- Database ------------------------------------------------------------
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5433/bulliexplorer"
 

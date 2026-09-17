@@ -55,6 +55,27 @@ def _sentry_before_send(event: dict[str, object], hint: dict[str, object]) -> di
             # Both Starlette and FastAPI HTTPException have .status_code
             if hasattr(exc, "status_code") and exc.status_code == 404:  # noqa: PLR2004 — HTTP status code
                 return None
+    # Keep only method + a URL without credentials, query parameters or fragments.
+    from urllib.parse import urlsplit, urlunsplit
+
+    event.pop("user", None)
+    event.pop("extra", None)
+    event.pop("breadcrumbs", None)
+    request = event.get("request")
+    if isinstance(request, dict):
+        clean_request = {}
+        if "method" in request:
+            clean_request["method"] = request["method"]
+        url = request.get("url")
+        if isinstance(url, str):
+            try:
+                parts = urlsplit(url)
+                clean_request["url"] = urlunsplit((parts.scheme, parts.hostname or "", parts.path, "", ""))
+            except ValueError:
+                pass  # Malformed URLs are omitted rather than forwarded.
+        event["request"] = clean_request
+    # Exception messages can still contain application data: project-side
+    # scrubbing remains required. Stack-frame locals are disabled at init.
     return event
 
 
@@ -72,6 +93,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             dsn=settings.sentry_dsn,
             environment=settings.app_env,
             traces_sample_rate=0.0,
+            send_default_pii=False,
+            include_local_variables=False,
+            max_request_body_size="never",
             before_send=_sentry_before_send,  # type: ignore[arg-type] — Sentry Event is a TypedDict; our signature is compatible at runtime
         )
         logger.info("Sentry initialised (env=%s)", settings.app_env)
@@ -162,8 +186,10 @@ def create_app() -> FastAPI:
     from app.routes.home import router as home_router
     from app.routes.internal import _internal as internal_router
     from app.routes.internal import router as editor_router
+    from app.routes.legal import router as legal_router
     from app.routes.posts import router as posts_router
 
+    app.include_router(legal_router)
     app.include_router(home_router)
     app.include_router(posts_router)
     app.include_router(editor_router)

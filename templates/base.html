@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{% block language %}en{% endblock %}">
     <head>
         <meta charset="utf-8" />
         <meta name="viewport"
@@ -66,7 +66,7 @@
         {% block content %}{% endblock %}
         <!-- Footer -->
         <footer class="site-footer">
-            <div class="container">© {{ year }} BulliExplorer</div>
+            <div class="container">© {{ year }} BulliExplorer · <a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a></div>
         </footer>
         <!-- Dark-mode toggle: reflects/updates the pre-paint script's choice,
          persists it to localStorage so it overrides the OS preference on
