@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -96,7 +97,12 @@ _TOKEN_HEADER = APIKeyHeader(name="X-Resync-Token", auto_error=False)
 def _require_resync_token(token: str | None = Depends(_TOKEN_HEADER)) -> str:  # noqa: B008 — FastAPI Depends pattern
     """Dependency: reject requests missing or carrying the wrong resync token."""
     settings = get_settings()
-    if not token or token != settings.resync_token:
+    # secrets.compare_digest, not `!=` — constant-time, matching the
+    # standard _verify_github_signature already sets below (F3,
+    # docs/dev/review_17SEP2026.md). Timing attacks are impractical over
+    # the public internet for this threat model, but the inconsistency
+    # is exactly the kind that gets copied into the next endpoint.
+    if not token or not secrets.compare_digest(token, settings.resync_token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-Resync-Token header",

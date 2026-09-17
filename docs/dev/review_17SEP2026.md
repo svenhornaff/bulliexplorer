@@ -281,3 +281,65 @@ appears anywhere in the post-detail HTML response. Existing
 `templates/partials/route_stats.html`, `tests/unit/test_templates.py`,
 `tests/unit/test_amenities_endpoint.py` (new),
 `tests/integration/test_post_map_integration.py`.
+
+### F2 + F3 + POI-popup escaping — one security-consistency commit
+
+**Done when**
+- [x] `buildAmenityPopupHtml`'s website link only renders when
+  `tags.website`/`tags["contact:website"]` starts with `http://` or
+  `https://` (case-insensitive scheme check) — a `javascript:`,
+  `data:`, or any other scheme is silently dropped, same as the "no
+  website" case today (no empty placeholder row).
+- [x] `app/routes/internal.py`'s `_require_resync_token` uses
+  `secrets.compare_digest(token, settings.resync_token)` instead of
+  `token != settings.resync_token`.
+- [x] The curated-POI popup in `templates/post.html` (`buildCategoryMarkerElement`'s
+  popup, currently `"<strong>" + props.name + "</strong>"` +
+  `props.notes` unescaped) uses `escapeHtml()` for `name`/`notes`, same
+  as the amenity popup already does — author-controlled data, so not
+  exploitable today, but inconsistent with the escaping convention used
+  two hundred lines below for a reason that no longer applies once both
+  paths are equally safe to make consistent.
+- [x] `make ci` green — existing resync-token tests
+  (`tests/unit/test_resync.py`) continue to pass with the swapped
+  comparison (a `compare_digest` mismatch/match behaves identically to
+  `!=` for the existing correct/incorrect-token test cases, confirmed —
+  no existing assertions needed to change, only the implementation
+  underneath them). No new automated test for the scheme-allowlist/
+  popup-escaping — client-side WebGL/DOM logic, same "not meaningfully
+  unit-testable" reasoning already established throughout this
+  project's map-feature docs.
+
+**Summary**: Three one-line-ish fixes in one commit, as planned:
+
+1. **F2** — `buildAmenityPopupHtml`'s website link in `templates/post.html`
+   now only renders when `tags.website`/`tags["contact:website"]` matches
+   `/^https?:\/\//i` — a `javascript:`/`data:`/any-other-scheme value is
+   silently dropped, same as the pre-existing "no website tag" case (no
+   placeholder row). `escapeHtml()` was already correctly preventing an
+   attribute break-out; this closes the remaining gap where an escaped-
+   but-still-executable scheme could survive as a clickable link.
+2. **F3** — `app/routes/internal.py`'s `_require_resync_token` now uses
+   `secrets.compare_digest(token, settings.resync_token)` instead of
+   `token != settings.resync_token`, matching the constant-time standard
+   `_verify_github_signature` already sets in the same file.
+3. **POI-popup escaping** (tech-debt register) — the curated-POI popup's
+   `name`/`notes` now go through the same `escapeHtml()` the amenity
+   popup already uses, removing the one asymmetry between the two popup
+   builders (author-curated content, so not exploitable today, but
+   inconsistent for no remaining reason).
+
+**Testing**: F2/POI-escaping are client-side WebGL/DOM logic — same
+"not meaningfully unit-testable" reasoning already established
+throughout this project's map-feature docs (verified instead via
+`node -c` syntax-checking the extracted script with Jinja placeholders
+substituted, and `djlint templates/ --check` staying clean). F3 is
+covered transitively by the existing `tests/unit/test_resync.py` token
+tests (`test_resync_wrong_token_returns_401`,
+`test_resync_correct_token_returns_200`) — a `compare_digest` mismatch/
+match behaves identically to `!=` for both cases, so no test assertions
+needed to change, only the implementation underneath them.
+
+`make ci`: 305 passed, 95.89% coverage, security checks clean.
+
+**Files touched**: `app/routes/internal.py`, `templates/post.html`.

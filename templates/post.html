@@ -203,8 +203,15 @@ Vendor JS loaded last — only on posts that actually render a map. #}
         html += "<br><small class='text-muted'>" + escapeHtml(category) + "</small>";
       }
 
+      // Scheme allowlist (F2, docs/dev/review_17SEP2026.md) — escapeHtml()
+      // prevents breaking out of the href attribute, but a `javascript:...`
+      // value is still a perfectly valid *escaped* string that would
+      // survive intact as a clickable, executable link. tags.website is
+      // raw third-party OSM data (anyone can edit it), so only render the
+      // link when it's actually an http(s) URL — same silent-drop
+      // behaviour as the existing "no website tag" case, no placeholder.
       var website = tags.website || tags["contact:website"];
-      if (website) {
+      if (website && /^https?:\/\//i.test(website)) {
         html +=
           "<br><a href='" + escapeHtml(website) + "' target='_blank' rel='noopener noreferrer'>Website</a>";
       }
@@ -513,9 +520,15 @@ Vendor JS loaded last — only on posts that actually render a map. #}
         var props = feature.properties;
         var el = buildCategoryMarkerElement(props.category, props.name, 28, 1);
 
-        var popupHtml = "<strong>" + props.name + "</strong>";
+        // escapeHtml() used here too now (tech-debt register,
+        // review_17SEP2026.md) — name/notes are author-curated content,
+        // so not third-party-exploitable, but escapeHtml() already
+        // exists a hundred-plus lines below for the amenity popup;
+        // using it consistently here removes the only asymmetry between
+        // the two popup builders.
+        var popupHtml = "<strong>" + escapeHtml(props.name) + "</strong>";
         if (props.notes) {
-          popupHtml += "<br><small class='text-muted'>" + props.notes + "</small>";
+          popupHtml += "<br><small class='text-muted'>" + escapeHtml(props.notes) + "</small>";
         }
 
         new maplibregl.Marker({ element: el })
