@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -107,3 +108,54 @@ async def get_db_session() -> AsyncGenerator[AsyncSession]:
         except Exception:
             await session.rollback()
             raise
+
+
+async def try_acquire_advisory_lock(session: AsyncSession, key: int) -> bool:
+    """Try to acquire a session-scoped Postgres advisory lock.
+
+    Non-blocking (``pg_try_advisory_lock``) — returns immediately whether
+    or not the lock was acquired, rather than waiting for the holder to
+    release it. Used by the app's startup lifespan (F5,
+    docs/dev/review_17SEP2026.md) so that only one of Dockerfile's two
+    uvicorn workers runs the startup content sync per deploy, instead of
+    both running it and racing on the same upserts.
+
+    Session-scoped, not transaction-scoped: the lock is tied to the
+    session's underlying Postgres backend connection and survives
+    commit/rollback — it must be released explicitly with
+    :func:`release_advisory_lock` before that connection is returned to
+    the pool, or it leaks onto whichever caller reuses that connection
+    next.
+
+    Parameters
+    ----------
+    session
+        The session whose underlying connection acquires the lock. The
+        caller must keep this same session/connection open for as long
+        as the lock needs to be held.
+    key
+        Arbitrary application-chosen lock key (any 64-bit integer,
+        conventionally namespaced per use case to avoid collisions).
+
+    Returns
+    -------
+    bool
+        ``True`` if the lock was acquired by this session, ``False`` if
+        another session already holds it.
+    """
+    result = await session.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": key})
+    return bool(result.scalar_one())
+
+
+async def release_advisory_lock(session: AsyncSession, key: int) -> None:
+    """Release a session-scoped advisory lock acquired via
+    :func:`try_acquire_advisory_lock`.
+
+    Parameters
+    ----------
+    session
+        The same session that acquired the lock.
+    key
+        The same key passed to :func:`try_acquire_advisory_lock`.
+    """
+    await session.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": key})

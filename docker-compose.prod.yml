@@ -25,6 +25,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Docker daemon defaults (no explicit max-size/max-file) allow
+    # unbounded json-file log growth on this 4GB host — a real risk from
+    # a chatty app (Overpass warnings alone are high-volume on bad days)
+    # — and were the reason an 08:46-08:48 log window went missing
+    # during an earlier sync investigation (F6, docs/dev/review_17SEP2026.md).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     healthcheck:
       test:
         [

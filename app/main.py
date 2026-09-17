@@ -11,13 +11,25 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.core.config import get_settings
-from app.core.db import dispose_engine, get_session_factory, init_engine
+from app.core.db import (
+    dispose_engine,
+    get_session_factory,
+    init_engine,
+    release_advisory_lock,
+    try_acquire_advisory_lock,
+)
 from app.services.background_sync import cancel_amenity_sync_tasks, schedule_amenity_sync
-from app.services.post_sync import sync_posts
+from app.services.post_sync import SyncResult, sync_posts
 from app.utils.log_factory import configure_logging, get_logger
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 logger = get_logger(__name__)
+
+# Arbitrary fixed key for the startup-sync advisory lock (F5,
+# docs/dev/review_17SEP2026.md) — any 64-bit int works, this one has no
+# meaning beyond being unlikely to collide with a future unrelated use of
+# Postgres advisory locks in this app.
+_STARTUP_SYNC_LOCK_KEY = 84625179
 
 
 def _sentry_before_send(event: dict[str, object], hint: dict[str, object]) -> dict[str, object] | None:
@@ -77,11 +89,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # docs/dev/fix_startup_blocking_amenity_sync.md. Content sync itself
     # (this call) is fast and has no such failure mode — it stays
     # blocking, since a reader hitting a post needs it to actually exist.
+    # Dockerfile runs `uvicorn --workers 2`; FastAPI's lifespan runs once
+    # per worker process, not once per deploy, so without a lock, content
+    # sync runs twice on every deploy — double parsing, double upserts
+    # racing on the same rows, plus a race window where both workers can
+    # read a stale `amenities_synced_at` before either commits (F5,
+    # docs/dev/review_17SEP2026.md). pg_try_advisory_lock is non-blocking:
+    # the first worker to reach here takes it and does the real sync; any
+    # other worker sees it already held and skips straight through with
+    # an empty SyncResult (no amenity_route_ids, so it schedules no
+    # redundant amenity-discovery task either).
     content_dir = BASE_DIR / "content" / "posts"
     session_factory = get_session_factory()
     async with session_factory() as session:
-        result = await sync_posts(content_dir, session)
-        await session.commit()
+        acquired_lock = await try_acquire_advisory_lock(session, _STARTUP_SYNC_LOCK_KEY)
+        if acquired_lock:
+            try:
+                result = await sync_posts(content_dir, session)
+                await session.commit()
+            finally:
+                await release_advisory_lock(session, _STARTUP_SYNC_LOCK_KEY)
+        else:
+            logger.info("Startup sync lock held by another worker — skipping")
+            result = SyncResult()
 
     if settings.enable_amenity_discovery:
         schedule_amenity_sync(

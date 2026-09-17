@@ -10,6 +10,7 @@ the mock session helpers use side_effect to return different results per call.
 from __future__ import annotations
 
 import datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,6 +21,8 @@ from sqlalchemy.engine import Result
 
 from app.core.db import get_db_session
 from app.main import create_app
+
+STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
 
 # ---------------------------------------------------------------------------
 # Fake geometry — real WKBElements that to_shape() can process, no DB needed
@@ -540,53 +543,64 @@ async def test_post_with_route_and_tiles_shows_map_container(client_with_route_a
 
 @pytest.mark.unit
 async def test_post_with_route_and_tiles_loads_maplibre(client_with_route_and_tiles):
-    """MapLibre vendor JS is included in the page when the map is active."""
+    """MapLibre vendor JS, plus the extracted post-map.js behavior file
+    (F4, docs/dev/review_17SEP2026.md), is included when the map is active.
+    """
     resp = await client_with_route_and_tiles.get("/posts/test-post")
     assert "maplibre-gl.js" in resp.text
     assert "maplibre-gl.css" in resp.text
     assert "pmtiles.js" in resp.text
     assert "basemaps.js" in resp.text
+    assert "/static/js/post-map.js" in resp.text
 
 
 @pytest.mark.unit
 async def test_post_with_route_and_tiles_inlines_geojson(client_with_route_and_tiles):
-    """Route GeoJSON is inlined as a JS variable in the page."""
+    """Route GeoJSON is inlined into window.BULLIEXPLORER_MAP_DATA — the
+    data-only inline block that remains in post.html after F4's extraction
+    of behavior into static/js/post-map.js (docs/dev/review_17SEP2026.md).
+    """
     resp = await client_with_route_and_tiles.get("/posts/test-post")
-    assert "ROUTE_GEOJSON" in resp.text
+    assert "BULLIEXPLORER_MAP_DATA" in resp.text
+    assert "routeGeojson" in resp.text
     assert "LineString" in resp.text
 
 
 @pytest.mark.unit
 async def test_post_with_route_and_tiles_inlines_poi_geojson(client_with_route_and_tiles):
-    """POI GeoJSON is inlined as a JS variable (FeatureCollection)."""
+    """POI GeoJSON is inlined into window.BULLIEXPLORER_MAP_DATA (FeatureCollection)."""
     resp = await client_with_route_and_tiles.get("/posts/test-post")
-    assert "POIS_GEOJSON" in resp.text
+    assert "poisGeojson" in resp.text
     assert "FeatureCollection" in resp.text
     assert "Wild Campsite" in resp.text
 
 
 @pytest.mark.unit
-async def test_post_with_route_and_tiles_includes_cycling_layers(client_with_route_and_tiles):
+def test_post_map_js_includes_cycling_layers():
     """cyclingLayers() (gis_cycling_upgrade.md Phase 1) is defined and
     appended to both the initial style and the theme-swap setStyle call.
+
+    Lives in static/js/post-map.js since F4's extraction
+    (docs/dev/review_17SEP2026.md) — no longer part of the per-request
+    HTML response, so this test reads the static file directly.
     """
-    resp = await client_with_route_and_tiles.get("/posts/test-post")
-    assert "function cyclingLayers(flavor)" in resp.text
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    assert "function cyclingLayers(flavor)" in js
     # Appended via .concat(...) in both places the base style is built —
     # initial load and the theme-change setStyle rebuild — not replacing
     # basemaps.layers()'s own array.
-    assert resp.text.count(".concat(cyclingLayers(") == 2
+    assert js.count(".concat(cyclingLayers(") == 2
 
 
 @pytest.mark.unit
-async def test_post_with_route_and_tiles_cycling_layers_use_kind_detail(client_with_route_and_tiles):
+def test_post_map_js_cycling_layers_use_kind_detail():
     """Filters on kind_detail (the OSM highway=* value), not kind itself —
     Phase 0's tile-inspection finding: kind only has 5 broad buckets, the
     real cycleway/path/track distinction lives on kind_detail.
     """
-    resp = await client_with_route_and_tiles.get("/posts/test-post")
-    assert '"kind_detail"' in resp.text
-    assert '"cycleway"' in resp.text
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    assert '"kind_detail"' in js
+    assert '"cycleway"' in js
     # Both cycling layers read from the "roads" source-layer confirmed
     # present via direct tile inspection in Phase 0.
-    assert resp.text.count('"source-layer": "roads"') >= 2
+    assert js.count('"source-layer": "roads"') >= 2
