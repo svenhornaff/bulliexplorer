@@ -291,6 +291,9 @@ S3_BUCKET=bulliexplorer
 TILES_URL=
 
 # Public legal disclosure values — see docs/dev/legal_gdpr.md.
+# LEGAL_CLASSIFICATION: "personal" or "commercial" — unset 503s /impressum and
+# /datenschutz in production; see docs/dev/legal_gdpr_classification_refactor.md.
+LEGAL_CLASSIFICATION=
 # LEGAL_ADDRESS stays empty until a ladungsfaehige Anschrift is confirmed —
 # /impressum and /datenschutz return 503 in production while any are unset.
 LEGAL_NAME=

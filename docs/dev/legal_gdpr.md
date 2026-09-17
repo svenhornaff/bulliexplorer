@@ -71,6 +71,47 @@ until this is actually resolved one way or the other.
 - Redact home endpoints, timestamps and other identifiable people's location data in published GPX.
 - Reassess before introducing accounts, imports, uploads, embeds, analytics or marketing.
 
+## Legal classification (personal vs. commercial)
+
+`LEGAL_CLASSIFICATION` (`personal` | `commercial` | unset) controls which
+`/impressum` renders — see `docs/dev/legal_gdpr_classification_refactor.md`
+for the full evaluation of the § 18 Abs. 1 MStV personal/family exemption
+this setting is built on. Decided: **`personal`** — no residential or
+virtual address is published; `/impressum` shows only the non-commercial
+diary notice, `LEGAL_EMAIL` remains required. `/datenschutz` is unaffected
+by this setting either way — the GDPR controller-identification duty
+(Art. 13) is separate from the § 5 DDG/§ 18 MStV provider-identification
+duty the personal/family exemption addresses, so its own required fields
+(including address) still apply regardless of classification. Unset still
+503s both pages in production — no silent default to either value.
+
+### Regression guard
+
+Any of the following changes moves BulliExplorer away from the
+"exclusively private and non-commercial personal diary" basis the
+`personal` classification relies on, and requires re-running the Phase 0
+classification decision (ideally with a real legal check) before shipping:
+
+- adding advertising
+- adding affiliate links
+- accepting sponsorship
+- accepting donations
+- charging users
+- selling goods or services
+- adding subscriptions
+- adding commercial partnerships
+- introducing user accounts
+- allowing public user-generated content
+- introducing comments
+- adding newsletters
+- adding analytics
+- adding advertising trackers
+- adding social-media tracking
+- adding additional external embeds
+- changing hosting/CDN providers
+- changing logging behaviour
+- materially changing Sentry data collection
+
 ## Technical changes
 
 Sentry defaults are explicit: no default PII, no local variables/request bodies/traces.

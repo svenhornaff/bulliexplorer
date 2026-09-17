@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -23,6 +24,11 @@ class Settings(BaseSettings):
     legal_log_retention: str = ""
     legal_cloudflare_details: str = ""
     legal_sentry_details: str = ""
+    # Unset (None) is a deliberate non-default — see docs/dev/legal_gdpr_classification_refactor.md.
+    # "personal": /impressum renders the no-address personal/family notice (§ 18 Abs. 1 MStV).
+    # "commercial": /impressum renders the full operator Impressum, LEGAL_ADDRESS required.
+    # None: /impressum and /datenschutz both 503 in production until a classification is chosen.
+    legal_classification: Literal["personal", "commercial"] | None = None
 
     # --- Database ------------------------------------------------------------
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5433/bulliexplorer"
