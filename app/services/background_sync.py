@@ -24,12 +24,24 @@ FastAPI itself).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.geo_sync import sync_route_amenities
 from app.utils.log_factory import get_logger
+
+# A zero-arg callable returning an async context manager over an
+# AsyncSession — what every caller here actually needs. Deliberately not
+# typed as the concrete sqlalchemy.ext.asyncio.async_sessionmaker class:
+# every real caller does pass one (e.g. get_session_factory()), but this
+# module only ever calls session_factory() and uses the result as an
+# async context manager, so the looser structural type is the accurate
+# one and lets tests pass a plain callable fixture without a type
+# mismatch.
+SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 logger = get_logger(__name__)
 
@@ -42,7 +54,7 @@ _TASK_SET_ATTR = "amenity_sync_tasks"
 
 
 async def sync_amenities_for_routes(
-    session_factory: async_sessionmaker,
+    session_factory: SessionFactory,
     route_ids: list[int],
 ) -> None:
     """Run amenity discovery for every route id, in its own session.
@@ -62,9 +74,10 @@ async def sync_amenities_for_routes(
     Parameters
     ----------
     session_factory:
-        An ``async_sessionmaker`` (e.g. ``get_session_factory()``) — a
-        factory, not an already-open session, since this may run well
-        after the caller's own session has closed.
+        A zero-arg callable returning an async context manager over an
+        ``AsyncSession`` (e.g. ``get_session_factory()``) — a factory,
+        not an already-open session, since this may run well after the
+        caller's own session has closed.
     route_ids:
         Route ids to sync amenities for, typically
         ``SyncResult.amenity_route_ids`` from a prior ``sync_posts()``
@@ -76,6 +89,12 @@ async def sync_amenities_for_routes(
         try:
             async with session_factory() as session:
                 await sync_route_amenities(session, route_id)
+                # sync_amenities (called via sync_route_amenities) now
+                # commits its own writes per-chunk as it goes — see
+                # docs/dev/fix_incremental_amenity_writes.md. This final
+                # commit is a no-op in the common case (nothing left
+                # pending) but stays here as a harmless safety net for
+                # any future change to that contract.
                 await session.commit()
             synced += 1
         except asyncio.CancelledError:
@@ -111,7 +130,7 @@ def _log_task_exception(task: asyncio.Task) -> None:
 
 def schedule_amenity_sync(
     state: Any,
-    session_factory: async_sessionmaker,
+    session_factory: SessionFactory,
     route_ids: list[int],
     *,
     task_name: str,

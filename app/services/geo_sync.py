@@ -34,6 +34,7 @@ Overpass amenity discovery (Phase 4, ``docs/dev/gis_cycling_upgrade.md``):
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime
 import logging
 import math
@@ -44,7 +45,8 @@ import gpxpy
 import httpx
 from geoalchemy2.shape import from_shape, to_shape
 from shapely.geometry import LineString, Point
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, tuple_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.nearby_amenity import NearbyAmenity
@@ -180,6 +182,53 @@ _MAX_AMENITY_QUERIES: int = 30
 _AMENITY_SYNC_COOLDOWN = datetime.timedelta(minutes=15)
 
 _KM_PER_DEGREE_LAT: float = 111.0
+
+
+@dataclasses.dataclass
+class AmenitySyncStatus:
+    """In-progress/last-run amenity sync progress for one route.
+
+    Operator visibility (``docs/dev/fix_incremental_amenity_writes.md``
+    Phase 2): checking "is this route's sync working, and how far along
+    is it" used to mean SSH + ``docker compose logs`` + manual ``grep``,
+    every single time. This is in-memory, process-local state —
+    deliberately not persisted: it's operator-facing progress for *this*
+    process's current or most recent run, not a durable record (the
+    actual result of a sync is the ``NearbyAmenity`` rows themselves,
+    already durable). Reset to a fresh instance at the start of every
+    sync attempt, so a route's status always reflects its latest run,
+    never a stale one from before a restart carried over.
+    """
+
+    chunks_succeeded: int = 0
+    chunks_failed: int = 0
+    chunks_total: int = 0
+    in_progress: bool = False
+    last_attempt_at: datetime.datetime | None = None
+
+
+# route_id -> AmenitySyncStatus. Process-local, not shared across workers
+# — fine for this project's single-process deployment
+# (``bulliexplorer-tech-concept.md``); a multi-worker deployment would
+# need this moved to the DB or a shared cache, not attempted here since
+# it isn't warranted by the current deployment shape.
+_amenity_sync_status: dict[int, AmenitySyncStatus] = {}
+
+
+def get_amenity_sync_status(route_id: int) -> AmenitySyncStatus | None:
+    """Return the current/last-run amenity sync status for a route, or
+    ``None`` if no sync has ever been attempted for it in this process's
+    lifetime (e.g. right after a restart, before any sync has run).
+    """
+    return _amenity_sync_status.get(route_id)
+
+
+def get_all_amenity_sync_statuses() -> dict[int, AmenitySyncStatus]:
+    """Return every route's current/last-run amenity sync status tracked
+    in this process. Returns a shallow copy — callers must not mutate
+    the tracker directly.
+    """
+    return dict(_amenity_sync_status)
 
 
 # ---------------------------------------------------------------------------
@@ -397,8 +446,11 @@ async def sync_route_amenities(
     Parameters
     ----------
     session:
-        Open ``AsyncSession``.  Caller owns the transaction (including any
-        commit — this function does not commit).
+        Open ``AsyncSession``.  Note that :func:`sync_amenities` commits
+        its own writes per-chunk as it goes (see that function's
+        docstring, ``docs/dev/fix_incremental_amenity_writes.md``) — this
+        function does not add any transaction semantics of its own on
+        top of that.
     route_id:
         The ``Route.id`` to sync amenities for.
     http_client:
@@ -429,24 +481,54 @@ async def sync_amenities(
 ) -> None:
     """Discover and upsert :class:`NearbyAmenity` rows for a route.
 
-    Best-effort, snapshot-replace semantics:
+    Best-effort, **per-chunk incremental** write semantics
+    (``docs/dev/fix_incremental_amenity_writes.md``) — a deliberate change
+    from the original all-or-nothing design (queue every chunk's results
+    in memory, write once only if every chunk succeeds). That design made
+    sense for a typical route (a handful of chunks, high per-chunk
+    reliability) but actively withheld real, already-fetched data
+    indefinitely for a route needing many chunks against an unreliable
+    free public API (Dream of North, ~30 chunks) — the probability of a
+    fully clean run across 30 chunks is low enough that "wait for one"
+    isn't a plan, and there was no existing good snapshot being protected
+    in the first place for a route that had never once completed a full
+    run.
 
-    - Queries Overpass in full **before** touching the DB. Existing
-      amenities are only replaced once every chunk query has *succeeded*
-      (partial success across chunks still preserves the old snapshot —
-      an incomplete answer is worse than a stale one for derived data
-      nobody manually edits).
-    - A successful query with zero results legitimately clears old rows
-      (the amenities genuinely aren't there any more, e.g. the route
-      changed).
-    - Deduplicates by ``(osm_element_type, osm_element_id)`` across
-      chunks — the buffer padding means adjacent chunks' bboxes overlap,
-      so the same OSM element can appear in more than one chunk's result.
+    The core safety property is preserved, just scoped to the chunk
+    instead of the whole route: a *failed* chunk never deletes or
+    inserts anything for its own bbox this run, and never touches any
+    other chunk's data. As each chunk *succeeds*, this function commits
+    its own transaction immediately — deliberately, not left to the
+    caller, since the whole point is that a reader (or an operator
+    checking progress via a separate DB connection) can see a chunk's
+    amenities the moment that chunk finishes, not only once every chunk
+    in the route has. A caller that wraps this in a larger transaction of
+    its own should know amenity writes commit independently, not
+    atomically with the rest of that caller's work.
+
+    Per successful chunk:
+
+    - **Upsert by natural key** (``route_id``, ``osm_element_type``,
+      ``osm_element_id`` — the DB's own ``uq_nearby_amenities_route_osm_
+      element`` constraint) rather than blind insert. Adjacent chunks'
+      buffer-padded bboxes overlap by design, so the same OSM element can
+      legitimately be returned by more than one chunk; upserting means a
+      second chunk re-reporting it updates the row in place instead of
+      violating the unique constraint or creating a duplicate.
+    - **Delete scoped to that chunk's own bbox**: existing rows whose
+      ``location`` falls within this chunk's bbox but that this chunk's
+      *fresh* result didn't return are deleted — this is what lets a
+      genuinely-gone amenity actually disappear, at the granularity data
+      arrives at, without requiring a perfect whole-route run to ever
+      clean anything up. A row just outside this chunk's bbox (covered by
+      a different chunk) is never touched by this delete.
 
     Parameters
     ----------
     session:
-        Open ``AsyncSession``.  Caller owns the transaction.
+        Open ``AsyncSession``.  Caller owns the transaction for anything
+        *other* than amenity writes — this function commits its own
+        per-chunk writes directly (see above).
     route:
         The just-upserted :class:`Route` row (``route.id`` must already be
         populated — caller flushes first for a fresh insert).
@@ -472,13 +554,23 @@ async def sync_amenities(
             )
             return
 
-    # Set on every *attempted* sync, success or failure — a failed attempt
-    # still counts against the cooldown, since retrying a route that's
-    # already failing fast (e.g. Overpass mid-outage) is exactly the burst
-    # pattern this cooldown exists to prevent.
+    # Set (and committed) on every *attempted* sync, success or failure —
+    # a failed attempt still counts against the cooldown, since retrying a
+    # route that's already failing fast (e.g. Overpass mid-outage) is
+    # exactly the burst pattern this cooldown exists to prevent. Committed
+    # up front, before any chunk runs, so a crash mid-sync still leaves
+    # the cooldown correctly started rather than retriable immediately.
     route.amenities_synced_at = now
+    await session.commit()
 
     bboxes = _amenity_query_bboxes(linestring)
+
+    # Operator visibility (fix_incremental_amenity_writes.md Phase 2) —
+    # a fresh status object for this run, replacing whatever was tracked
+    # from a previous run for this route, so status always reflects the
+    # latest attempt.
+    status = AmenitySyncStatus(chunks_total=len(bboxes), in_progress=True, last_attempt_at=now)
+    _amenity_sync_status[route.id] = status
 
     _close_client = False
     client = http_client
@@ -491,8 +583,9 @@ async def sync_amenities(
         client = httpx.AsyncClient()
         _close_client = True
 
+    chunks_succeeded = 0
+    chunks_failed = 0
     try:
-        all_results: list[AmenityResult] = []
         # Sticky per-sync failover (docs/dev/gis_cycling_upgrade.md Phase
         # 5): once a chunk actually gets served by the mirror, subsequent
         # chunks in THIS sync try the mirror first too, rather than
@@ -532,35 +625,93 @@ async def sync_amenities(
             if result_meta.get("rate_limited"):
                 rate_limited_this_run = True
             if chunk_results is None:
-                # One chunk failed — the overall answer is incomplete.
-                # Preserve whatever amenities already exist rather than
-                # replace them with a partial result.
+                # This one chunk failed — touch nothing for its bbox this
+                # run (no delete, no insert/update), but every other
+                # chunk's already-written data in this same run is
+                # unaffected. Continue to the next chunk rather than
+                # aborting the whole route.
+                chunks_failed += 1
+                status.chunks_failed = chunks_failed
                 logger.warning(
                     "Overpass amenity sync incomplete for route_id=%d (bbox %s,%s,%s,%s failed) — "
-                    "leaving existing NearbyAmenity rows untouched",
+                    "leaving existing NearbyAmenity rows for this bbox untouched, continuing with "
+                    "remaining chunks",
                     route.id,
                     south,
                     west,
                     north,
                     east,
                 )
-                return
-            all_results.extend(chunk_results)
+                continue
+
+            await _write_amenity_chunk(session, route.id, south, west, north, east, chunk_results)
+            chunks_succeeded += 1
+            status.chunks_succeeded = chunks_succeeded
+            status.chunks_failed = chunks_failed
     finally:
         if _close_client:
             await client.aclose()
+        status.chunks_succeeded = chunks_succeeded
+        status.chunks_failed = chunks_failed
+        status.in_progress = False
 
-    # Dedupe across chunks (overlapping buffers can return the same OSM
-    # element from more than one chunk).
+    logger.info(
+        "Amenity sync for route_id=%d complete — %d/%d chunk(s) succeeded and were written",
+        route.id,
+        chunks_succeeded,
+        chunks_succeeded + chunks_failed,
+    )
+
+
+async def _write_amenity_chunk(
+    session: AsyncSession,
+    route_id: int,
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    chunk_results: list[AmenityResult],
+) -> None:
+    """Write one successful chunk's results, then commit immediately.
+
+    Deletes existing rows within this chunk's own bbox that this fresh
+    result didn't return (genuinely-stale cleanup, scoped to what this
+    query actually covers), then upserts what the chunk returned by its
+    natural key. Adjacent chunks' bboxes overlap by design (buffer
+    padding) — that overlap is exactly why the delete is scoped to *this*
+    bbox only, never the whole route: a row belonging to a neighboring
+    chunk's bbox that this chunk didn't happen to return this time must
+    not be deleted by this chunk's write.
+
+    Deduplicates ``chunk_results`` by ``(osm_element_type, osm_element_id)``
+    first — Overpass can return the same element more than once within a
+    single response for elements spanning the query's edge.
+    """
     deduped: dict[tuple[str, int], AmenityResult] = {}
-    for result in all_results:
+    for result in chunk_results:
         deduped[(result.osm_element_type, result.osm_element_id)] = result
 
-    # All chunk queries succeeded — safe to replace the snapshot now.
-    await session.execute(delete(NearbyAmenity).where(NearbyAmenity.route_id == route.id))
+    envelope = func.ST_MakeEnvelope(west, south, east, north, 4326)
+    fresh_keys = {(result.osm_element_type, result.osm_element_id) for result in deduped.values()}
+
+    stale_query = select(NearbyAmenity.osm_element_type, NearbyAmenity.osm_element_id).where(
+        NearbyAmenity.route_id == route_id,
+        func.ST_Within(NearbyAmenity.location, envelope),
+    )
+    existing_in_bbox = (await session.execute(stale_query)).all()
+    stale_keys = [(t, i) for t, i in existing_in_bbox if (t, i) not in fresh_keys]
+    if stale_keys:
+        await session.execute(
+            delete(NearbyAmenity).where(
+                NearbyAmenity.route_id == route_id,
+                func.ST_Within(NearbyAmenity.location, envelope),
+                tuple_(NearbyAmenity.osm_element_type, NearbyAmenity.osm_element_id).in_(stale_keys),
+            )
+        )
+
     for result in deduped.values():
-        amenity = NearbyAmenity(
-            route_id=route.id,
+        stmt = pg_insert(NearbyAmenity).values(
+            route_id=route_id,
             osm_element_type=result.osm_element_type,
             osm_element_id=result.osm_element_id,
             category=result.category,
@@ -568,9 +719,28 @@ async def sync_amenities(
             location=from_shape(Point(result.lon, result.lat), srid=4326),
             tags=result.tags,
         )
-        session.add(amenity)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_nearby_amenities_route_osm_element",
+            set_={
+                "category": stmt.excluded.category,
+                "name": stmt.excluded.name,
+                "location": stmt.excluded.location,
+                "tags": stmt.excluded.tags,
+            },
+        )
+        await session.execute(stmt)
 
-    logger.info("Synced %d NearbyAmenity rows for route_id=%d", len(deduped), route.id)
+    await session.commit()
+    logger.info(
+        "Wrote %d amenity row(s) for route_id=%d, bbox (%s,%s,%s,%s) — %d stale row(s) removed",
+        len(deduped),
+        route_id,
+        south,
+        west,
+        north,
+        east,
+        len(stale_keys),
+    )
 
 
 async def sync_pois(

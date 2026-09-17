@@ -14,11 +14,13 @@ Run with: docker compose up -d && uv run pytest tests/integration/ -v
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import gpxpy
 import pytest
 from geoalchemy2.shape import to_shape
+from shapely.geometry import LineString
 from sqlalchemy import select, text
 
 import app.core.db as db_module
@@ -844,3 +846,215 @@ Body.
             (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route_id))).scalars().all()
         )
         assert len(amenities) == 1, "the cooldown-skipped sync must leave the first sync's row untouched"
+
+
+# ---------------------------------------------------------------------------
+# fix_incremental_amenity_writes.md Phase 1: per-chunk incremental writes.
+#
+# These tests need a route spanning more than _SINGLE_QUERY_MAX_SPAN_DEG
+# (1.0°) so _amenity_query_bboxes() actually plans more than one chunk —
+# the whole point of this phase is behavior that's only observable across
+# multiple chunks in the same sync run.
+# ---------------------------------------------------------------------------
+
+_MULTI_CHUNK_GPX = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="bulliexplorer-test"
+     xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Multi-Chunk Test Route</name>
+    <trkseg>
+      <trkpt lat="48.0" lon="8.0"><ele>200.0</ele><time>2025-06-01T08:00:00Z</time></trkpt>
+      <trkpt lat="48.5" lon="8.0"><ele>210.0</ele><time>2025-06-01T08:20:00Z</time></trkpt>
+      <trkpt lat="49.0" lon="8.0"><ele>220.0</ele><time>2025-06-01T08:40:00Z</time></trkpt>
+      <trkpt lat="49.5" lon="8.0"><ele>230.0</ele><time>2025-06-01T09:00:00Z</time></trkpt>
+      <trkpt lat="50.0" lon="8.0"><ele>240.0</ele><time>2025-06-01T09:20:00Z</time></trkpt>
+      <trkpt lat="50.5" lon="8.0"><ele>250.0</ele><time>2025-06-01T09:40:00Z</time></trkpt>
+      <trkpt lat="51.0" lon="8.0"><ele>260.0</ele><time>2025-06-01T10:00:00Z</time></trkpt>
+      <trkpt lat="51.5" lon="8.0"><ele>270.0</ele><time>2025-06-01T10:20:00Z</time></trkpt>
+      <trkpt lat="52.0" lon="8.0"><ele>280.0</ele><time>2025-06-01T10:40:00Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>
+"""
+
+
+def _overpass_node(osm_id: int, lat: float, lon: float, name: str) -> dict:
+    return {
+        "type": "node",
+        "id": osm_id,
+        "lat": lat,
+        "lon": lon,
+        "tags": {"tourism": "camp_site", "name": name},
+    }
+
+
+async def _sync_multi_chunk_route(tmp_path: Path, slug: str) -> int:
+    """Shared setup for the Phase 1 tests below: write a multi-chunk GPX
+    + post, sync content, return the route id.
+    """
+    _write_gpx(tmp_path, "route.gpx", content=_MULTI_CHUNK_GPX)
+    _write_md(
+        tmp_path,
+        f"{slug}.md",
+        f"""\
+---
+title: Multi Chunk Post
+slug: {slug}
+date: 2025-06-01
+route:
+  name: Multi Chunk Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await sync_posts(tmp_path, session)
+        await session.commit()
+    assert len(result.amenity_route_ids) == 1
+    return result.amenity_route_ids[0]
+
+
+@pytest.mark.integration
+async def test_amenity_sync_partial_failure_preserves_other_chunks_writes(tmp_path):
+    """The whole point of Phase 1: one chunk failing must not discard
+    other chunks' already-written results in the same run — the old
+    all-or-nothing behavior this replaces would have left zero rows here.
+    """
+    route_id = await _sync_multi_chunk_route(tmp_path, "partial-failure-post")
+
+    from app.services.geo_sync import _amenity_query_bboxes
+
+    async with get_session_factory()() as session:
+        route = await session.get(Route, route_id)
+        assert route is not None
+        linestring = cast("LineString", to_shape(route.track))
+    bboxes = _amenity_query_bboxes(linestring)
+    assert len(bboxes) >= 3, "fixture route must plan at least 3 chunks for this test to mean anything"
+
+    call_index = 0
+
+    async def _fake_query(south, west, north, east, *, http_client=None, result_meta=None, **kwargs):
+        nonlocal call_index
+        idx = call_index
+        call_index += 1
+        if result_meta is not None:
+            result_meta["served_index"] = 0
+            result_meta["rate_limited"] = False
+        if idx == 1:
+            # The second chunk fails outright.
+            return None
+        return [_parse_element(_overpass_node(1000 + idx, (south + north) / 2, (west + east) / 2, f"Camp {idx}"))]
+
+    with patch("app.services.geo_sync.query_nearby_amenities", side_effect=_fake_query):
+        async with get_session_factory()() as session:
+            await sync_route_amenities(session, route_id)
+
+    async with get_session_factory()() as session:
+        amenities = (
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route_id))).scalars().all()
+        )
+    surviving_ids = {a.osm_element_id for a in amenities}
+    # Chunk 1 (index 1) failed and wrote nothing; chunks 0 and 2+ succeeded
+    # and their rows must exist.
+    assert 1001 not in surviving_ids
+    assert 1000 in surviving_ids
+    assert any(oid not in (1000, 1001) for oid in surviving_ids), "a later successful chunk's row must also survive"
+
+
+@pytest.mark.integration
+async def test_amenity_sync_overlapping_chunks_no_duplicate_row(tmp_path):
+    """The same OSM element returned by two different (overlapping,
+    buffer-padded) chunks must upsert to one row, not create a duplicate
+    — exercises the DB's own uq_nearby_amenities_route_osm_element
+    constraint via the natural-key upsert, not just in-memory dedup.
+    """
+    route_id = await _sync_multi_chunk_route(tmp_path, "overlap-post")
+
+    shared_node = _overpass_node(42, 48.5, 8.0, "Shared Camp")
+
+    async def _fake_query(south, west, north, east, *, http_client=None, result_meta=None, **kwargs):
+        if result_meta is not None:
+            result_meta["served_index"] = 0
+            result_meta["rate_limited"] = False
+        # Every chunk "sees" the same shared element (simulating it
+        # falling within more than one chunk's buffer-padded bbox).
+        return [_parse_element(shared_node)]
+
+    with patch("app.services.geo_sync.query_nearby_amenities", side_effect=_fake_query):
+        async with get_session_factory()() as session:
+            await sync_route_amenities(session, route_id)
+
+    async with get_session_factory()() as session:
+        amenities = (
+            (
+                await session.execute(
+                    select(NearbyAmenity).where(NearbyAmenity.route_id == route_id, NearbyAmenity.osm_element_id == 42)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(amenities) == 1, "the same OSM element from multiple chunks must upsert to one row, not duplicate"
+
+
+@pytest.mark.integration
+async def test_amenity_sync_stale_element_removed_when_absent_from_fresh_chunk(tmp_path):
+    """An element that used to be in a chunk's bbox but is legitimately
+    gone from a fresh, successful re-query of that same bbox must be
+    deleted — staleness handling preserved at chunk granularity.
+    """
+    route_id = await _sync_multi_chunk_route(tmp_path, "staleness-post")
+
+    vanishing_node = _overpass_node(77, 48.02, 8.0, "Soon Gone Camp")
+    call_count = 0
+
+    async def _fake_query_first_run(south, west, north, east, *, http_client=None, result_meta=None, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if result_meta is not None:
+            result_meta["served_index"] = 0
+            result_meta["rate_limited"] = False
+        # Only the first chunk (covering lat ~48.0-48.5, where
+        # vanishing_node sits) returns it; later chunks return nothing.
+        if call_count == 1:
+            return [_parse_element(vanishing_node)]
+        return []
+
+    with patch("app.services.geo_sync.query_nearby_amenities", side_effect=_fake_query_first_run):
+        async with get_session_factory()() as session:
+            await sync_route_amenities(session, route_id)
+
+    async with get_session_factory()() as session:
+        amenities = (
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route_id))).scalars().all()
+        )
+    assert any(a.osm_element_id == 77 for a in amenities), "first run must have written the node"
+
+    # Reset the cooldown so a second sync actually re-queries Overpass.
+    async with get_session_factory()() as session:
+        route = await session.get(Route, route_id)
+        assert route is not None
+        route.amenities_synced_at = None
+        await session.commit()
+
+    async def _fake_query_second_run(south, west, north, east, *, http_client=None, result_meta=None, **kwargs):
+        if result_meta is not None:
+            result_meta["served_index"] = 0
+            result_meta["rate_limited"] = False
+        # The node is genuinely gone now — every chunk, including the one
+        # that used to cover it, returns nothing.
+        return []
+
+    with patch("app.services.geo_sync.query_nearby_amenities", side_effect=_fake_query_second_run):
+        async with get_session_factory()() as session:
+            await sync_route_amenities(session, route_id)
+
+    async with get_session_factory()() as session:
+        amenities = (
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route_id))).scalars().all()
+        )
+    assert not any(a.osm_element_id == 77 for a in amenities), "stale node must be removed after a fresh empty query"

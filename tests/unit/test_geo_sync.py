@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -772,6 +772,12 @@ async def test_sync_amenities_backs_off_after_rate_limited_chunk(monkeypatch):
     # chunks.
     linestring = LineString([(8.0, 48.0), (8.0, 49.5)])
     fake_session = AsyncMock(spec=AsyncSession)
+    # _write_amenity_chunk's staleness query does `(await session.execute(
+    # select(...))).all()` — the mocked execute() must return something
+    # whose .all() is a plain (awaitable-free) list, not another AsyncMock
+    # coroutine, since this test only cares about pacing/backoff, not
+    # actual DB writes.
+    fake_session.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
 
     call_count = 0
 
@@ -823,6 +829,7 @@ async def test_sync_amenities_no_backoff_without_a_429(monkeypatch):
     route = Route(id=1, name="Test Route")
     linestring = LineString([(8.0, 48.0), (8.0, 49.5)])
     fake_session = AsyncMock(spec=AsyncSession)
+    fake_session.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
 
     async def _fake_query_nearby_amenities(south, west, north, east, *, http_client=None, result_meta=None, **kwargs):
         if result_meta is not None:

@@ -163,3 +163,76 @@ async def test_resync_get_not_allowed(resync_client):
         headers={"X-Resync-Token": _VALID_TOKEN},
     )
     assert resp.status_code == 405
+
+
+# ---------------------------------------------------------------------------
+# GET /internal/sync-status (fix_incremental_amenity_writes.md Phase 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_sync_status_missing_token_returns_401(resync_client):
+    """Same auth as /internal/resync — no header → 401."""
+    resp = await resync_client.get("/internal/sync-status")
+    assert resp.status_code == 401
+
+
+@pytest.mark.unit
+async def test_sync_status_wrong_token_returns_401(resync_client):
+    """Same auth as /internal/resync — wrong token → 401."""
+    resp = await resync_client.get(
+        "/internal/sync-status",
+        headers={"X-Resync-Token": "wrong-token"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.unit
+async def test_sync_status_reflects_live_in_memory_state(resync_client):
+    """The endpoint must reflect whatever's currently tracked in
+    geo_sync's in-memory status dict — not a cached/stale snapshot —
+    confirmed by mutating the tracker directly (as a running sync would)
+    and observing the exact same values through the endpoint.
+    """
+    import datetime
+
+    from app.services.geo_sync import AmenitySyncStatus, _amenity_sync_status
+
+    _amenity_sync_status.clear()
+    now = datetime.datetime.now(datetime.UTC)
+    _amenity_sync_status[3] = AmenitySyncStatus(
+        chunks_succeeded=5, chunks_failed=1, chunks_total=30, in_progress=True, last_attempt_at=now
+    )
+
+    resp = await resync_client.get(
+        "/internal/sync-status",
+        headers={"X-Resync-Token": _VALID_TOKEN},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["routes"]["3"]["chunks_succeeded"] == 5
+    assert body["routes"]["3"]["chunks_failed"] == 1
+    assert body["routes"]["3"]["chunks_total"] == 30
+    assert body["routes"]["3"]["in_progress"] is True
+    assert body["routes"]["3"]["last_attempt_at"] == now.isoformat()
+
+    _amenity_sync_status.clear()
+
+
+@pytest.mark.unit
+async def test_sync_status_empty_when_nothing_ever_synced(resync_client):
+    """A route never attempted in this process's lifetime is simply
+    absent, not listed with zeroed-out fields.
+    """
+    from app.services.geo_sync import _amenity_sync_status
+
+    _amenity_sync_status.clear()
+
+    resp = await resync_client.get(
+        "/internal/sync-status",
+        headers={"X-Resync-Token": _VALID_TOKEN},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"routes": {}}

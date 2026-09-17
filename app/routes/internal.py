@@ -165,6 +165,58 @@ async def resync(
     }
 
 
+@_internal.get("/sync-status", status_code=status.HTTP_200_OK)
+async def sync_status(
+    _token: str = Depends(_require_resync_token),  # noqa: B008 — FastAPI Depends pattern
+) -> dict[str, object]:
+    """Operator visibility into in-progress/last-run amenity syncs.
+
+    ``docs/dev/fix_incremental_amenity_writes.md`` Phase 2 — checking
+    "is Dream of North's sync working, and how far along is it" used to
+    mean SSH + ``docker compose logs`` + manual ``grep``, every single
+    time. Same auth as ``/internal/resync`` (``X-Resync-Token``) —
+    operator tooling, not meant to be public.
+
+    Reflects this process's in-memory state
+    (:func:`app.services.geo_sync.get_all_amenity_sync_statuses`), so it's
+    always live/current for whichever chunk is running right now, not a
+    cached or delayed snapshot — there's no separate polling/refresh
+    step, the status object a running sync mutates is exactly what this
+    endpoint reads.
+
+    Intended workflow::
+
+        curl -H "X-Resync-Token: $RESYNC_TOKEN" \\
+             https://bulliexplorer.com/internal/sync-status
+
+    Returns
+    -------
+    dict
+        ``{"routes": {"<route_id>": {"chunks_succeeded": N,
+        "chunks_failed": N, "chunks_total": N, "in_progress": bool,
+        "last_attempt_at": "<ISO 8601>" | None}, ...}}`` — only routes
+        that have had at least one amenity sync attempted in this
+        process's lifetime appear; a route never attempted (e.g. right
+        after a restart, before any sync has run) is simply absent, not
+        listed with zeroed-out fields.
+    """
+    from app.services.geo_sync import get_all_amenity_sync_statuses
+
+    statuses = get_all_amenity_sync_statuses()
+    return {
+        "routes": {
+            str(route_id): {
+                "chunks_succeeded": s.chunks_succeeded,
+                "chunks_failed": s.chunks_failed,
+                "chunks_total": s.chunks_total,
+                "in_progress": s.in_progress,
+                "last_attempt_at": s.last_attempt_at.isoformat() if s.last_attempt_at else None,
+            }
+            for route_id, s in statuses.items()
+        }
+    }
+
+
 # ---------------------------------------------------------------------------
 # GitHub webhook endpoint
 # ---------------------------------------------------------------------------
