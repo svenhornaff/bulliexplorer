@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from app.services.overpass import (  # noqa: PLC2701
+    _HTTP_TIMEOUT_S,
     _MAX_SPLIT_DEPTH,
     _OVERPASS_URLS,
     AmenityResult,
@@ -230,6 +231,29 @@ async def test_query_nearby_amenities_http_error_returns_none():
     async with httpx.AsyncClient(transport=transport) as client:
         results = await query_nearby_amenities(1.0, 2.0, 3.0, 4.0, http_client=client)
     assert results is None
+
+
+@pytest.mark.unit
+async def test_query_nearby_amenities_sets_timeout_per_request_not_via_client():
+    """Regression test for fix_overpass_urban_density_timeout.md's
+    corrected root cause: the timeout must be set on the client.post()
+    call itself (request.extensions["timeout"]), not left to whatever
+    timeout the caller's client happens to be configured with. A caller
+    (geo_sync.sync_amenities) that passes in a bare httpx.AsyncClient()
+    with no timeout= at all must still get the full _HTTP_TIMEOUT_S
+    budget on every request — httpx.AsyncClient()'s own default is a
+    mere 5s, which is exactly how this bug reached production.
+    """
+    transport = _JsonTransport({"elements": []})
+    # Deliberately no timeout= here — the point is that the caller's own
+    # client config must not matter.
+    async with httpx.AsyncClient(transport=transport) as client:
+        results = await query_nearby_amenities(1.0, 2.0, 3.0, 4.0, http_client=client)
+    assert results == []
+    assert len(transport.requests) == 1
+    timeout = transport.requests[0].extensions["timeout"]
+    assert timeout["read"] == _HTTP_TIMEOUT_S
+    assert timeout["connect"] == _HTTP_TIMEOUT_S
 
 
 @pytest.mark.unit

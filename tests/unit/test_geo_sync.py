@@ -33,7 +33,6 @@ from app.services.geo_sync import (  # noqa: PLC2701
     _resolve_poi_location_with_geocoding,
     sync_amenities,
 )
-from app.services.overpass import HTTP_TIMEOUT_S
 
 # Minimal valid GPX with two track points and elevation/timestamp data.
 # Distance ≈ 11.13 km (straight-line Haversine between the two points).
@@ -629,24 +628,27 @@ def test_amenity_query_bboxes_chunks_are_geographically_local():
 
 
 # ---------------------------------------------------------------------------
-# sync_amenities — default httpx.AsyncClient must carry HTTP_TIMEOUT_S
+# sync_amenities — client pass-through (timeout guarantee lives in overpass.py)
 #
-# Regression test for fix_overpass_urban_density_timeout.md's corrected
-# root cause: sync_amenities is the only real caller that builds its own
-# client and passes it into overpass.query_nearby_amenities(). httpx's own
-# AsyncClient() defaults to a 5s timeout when none is given, which
-# silently undercut the intended 90s (HTTP_TIMEOUT_S) budget for every
-# production sync, before and after the Phase 1 "fix" — that constant only
-# ever applied on the http_client=None branch *inside* overpass.py itself,
-# never to a client built by a caller.
+# fix_overpass_urban_density_timeout.md's corrected root cause moved the
+# fix into overpass.py itself: _query_one_instance sets timeout= directly
+# on the client.post() call, per request, so it can't be silently
+# undercut by whatever timeout config a caller's client happens to have
+# (or not have). sync_amenities no longer needs to know or care about
+# HTTP_TIMEOUT_S at all — these tests just confirm it passes whatever
+# client it has (its own bare one, or a caller-supplied one) straight
+# through unmodified. The actual timeout coverage lives in
+# tests/unit/test_overpass.py's
+# test_query_nearby_amenities_sets_timeout_per_request_not_via_client.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_sync_amenities_default_client_uses_overpass_http_timeout():
-    """When sync_amenities builds its own client (no http_client passed),
-    that client's timeout must match overpass.HTTP_TIMEOUT_S — not
-    httpx's own 5s default.
+async def test_sync_amenities_passes_its_own_client_through_unmodified():
+    """When no http_client is passed, sync_amenities builds a plain
+    httpx.AsyncClient() and hands it straight to query_nearby_amenities —
+    no timeout= special-casing needed here now that overpass.py sets it
+    per-request.
     """
     route = Route(id=1, name="Test Route")
     linestring = LineString([(8.0, 48.0), (8.1, 48.1)])
@@ -668,17 +670,14 @@ async def test_sync_amenities_default_client_uses_overpass_http_timeout():
 
     assert seen_clients, "query_nearby_amenities was never called"
     client = seen_clients[0]
-    assert client is not None
-    assert client.timeout.read == HTTP_TIMEOUT_S
-    assert client.timeout.connect == HTTP_TIMEOUT_S
+    assert isinstance(client, httpx.AsyncClient)
     await client.aclose()
 
 
 @pytest.mark.unit
 async def test_sync_amenities_passed_in_client_is_not_overridden():
     """When a caller passes its own http_client, sync_amenities must use
-    it as-is (not silently rewrap it) — only the http_client=None default
-    path needs the HTTP_TIMEOUT_S fix.
+    it as-is (not silently rewrap it).
     """
     route = Route(id=1, name="Test Route")
     linestring = LineString([(8.0, 48.0), (8.1, 48.1)])

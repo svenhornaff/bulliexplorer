@@ -290,28 +290,61 @@ production traffic yet, despite being fully covered by fixture tests
 (which always inject their own client with an explicit timeout, so they
 never exposed this gap).
 
-**Fix**: `geo_sync.py` now imports `overpass.HTTP_TIMEOUT_S` (renamed from
-the module-private `_HTTP_TIMEOUT_S`, kept as an internal alias for
-existing in-module references) and passes
-`httpx.AsyncClient(timeout=HTTP_TIMEOUT_S)` on the `http_client=None`
-default-construction path, so the one production caller's client budget
-matches what `overpass.py` intends. The caller-injected-client path
-(tests, and any future caller) is untouched — an explicitly passed-in
-client's timeout is still the caller's own responsibility, unchanged.
+**Fix, first attempt (superseded below)**: `geo_sync.py` was changed to
+import `overpass.HTTP_TIMEOUT_S` and pass
+`httpx.AsyncClient(timeout=HTTP_TIMEOUT_S)` on its `http_client=None`
+default-construction path, so the one known production caller's client
+budget matched what `overpass.py` intends.
 
-**Testing**: two new unit tests in `tests/unit/test_geo_sync.py` —
-`test_sync_amenities_default_client_uses_overpass_http_timeout` asserts
-the client `sync_amenities` builds internally has both `timeout.read` and
-`timeout.connect` equal to `HTTP_TIMEOUT_S` (not httpx's 5s default), and
-`test_sync_amenities_passed_in_client_is_not_overridden` confirms an
-explicitly passed-in client is used as-is, unmodified. `make ci`: 263
+This fixed today's one caller but not the actual root cause: it's the
+same "maybe caller passes a client, maybe not" shape as
+`_fetch_gpx_over_http` a few hundred lines away in the same file — and
+that function is *not* buggy despite the identical shape, because its
+request call is `client.get(url, timeout=10)`: the timeout is set
+**per request, at the call site**, not left to whatever the client
+happens to be configured with. `overpass.py`'s `client.post()` call had
+no `timeout=` at all, relying entirely on the caller's client — which is
+exactly how this bug happened in the first place. Fixing only
+`geo_sync.py`'s client construction leaves that same trap in place for
+any *future* caller that builds a bare `httpx.AsyncClient()` and passes
+it into `query_nearby_amenities`: it would silently reintroduce the
+identical 5s ceiling, and nothing would catch it short of another live
+incident.
+
+**Fix, corrected (again)**: moved the fix to `overpass.py`'s
+`_query_one_instance`, adding `timeout=_HTTP_TIMEOUT_S` directly on the
+`client.post()` call — the same pattern already proven correct in
+`_fetch_gpx_over_http`. This closes the bug at its root: no caller,
+now or in the future, needs to know or remember anything about timeout
+configuration to get the right behavior. The `geo_sync.py` client-
+construction change was reverted (now genuinely redundant, and
+misleading to leave in place implying it still matters) — `sync_amenities`
+goes back to building a bare `httpx.AsyncClient()` when no `http_client`
+is passed, same as before any of this, and that's fine now.
+
+**Testing**: `tests/unit/test_overpass.py` gained
+`test_query_nearby_amenities_sets_timeout_per_request_not_via_client`,
+which deliberately uses a caller client with **no** `timeout=` at all and
+asserts via `httpx.Request.extensions["timeout"]` (what httpx actually
+sets on the wire) that both `read` and `connect` equal `_HTTP_TIMEOUT_S`
+regardless. The two `test_geo_sync.py` tests from the first attempt were
+rewritten to `test_sync_amenities_passes_its_own_client_through_unmodified`
+and `test_sync_amenities_passed_in_client_is_not_overridden`, confirming
+`sync_amenities` now has no timeout-related responsibility at all — it
+just passes whatever client it has straight through. `make ci`: 264
 tests passed, 93.25% coverage, security checks clean.
+
+**Also confirmed while investigating**: `origin/develop` did not yet have
+Phase 1's `_HTTP_TIMEOUT_S` bump (`git show origin/develop:...` showed
+`35.0`) — it existed only in local, unpushed commits. Not a lost fix,
+just not yet pushed; resolved by pushing all pending commits together
+with this one.
 
 **Still not verified live** — same constraint as Phase 3 above: this
 sandbox has no access to production Overpass egress. The next live
 resync of `dream-of-north` is the first one that will actually run
-against the intended 90s budget; only then does the original density
-theory get a real test.
+against the intended 90s budget, set unconditionally per request this
+time; only then does the original density theory get a real test.
 
 ## Explicitly out of scope
 

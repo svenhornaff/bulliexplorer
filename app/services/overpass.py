@@ -74,17 +74,18 @@ _INTER_INSTANCE_RETRY_DELAY_S = 1.0
 # a real dense-urban bbox (Cologne-Bonn-Ruhr) timed out against both
 # instances at 35s — cheap headroom to try before reaching for the
 # heavier Phase 2 adaptive-split fix below.
-# Exposed (not underscore-prefixed as far as external use goes — still
-# module-private by convention, but geo_sync.py imports it directly) so
-# any caller building its own httpx.AsyncClient to pass in via
-# ``http_client=`` uses the same timeout budget as the client this module
-# builds itself. httpx.AsyncClient() defaults to a 5s timeout when none is
-# given — a caller-supplied client that omits ``timeout=`` silently falls
-# back to that 5s default instead of the 90s budget above, which is
-# exactly what happened in production (fix_overpass_urban_density_timeout.md
-# "Root cause, corrected").
-HTTP_TIMEOUT_S = 90.0
-_HTTP_TIMEOUT_S = HTTP_TIMEOUT_S
+#
+# Set explicitly on the client.post() call itself (see
+# _query_one_instance below), not just on this module's own
+# httpx.AsyncClient() construction — matches geo_sync._fetch_gpx_over_http's
+# proven per-request pattern. A caller-supplied client passed in via
+# ``http_client=`` (as geo_sync.sync_amenities does) has no way to
+# silently undercut this budget, unlike relying on the client's own
+# timeout config: httpx.AsyncClient() defaults to a 5s timeout when none
+# is given, which is exactly what happened in production before this was
+# set per-request (fix_overpass_urban_density_timeout.md "Root cause,
+# corrected (again)").
+_HTTP_TIMEOUT_S = 90.0
 
 # Max times a failing bbox is split in half and retried
 # (fix_overpass_urban_density_timeout.md Phase 2). Capped at 1 — split
@@ -383,6 +384,15 @@ async def _query_one_instance(
             url,
             data={"data": query},
             headers={"User-Agent": _OVERPASS_UA},
+            # Set per-request, not left to whatever the caller's client
+            # happens to be configured with — matches
+            # geo_sync._fetch_gpx_over_http's proven pattern. A client
+            # passed in via http_client= (as sync_amenities does) has no
+            # way to silently undercut this: see
+            # fix_overpass_urban_density_timeout.md "Root cause,
+            # corrected (again)" for the caller-side bug this closes at
+            # its actual root instead of at one call site.
+            timeout=_HTTP_TIMEOUT_S,
         )
         resp.raise_for_status()
         payload = resp.json()
