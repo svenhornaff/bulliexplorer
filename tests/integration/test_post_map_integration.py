@@ -18,11 +18,12 @@ import pytest
 from geoalchemy2.shape import from_shape
 from httpx import ASGITransport, AsyncClient
 from shapely.geometry import LineString, Point
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 import app.core.db as db_module
 from app.core.config import get_settings
 from app.core.db import dispose_engine, get_session_factory, init_engine
+from app.models.nearby_amenity import NearbyAmenity
 from app.models.point_of_interest import PointOfInterest
 from app.models.post import Post
 from app.models.route import Route
@@ -109,6 +110,30 @@ async def _insert_poi(factory, post_id: int) -> None:
             location=location,
         )
         session.add(poi)
+        await session.commit()
+
+
+async def _route_id_for_post(factory, post_id: int) -> int:
+    """Look up a Route's id by its post_id (F1, review_17SEP2026.md tests)."""
+    async with factory() as session:
+        result = await session.execute(select(Route.id).where(Route.post_id == post_id))
+        return result.scalar_one()
+
+
+async def _insert_amenity(factory, route_id: int) -> None:
+    """Insert a single NearbyAmenity for the given route (F1, review_17SEP2026.md)."""
+    location = from_shape(Point(8.05, 48.05), srid=4326)
+    async with factory() as session:
+        amenity = NearbyAmenity(
+            route_id=route_id,
+            osm_element_type="node",
+            osm_element_id=999,
+            category="restaurant",
+            name="Waldgasthof",
+            location=location,
+            tags={"website": "https://example.com"},
+        )
+        session.add(amenity)
         await session.commit()
 
 
@@ -283,3 +308,105 @@ async def test_post_list_not_affected_by_route_data():
     # No map code on the list page.
     assert "post-map" not in resp.text
     assert "maplibregl" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# F1 (docs/dev/review_17SEP2026.md) — lazy amenity GeoJSON endpoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_post_detail_no_longer_inlines_amenity_data():
+    """The whole point of F1: a post with amenities must not carry their
+    name/tags in the HTML response body any more — that data is now
+    fetched lazily from the new endpoint instead."""
+    factory = get_session_factory()
+    post_id = await _insert_post(factory)
+    await _insert_route(factory, post_id)
+    route_id = await _route_id_for_post(factory, post_id)
+    await _insert_amenity(factory, route_id)
+
+    from app.main import create_app
+
+    application = create_app()
+    transport = ASGITransport(app=application)
+
+    with patch("app.routes.posts.get_settings") as mock_gs:
+        mock_gs.return_value.tiles_url = "pmtiles://https://example.com/tiles.pmtiles"
+        mock_gs.return_value.is_production = False
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/posts/kinzig-valley-loop")
+
+    assert resp.status_code == 200
+    assert "Waldgasthof" not in resp.text  # amenity name must not be inlined
+    assert "amenities.geojson" in resp.text  # lazy-fetch URL is present instead
+    assert "amenity-toggle" in resp.text  # toggle still renders (has_amenities=True)
+
+
+@pytest.mark.integration
+async def test_amenities_geojson_endpoint_returns_real_geometry():
+    """Round-trips a real NearbyAmenity's PostGIS geometry through the new
+    /posts/{slug}/amenities.geojson endpoint end-to-end."""
+    factory = get_session_factory()
+    post_id = await _insert_post(factory)
+    await _insert_route(factory, post_id)
+    route_id = await _route_id_for_post(factory, post_id)
+    await _insert_amenity(factory, route_id)
+
+    from app.main import create_app
+
+    application = create_app()
+    transport = ASGITransport(app=application)
+
+    with patch("app.routes.posts.get_settings") as mock_gs:
+        mock_gs.return_value.is_production = False
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/posts/kinzig-valley-loop/amenities.geojson")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["type"] == "FeatureCollection"
+    assert len(body["features"]) == 1
+    feature = body["features"][0]
+    assert feature["geometry"]["type"] == "Point"
+    assert feature["geometry"]["coordinates"] == [8.05, 48.05]
+    assert feature["properties"]["name"] == "Waldgasthof"
+    assert feature["properties"]["tags"] == {"website": "https://example.com"}
+    assert "etag" in resp.headers
+
+
+@pytest.mark.integration
+async def test_amenities_geojson_endpoint_empty_when_route_has_none():
+    """A route with zero amenities returns an empty FeatureCollection, not a 404."""
+    factory = get_session_factory()
+    post_id = await _insert_post(factory)
+    await _insert_route(factory, post_id)
+
+    from app.main import create_app
+
+    application = create_app()
+    transport = ASGITransport(app=application)
+
+    with patch("app.routes.posts.get_settings") as mock_gs:
+        mock_gs.return_value.is_production = False
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/posts/kinzig-valley-loop/amenities.geojson")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"type": "FeatureCollection", "features": []}
+
+
+@pytest.mark.integration
+async def test_amenities_geojson_endpoint_404_for_unknown_slug():
+    from app.main import create_app
+
+    application = create_app()
+    transport = ASGITransport(app=application)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/posts/does-not-exist/amenities.geojson")
+
+    assert resp.status_code == 404

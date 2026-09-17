@@ -173,7 +173,7 @@ async def _post_with_route_session():
         _result(scalar=_FakePostWithRouteMapBlock()),
         _result(scalar=_FakeRoute()),
         _result(scalars_list=[]),  # POIs query
-        _result(scalars_list=[]),  # NearbyAmenity query (route is not None)
+        _result(scalar=None),  # NearbyAmenity existence check (route is not None)
     )
 
 
@@ -183,7 +183,7 @@ async def _post_with_route_and_pois_session():
         _result(scalar=_FakePostWithRouteMapBlock()),
         _result(scalar=_FakeRoute()),
         _result(scalars_list=[_FakePOI()]),  # POIs query
-        _result(scalars_list=[]),  # NearbyAmenity query (route is not None)
+        _result(scalar=None),  # NearbyAmenity existence check (route is not None)
     )
 
 

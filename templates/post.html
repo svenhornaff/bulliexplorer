@@ -73,7 +73,12 @@ Vendor JS loaded last — only on posts that actually render a map. #}
     // |tojson filter escapes forward-slashes and special chars — safe in <script>.
     const ROUTE_GEOJSON     = {{ route_geojson     | tojson }};
     const POIS_GEOJSON      = {{ pois_geojson      | tojson }};
-    const AMENITIES_GEOJSON = {{ amenities_geojson | tojson }};
+    // Amenities are no longer inlined here (docs/dev/review_17SEP2026.md
+    // F1) — a route with 15k+ amenities blew this past 3.7MB inside the
+    // HTML document itself, re-downloaded on every visit even though the
+    // toggle below defaults off. Fetched lazily from this endpoint only
+    // the first time the "Show nearby services" checkbox is checked.
+    const AMENITIES_GEOJSON_URL = {{ amenities_geojson_url | tojson }};
     const TILES_URL          = {{ tiles_url          | tojson }};
 
     // ── Category → marker colour map ──────────────────────────────────────
@@ -532,15 +537,48 @@ Vendor JS loaded last — only on posts that actually render a map. #}
       // individual points at a wide zoom would still be an unreadable
       // solid mass; grouping into count bubbles that split apart on zoom
       // is what actually fixes both performance AND readability together.
+      // Source starts empty — the real data is fetched lazily (below),
+      // only on first toggle check, not on page load (F1,
+      // review_17SEP2026.md). An empty FeatureCollection is a valid,
+      // cheap placeholder; setData() swaps in the real one once fetched.
       registerCategoryImages(map); // must run before addAmenitiesSourceAndLayers references these image ids
-      addAmenitiesSourceAndLayers(map, AMENITIES_GEOJSON);
+      addAmenitiesSourceAndLayers(map, { type: "FeatureCollection", features: [] });
       setAmenitiesVisibility(map, amenitiesVisible); // off by default, same as before
 
       var amenityToggle = document.getElementById("amenity-toggle-input");
-      if (amenityToggle) {
+      var amenitiesLoaded = false;
+      var amenitiesLoading = false;
+      if (amenityToggle && AMENITIES_GEOJSON_URL) {
         amenityToggle.addEventListener("change", function () {
           amenitiesVisible = amenityToggle.checked;
           setAmenitiesVisibility(map, amenitiesVisible);
+
+          // Fetch once, lazily, on the first time the toggle is checked
+          // — not on page load, not re-fetched on subsequent toggles.
+          if (amenitiesVisible && !amenitiesLoaded && !amenitiesLoading) {
+            amenitiesLoading = true;
+            fetch(AMENITIES_GEOJSON_URL)
+              .then(function (resp) {
+                if (!resp.ok) throw new Error("amenities fetch failed: " + resp.status);
+                return resp.json();
+              })
+              .then(function (geojson) {
+                amenitiesLoaded = true;
+                var source = map.getSource(AMENITIES_SOURCE_ID);
+                if (source) source.setData(geojson);
+              })
+              .catch(function (err) {
+                // Graceful degradation, same philosophy as the rest of
+                // this project (amenities/geocoding/tiles all fail
+                // toward "less enrichment", never toward a broken page)
+                // — a failed fetch just leaves the overlay empty, the
+                // rest of the map is unaffected.
+                console.error("Failed to load nearby amenities:", err);
+              })
+              .finally(function () {
+                amenitiesLoading = false;
+              });
+          }
         });
       }
 

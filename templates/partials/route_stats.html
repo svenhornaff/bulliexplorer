@@ -47,8 +47,11 @@ template's context. #}
     </div>
     {# Amenity toggle (Phase 4, gis_cycling_upgrade.md) — auto-discovered,
     not curated, so it defaults off and is hidden entirely when there's
-    nothing to show (empty collection isn't rendered as an empty control). #}
-    {% if amenities_geojson and amenities_geojson.features %}
+    nothing to show (empty collection isn't rendered as an empty control).
+    has_amenities is a cheap existence check, not the full row set (F1,
+    review_17SEP2026.md) — the actual data is fetched lazily by the
+    browser only on first toggle check. #}
+    {% if has_amenities %}
         <label class="amenity-toggle">
             <input type="checkbox" id="amenity-toggle-input" aria-controls="post-map" />
             Show nearby services

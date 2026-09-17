@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from geoalchemy2.shape import to_shape
 from shapely.geometry import Point as ShapelyPoint
 from sqlalchemy import select
@@ -86,18 +87,26 @@ async def post_detail(
     poi_result = await db.execute(select(PointOfInterest).where(PointOfInterest.post_id == post.id))
     pois = poi_result.scalars().all()
 
-    # Auto-discovered amenities (Phase 4, gis_cycling_upgrade.md) — tied to
-    # the route, not the post, and only queried when a route exists.
-    amenities: list[NearbyAmenity] = []
+    # Auto-discovered amenities (Phase 4, gis_cycling_upgrade.md) are no
+    # longer fetched or inlined here (docs/dev/review_17SEP2026.md F1) —
+    # a route with 15k+ amenities blew the inline GeoJSON past 3.7MB
+    # inside the HTML document itself, re-downloaded on every visit even
+    # though the "Show nearby services" toggle defaults off. The template
+    # only needs to know whether *any* amenities exist, to decide whether
+    # to render the toggle at all — a cheap existence check, not the full
+    # rows. The actual data is fetched lazily by the browser from
+    # GET /posts/{slug}/amenities.geojson, only on first toggle check.
+    has_amenities = False
     if route is not None:
-        amenity_result = await db.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))
-        amenities = list(amenity_result.scalars().all())
+        amenity_exists_result = await db.execute(
+            select(NearbyAmenity.id).where(NearbyAmenity.route_id == route.id).limit(1)
+        )
+        has_amenities = amenity_exists_result.scalar_one_or_none() is not None
 
     # Convert to GeoJSON dicts for the template's inline JavaScript.
     # Jinja2's |tojson filter serialises these safely into <script> tags.
     route_geojson: dict[str, Any] | None = _route_to_geojson(route)
     pois_geojson: dict[str, Any] = _pois_to_geojson(list(pois))
-    amenities_geojson: dict[str, Any] = _amenities_to_geojson(amenities)
 
     templates = request.app.state.templates
     return templates.TemplateResponse(
@@ -109,11 +118,63 @@ async def post_detail(
             "pois": pois,
             "route_geojson": route_geojson,
             "pois_geojson": pois_geojson,
-            "amenities_geojson": amenities_geojson,
+            "has_amenities": has_amenities,
+            "amenities_geojson_url": f"/posts/{post.slug}/amenities.geojson" if has_amenities else None,
             "tiles_url": settings.tiles_url,
             "year": datetime.now().year,
         },
     )
+
+
+@router.get("/{slug}/amenities.geojson")
+async def post_amenities_geojson(
+    slug: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),  # noqa: B008
+) -> JSONResponse:
+    """Lazily-fetched amenity GeoJSON for a post's map (F1, review_17SEP2026.md).
+
+    Split out of ``post_detail`` so the (potentially 15k+ row) amenity
+    FeatureCollection is never inlined into the HTML document — the
+    browser fetches this endpoint only on first "Show nearby services"
+    toggle check, not on every page load. Carries an ``ETag`` derived
+    from the route's ``amenities_synced_at`` (amenities only change on a
+    sync), so a revalidating client gets a cheap 304 instead of
+    re-transferring the same multi-MB payload.
+
+    Parameters
+    ----------
+    slug:
+        The post's slug.
+
+    Returns
+    -------
+    JSONResponse
+        A GeoJSON FeatureCollection (possibly empty) of the route's
+        nearby amenities, with an ``ETag`` header set. 404 for an
+        unknown slug or a post with no route.
+    """
+    result = await db.execute(select(Post).where(Post.slug == slug))
+    post = result.scalar_one_or_none()
+
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    settings = get_settings()
+    if post.is_draft and settings.is_production:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    route_result = await db.execute(select(Route).where(Route.post_id == post.id))
+    route = route_result.scalar_one_or_none()
+
+    if route is None:
+        raise HTTPException(status_code=404, detail="Post has no route")
+
+    amenity_result = await db.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route.id))
+    amenities = list(amenity_result.scalars().all())
+
+    etag = f'"amenities-{route.id}-{route.amenities_synced_at.isoformat() if route.amenities_synced_at else "never"}"'
+    return JSONResponse(content=_amenities_to_geojson(amenities), headers={"ETag": etag})
 
 
 # ---------------------------------------------------------------------------
