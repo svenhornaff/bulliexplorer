@@ -220,6 +220,17 @@ def _amenities_to_geojson(amenities: list[NearbyAmenity]) -> dict[str, Any]:
                     "properties": {
                         "name": amenity.name or "",
                         "category": amenity.category,
+                        # Raw OSM tags (fix_amenity_overlay_ux.md Phase 3)
+                        # — already loaded, just not previously passed
+                        # through to the browser. The frontend popup
+                        # builder picks specific keys (website, phone,
+                        # etc.) out of this dict conditionally; sending
+                        # the whole dict here keeps this function
+                        # data-agnostic about which OSM keys happen to be
+                        # interesting today, rather than hardcoding a
+                        # subset server-side that would need updating
+                        # every time the frontend wants one more.
+                        "tags": amenity.tags or {},
                     },
                 }
             )

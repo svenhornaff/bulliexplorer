@@ -143,6 +143,82 @@ Vendor JS loaded last — only on posts that actually render a map. #}
       return el;
     }
 
+    // Escapes text pulled from OSM tag data before it's concatenated into
+    // popup innerHTML (fix_amenity_overlay_ux.md Phase 3) — amenity
+    // name/tags are auto-discovered from OpenStreetMap, editable by
+    // anyone, unlike the curated POI data the popup above already
+    // concatenates unescaped. Cheap and standard; not worth a library.
+    function escapeHtml(value) {
+      var div = document.createElement("div");
+      div.textContent = String(value == null ? "" : value);
+      return div.innerHTML;
+    }
+
+    // Human-readable label for a category slug ("bike_shop" → "Bike
+    // shop") — categories always shown now per Phase 3's "name plus a
+    // category line" popup design, not just a bare name.
+    function categoryLabel(category) {
+      if (!category) return "";
+      return category
+        .split("_")
+        .map(function (word, i) {
+          return i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word;
+        })
+        .join(" ");
+    }
+
+    // Builds the nearby-amenity popup HTML (fix_amenity_overlay_ux.md
+    // Phase 3). Name + category line always shown; a website link
+    // (opens in a new tab) and a phone link (tel:) only when those OSM
+    // tags actually exist on this element — no empty "Phone: —" row for
+    // a field that isn't there.
+    //
+    // `props.tags` comes back from a GeoJSON *source* feature (not a
+    // plain JS object we built ourselves) — MapLibre/GL JS serializes
+    // nested object properties to a JSON string on the wire, so this
+    // must be parsed defensively rather than accessed directly.
+    function amenityTags(props) {
+      if (!props || !props.tags) return {};
+      if (typeof props.tags === "string") {
+        try {
+          return JSON.parse(props.tags) || {};
+        } catch (e) {
+          return {};
+        }
+      }
+      return props.tags;
+    }
+
+    function buildAmenityPopupHtml(props) {
+      var tags = amenityTags(props);
+      var name = props.name || categoryLabel(props.category) || "Unnamed";
+      var html = "<strong>" + escapeHtml(name) + "</strong>";
+      var category = categoryLabel(props.category);
+      if (category) {
+        html += "<br><small class='text-muted'>" + escapeHtml(category) + "</small>";
+      }
+
+      var website = tags.website || tags["contact:website"];
+      if (website) {
+        html +=
+          "<br><a href='" + escapeHtml(website) + "' target='_blank' rel='noopener noreferrer'>Website</a>";
+      }
+
+      var phone = tags.phone || tags["contact:phone"];
+      if (phone) {
+        // OSM's phone tag occasionally lists more than one number
+        // separated by ";" or "," (e.g. "+49 761 1234; +49 761 5678") —
+        // take only the first for the tel: link (a link can only dial
+        // one number), but keep displaying the full original tag text
+        // so a reader who needs the second number still sees it.
+        var firstPhone = phone.split(/[;,]/)[0];
+        var telHref = firstPhone.replace(/[^+\d]/g, "");
+        html += "<br><a href='tel:" + escapeHtml(telHref) + "'>" + escapeHtml(phone) + "</a>";
+      }
+
+      return html;
+    }
+
     // ── Register the pmtiles:// protocol with MapLibre ─────────────────────
     const protocol = new pmtiles.Protocol();
     maplibregl.addProtocol("pmtiles", protocol.tile);
@@ -264,18 +340,63 @@ Vendor JS loaded last — only on posts that actually render a map. #}
     var AMENITIES_SOURCE_ID = "amenities";
     var AMENITIES_LAYER_IDS = ["amenities-clusters", "amenities-cluster-count", "amenities-unclustered"];
 
-    // Builds the ['match', ['get', 'category'], cat1, colour1, cat2, ...,
-    // fallback] expression MapLibre's `circle-color` paint property
-    // expects, from the same CATEGORY_COLOURS map the DOM-marker POI
-    // pins above already use — same visual language, zero new assets.
-    function categoryColorExpression() {
-      var expr = ["match", ["get", "category"]];
-      Object.keys(CATEGORY_COLOURS).forEach(function (category) {
-        if (category === "other") return; // fallback value, added last below
-        expr.push(category, CATEGORY_COLOURS[category]);
+    // Runtime-generated icons for unclustered amenity points
+    // (fix_amenity_overlay_ux.md Phase 2). map.addImage() accepts any
+    // canvas/ImageData at runtime — no sprite sheet file needed, despite
+    // the original performance-fix doc assuming one was required. Reuses
+    // CATEGORY_ICON_PATHS/CATEGORY_COLOURS (already vendored for the
+    // curated-POI DOM markers above) rather than any new asset: same
+    // "colored circle, white glyph" visual recipe, just rasterized once
+    // per category onto an offscreen canvas instead of built as DOM
+    // nodes per feature.
+    function categoryImageId(category) {
+      return "amenity-icon-" + category;
+    }
+
+    function drawCategoryIcon(category) {
+      var size = 32;
+      var canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      var ctx = canvas.getContext("2d");
+      var colour = CATEGORY_COLOURS[category] || CATEGORY_COLOURS.other;
+
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, size / 2 - 1.5, 0, 2 * Math.PI);
+      ctx.fillStyle = colour;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#fff";
+      ctx.stroke();
+
+      var iconPath = CATEGORY_ICON_PATHS[category];
+      if (iconPath) {
+        var glyphSize = size * 0.55;
+        var scale = glyphSize / 15; // paths are authored in a 15x15 viewBox
+        var offset = (size - glyphSize) / 2;
+        ctx.save();
+        ctx.translate(offset, offset);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = "#fff";
+        var path2d = new Path2D(iconPath);
+        ctx.fill(path2d);
+        ctx.restore();
+      }
+      return ctx.getImageData(0, 0, size, size);
+    }
+
+    // Registers one runtime image per known category (plus "other" as the
+    // fallback for anything unmapped). Must be called again after every
+    // setStyle() — map.addImage() doesn't survive a style swap any more
+    // than layers/sources do, and the unclustered symbol layer's
+    // icon-image expression below references these ids by name.
+    function registerCategoryImages(mapInstance) {
+      var categories = Object.keys(CATEGORY_COLOURS);
+      categories.forEach(function (category) {
+        var id = categoryImageId(category);
+        if (mapInstance.hasImage(id)) return; // idempotent, same reasoning as addAmenitiesSourceAndLayers
+        mapInstance.addImage(id, drawCategoryIcon(category));
       });
-      expr.push(CATEGORY_COLOURS.other);
-      return expr;
     }
 
     // Adds the amenities source + its three layers (idempotent — a no-op
@@ -322,18 +443,20 @@ Vendor JS loaded last — only on posts that actually render a map. #}
         },
         paint: { "text-color": "#fff" },
       });
+      // symbol + icon-image, not circle: unclustered points get real
+      // per-category icons now (Phase 2). Clusters keep the count-bubble
+      // circle styling above unchanged — a cluster of dozens of mixed
+      // categories has nowhere useful to put one icon.
       mapInstance.addLayer({
         id: "amenities-unclustered",
-        type: "circle",
+        type: "symbol",
         source: AMENITIES_SOURCE_ID,
         filter: ["!", ["has", "point_count"]],
-        layout: { visibility: "none" },
-        paint: {
-          "circle-color": categoryColorExpression(),
-          "circle-opacity": 0.85,
-          "circle-radius": 7,
-          "circle-stroke-color": "#fff",
-          "circle-stroke-width": 1.5,
+        layout: {
+          visibility: "none",
+          "icon-image": ["concat", "amenity-icon-", ["get", "category"]],
+          "icon-size": 0.75,
+          "icon-allow-overlap": true,
         },
       });
     }
@@ -409,6 +532,7 @@ Vendor JS loaded last — only on posts that actually render a map. #}
       // individual points at a wide zoom would still be an unreadable
       // solid mass; grouping into count bubbles that split apart on zoom
       // is what actually fixes both performance AND readability together.
+      registerCategoryImages(map); // must run before addAmenitiesSourceAndLayers references these image ids
       addAmenitiesSourceAndLayers(map, AMENITIES_GEOJSON);
       setAmenitiesVisibility(map, amenitiesVisible); // off by default, same as before
 
@@ -420,14 +544,41 @@ Vendor JS loaded last — only on posts that actually render a map. #}
         });
       }
 
+      // Cluster click-to-expand (fix_amenity_overlay_ux.md Phase 1) —
+      // MapLibre's own canonical, documented pattern for clustered
+      // sources: getClusterExpansionZoom(clusterId) returns the zoom
+      // level at which this specific cluster starts splitting apart,
+      // then easeTo() smoothly gets there. Without this, a reader has to
+      // manually scroll-zoom repeatedly to make a cluster break apart.
+      map.on("click", "amenities-clusters", function (e) {
+        var features = map.queryRenderedFeatures(e.point, { layers: ["amenities-clusters"] });
+        var clusterId = features[0] && features[0].properties && features[0].properties.cluster_id;
+        if (clusterId === undefined) return;
+        map.getSource(AMENITIES_SOURCE_ID).getClusterExpansionZoom(clusterId, function (err, zoom) {
+          if (err) return;
+          map.easeTo({ center: features[0].geometry.coordinates, zoom: zoom });
+        });
+      });
+      map.on("mouseenter", "amenities-clusters", function () {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "amenities-clusters", function () {
+        map.getCanvas().style.cursor = "";
+      });
+
+      // Richer popups (fix_amenity_overlay_ux.md Phase 3) — name and
+      // category always shown (closer to a Google-Maps-style "name plus a
+      // category line", not just a bare name); a website link (new tab)
+      // and a phone link (tel:) added only when those OSM tags actually
+      // exist on this element — no empty placeholder rows for fields
+      // that aren't there.
       map.on("click", "amenities-unclustered", function (e) {
         var feature = e.features && e.features[0];
         if (!feature) return;
         var props = feature.properties;
-        var popupHtml = "<strong>" + (props.name || props.category) + "</strong>";
         new maplibregl.Popup({ offset: 12 })
           .setLngLat(feature.geometry.coordinates)
-          .setHTML(popupHtml)
+          .setHTML(buildAmenityPopupHtml(props))
           .addTo(map);
       });
       map.on("mouseenter", "amenities-unclustered", function () {
@@ -450,6 +601,18 @@ Vendor JS loaded last — only on posts that actually render a map. #}
       if (!routeLoaded) return; // still mid-initial-load; nothing to swap yet
       var nextFlavor = event.detail.theme === "dark" ? "dark" : "light";
       var nextRouteColor = routeLineColor(nextFlavor);
+
+      // map.addImage() doesn't survive setStyle() any more than
+      // layers/sources do (fix_amenity_overlay_ux.md Phase 2) — the
+      // carried-over amenities-unclustered layer references these image
+      // ids via icon-image, so they must exist again before that layer
+      // is actually asked to render. "styledata" fires once the new
+      // style (including transformStyle's carried-over layers) has been
+      // applied — the earliest point at which addImage calls stick to
+      // the new style rather than the outgoing one.
+      map.once("styledata", function () {
+        registerCategoryImages(map);
+      });
 
       map.setStyle(
         {
