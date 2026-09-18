@@ -53,6 +53,7 @@ something that already exists, not to decide what to do next.
 | `issues_phase4.md` | Bugs found and fixed after `ui_ux_refresh.md` Phase 4 — all resolved. |
 | `legal_gdpr_classification_refactor.md` | Legal classification decision (`LEGAL_CLASSIFICATION=personal`), the deploy/passthrough bugs that followed, `LEGAL_ADDRESS` becoming optional for `/datenschutz`, and the later de-detailing of the public notice to recipient categories only. |
 | `seo_beyond_basics.md` | SEO beyond the basics, Sept-2026-evidence-checked — bucket #4. AI training/citation crawler split in `robots.txt` (operator decision: block training, allow citation), `sitemap.xml`/`feed.xml`, OpenGraph/Twitter Card meta, and `BlogPosting`/`Trip` JSON-LD. |
+| `security_review_owasp.md` | OWASP-informed security review — bucket #11. Real gaps fixed: SSRF allowlist on the GPX-fetch path, security-logging on both auth-failure paths. SQLi/dependency scanning confirmed already solid; CSRF confirmed correctly out of scope. Weekly scheduled `pip-audit`, CycloneDX SBOM CI artifact, credential-rotation discipline written down, OWASP ZAP baseline scan workflow. SonarCloud scoped but not wired up (needs an operator account). |
 
 ## Documented false leads — kept deliberately, not deleted
 

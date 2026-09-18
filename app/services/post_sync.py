@@ -69,6 +69,8 @@ class SyncResult:
 async def sync_posts(
     content_dir: Path,
     session: AsyncSession,
+    *,
+    r2_public_url: str = "",
 ) -> SyncResult:
     """Reconcile ``content_dir/*.md`` files with the ``posts`` table.
 
@@ -90,6 +92,13 @@ async def sync_posts(
     session:
         An open ``AsyncSession``.  The caller owns the transaction; this
         function does **not** commit or roll back.
+    r2_public_url:
+        ``Settings.r2_public_url`` — threaded down to :func:`sync_route`
+        as the SSRF allowlist for a URL-valued ``gpx_file``
+        (docs/dev/security_review_owasp.md Phase 1). Defaults to
+        ``""``, which allows no remote GPX fetch at all — callers that
+        want R2-hosted GPX files to actually resolve must pass the real
+        configured value.
 
     Returns
     -------
@@ -122,6 +131,7 @@ async def sync_posts(
             post.id,
             pp.frontmatter.route,
             content_dir,
+            r2_public_url=r2_public_url,
         )
         if route_id is not None:
             amenity_route_ids.append(route_id)

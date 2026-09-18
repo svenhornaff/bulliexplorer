@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -117,6 +118,44 @@ async def test_webhook_malformed_signature_header_returns_401(webhook_client):
         },
     )
     assert resp.status_code == 401
+
+
+@pytest.mark.unit
+async def test_webhook_wrong_secret_logs_security_warning(webhook_client, caplog):
+    """A spoofed webhook signature doesn't just 401 silently — it produces
+    a distinct, grep-able warning log line (docs/dev/
+    security_review_owasp.md Phase 2).
+    """
+    body = _push_payload()
+    with caplog.at_level(logging.WARNING):
+        resp = await webhook_client.post(
+            "/internal/webhook/github",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Hub-Signature-256": _sign(body, secret="wrong-secret"),  # noqa: S106 — test sentinel
+            },
+        )
+
+    assert resp.status_code == 401
+    warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("Webhook auth failed" in msg for msg in warnings)
+
+
+@pytest.mark.unit
+async def test_webhook_missing_signature_logs_security_warning(webhook_client, caplog):
+    """A missing signature header also produces the same distinct warning."""
+    body = _push_payload()
+    with caplog.at_level(logging.WARNING):
+        resp = await webhook_client.post(
+            "/internal/webhook/github",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert resp.status_code == 401
+    warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("Webhook auth failed" in msg for msg in warnings)
 
 
 # ---------------------------------------------------------------------------

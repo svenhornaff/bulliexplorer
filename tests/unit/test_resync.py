@@ -6,6 +6,7 @@ for the token, so no real database or secrets are needed.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -79,6 +80,37 @@ async def test_resync_wrong_token_returns_401(resync_client):
         headers={"X-Resync-Token": "wrong-token"},
     )
     assert resp.status_code == 401
+
+
+@pytest.mark.unit
+async def test_resync_wrong_token_logs_security_warning(resync_client, caplog):
+    """A wrong token doesn't just 401 silently — it produces a distinct,
+    grep-able warning log line (docs/dev/security_review_owasp.md
+    Phase 2). Before this, a brute-force attempt against the resync
+    token looked identical to normal traffic in the logs.
+    """
+    with caplog.at_level(logging.WARNING):
+        resp = await resync_client.post(
+            "/internal/resync",
+            headers={"X-Resync-Token": "wrong-token"},
+        )
+
+    assert resp.status_code == 401
+    warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("Resync auth failed" in msg for msg in warnings)
+
+
+@pytest.mark.unit
+async def test_resync_missing_token_logs_security_warning(resync_client, caplog):
+    """A missing token also produces the same distinct warning, not just
+    a wrong one.
+    """
+    with caplog.at_level(logging.WARNING):
+        resp = await resync_client.post("/internal/resync")
+
+    assert resp.status_code == 401
+    warnings = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("Resync auth failed" in msg for msg in warnings)
 
 
 @pytest.mark.unit

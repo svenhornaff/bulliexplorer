@@ -433,7 +433,10 @@ async def test_parse_gpx_fetches_https_url(tmp_path):
 
     Fixture route pointing at a mocked HTTPS URL, per
     ``media_storage_r2.md`` Phase 2 — R2-hosted GPX files must resolve
-    correctly before any real post's frontmatter is migrated.
+    correctly before any real post's frontmatter is migrated. Passes a
+    matching ``r2_public_url`` — docs/dev/security_review_owasp.md
+    Phase 1's SSRF allowlist means a real R2 URL must keep working
+    unchanged, not just that a disallowed one is rejected.
     """
     transport = _GpxTextTransport(_MINIMAL_GPX)
     async with httpx.AsyncClient(transport=transport) as client:
@@ -441,6 +444,7 @@ async def test_parse_gpx_fetches_https_url(tmp_path):
             "https://pub-example.r2.dev/media/route.gpx",
             tmp_path,
             http_client=client,
+            r2_public_url="https://pub-example.r2.dev",
         )
 
     assert result is not None
@@ -453,10 +457,18 @@ async def test_parse_gpx_fetches_https_url(tmp_path):
 
 @pytest.mark.unit
 async def test_parse_gpx_http_url_also_fetched(tmp_path):
-    """A plain ``http://`` URL (local dev) is fetched too, not just https."""
+    """A plain ``http://`` URL (local dev) is fetched too, not just https,
+    when it matches the configured (also plain-http, local dev) allowlist
+    host.
+    """
     transport = _GpxTextTransport(_MINIMAL_GPX)
     async with httpx.AsyncClient(transport=transport) as client:
-        result = await _parse_gpx("http://localhost:8000/media/route.gpx", tmp_path, http_client=client)
+        result = await _parse_gpx(
+            "http://localhost:8000/media/route.gpx",
+            tmp_path,
+            http_client=client,
+            r2_public_url="http://localhost:8000",
+        )
 
     assert result is not None
 
@@ -469,6 +481,7 @@ async def test_parse_gpx_https_network_error_returns_none(tmp_path):
             "https://pub-example.r2.dev/media/route.gpx",
             tmp_path,
             http_client=client,
+            r2_public_url="https://pub-example.r2.dev",
         )
 
     assert result is None
@@ -483,6 +496,7 @@ async def test_parse_gpx_https_404_returns_none(tmp_path):
             "https://pub-example.r2.dev/media/missing.gpx",
             tmp_path,
             http_client=client,
+            r2_public_url="https://pub-example.r2.dev",
         )
 
     assert result is None
@@ -495,8 +509,112 @@ async def test_parse_gpx_https_creates_default_client_when_none_given(tmp_path):
     Exercises the real network path is attempted (and fails fast against
     an unroutable address) rather than skipping the URL branch entirely.
     """
-    result = await _parse_gpx("https://127.0.0.1.invalid/media/route.gpx", tmp_path)
+    result = await _parse_gpx(
+        "https://127.0.0.1.invalid/media/route.gpx",
+        tmp_path,
+        r2_public_url="https://127.0.0.1.invalid",
+    )
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _parse_gpx / _fetch_gpx_over_http — SSRF allowlist
+# (docs/dev/security_review_owasp.md Phase 1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_parse_gpx_rejects_url_on_disallowed_host(tmp_path, caplog):
+    """A gpx_file URL whose host doesn't match the configured R2 public
+    URL is refused — never fetched — and logged distinctly, not silently
+    dropped. This is the doc's own "Done when" fixture: a non-R2 host is
+    rejected rather than fetched.
+    """
+    transport = _GpxTextTransport(_MINIMAL_GPX)
+    async with httpx.AsyncClient(transport=transport) as client:
+        with caplog.at_level(logging.WARNING):
+            result = await _parse_gpx(
+                "https://internal.attacker.example/metadata",
+                tmp_path,
+                http_client=client,
+                r2_public_url="https://pub-example.r2.dev",
+            )
+
+    assert result is None
+    assert len(transport.requests) == 0, "a disallowed host must never actually be fetched"
+    assert any("disallowed host" in record.message for record in caplog.records)
+
+
+@pytest.mark.unit
+async def test_parse_gpx_rejects_url_when_r2_public_url_unconfigured(tmp_path):
+    """With no ``r2_public_url`` configured (the ``Settings`` default),
+    every remote gpx_file URL is refused — fails closed, not open, when
+    there's no trust anchor to check against.
+    """
+    transport = _GpxTextTransport(_MINIMAL_GPX)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _parse_gpx(
+            "https://pub-example.r2.dev/media/route.gpx",
+            tmp_path,
+            http_client=client,
+        )
+
+    assert result is None
+    assert len(transport.requests) == 0
+
+
+@pytest.mark.unit
+async def test_parse_gpx_rejects_metadata_endpoint_style_host(tmp_path):
+    """The concrete SSRF scenario the doc names: a cloud metadata-style
+    address must never be reachable through gpx_file, regardless of
+    scheme.
+    """
+    transport = _GpxTextTransport(_MINIMAL_GPX)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _parse_gpx(
+            "http://169.254.169.254/latest/meta-data/",
+            tmp_path,
+            http_client=client,
+            r2_public_url="https://pub-example.r2.dev",
+        )
+
+    assert result is None
+    assert len(transport.requests) == 0
+
+
+@pytest.mark.unit
+async def test_is_allowed_gpx_host_matches_case_insensitively():
+    from app.services.geo_sync import _is_allowed_gpx_host
+
+    assert _is_allowed_gpx_host(
+        "https://PUB-EXAMPLE.r2.dev/media/route.gpx",
+        "https://pub-example.r2.dev",
+    )
+
+
+@pytest.mark.unit
+async def test_is_allowed_gpx_host_rejects_different_port_as_a_different_host_string():
+    """Documents actual behavior: hostname comparison ignores port, so a
+    different port on the same host string still matches — a deliberate
+    scope decision (host allowlisting, not full origin/port pinning), not
+    an oversight. A same-host-different-port SSRF target would still
+    require the allowed R2 host's own DNS name to resolve there, which is
+    a much narrower risk than an arbitrary host being reachable.
+    """
+    from app.services.geo_sync import _is_allowed_gpx_host
+
+    assert _is_allowed_gpx_host(
+        "https://pub-example.r2.dev:9999/media/route.gpx",
+        "https://pub-example.r2.dev",
+    )
+
+
+@pytest.mark.unit
+async def test_is_allowed_gpx_host_rejects_unparseable_urls():
+    from app.services.geo_sync import _is_allowed_gpx_host
+
+    assert not _is_allowed_gpx_host("not-a-url", "https://pub-example.r2.dev")
+    assert not _is_allowed_gpx_host("https://pub-example.r2.dev/media/route.gpx", "not-a-url")
 
 
 # ---------------------------------------------------------------------------

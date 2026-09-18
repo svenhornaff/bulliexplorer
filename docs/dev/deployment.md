@@ -311,6 +311,40 @@ Generate secrets:
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
+### Credential rotation — a standing practice, not a one-time reaction
+
+docs/dev/security_review_owasp.md Phase 4. Two written rules, so both
+are an actual standard rather than tribal knowledge the next relevant
+moment has to be reinvented from scratch:
+
+1. **Rotation habit for long-lived static tokens.** `RESYNC_TOKEN`,
+   `WEBHOOK_SECRET`, and `GITHUB_TOKEN` (all `.env`, never committed) have
+   no expiry or rotation mechanism of their own — reasonable for a
+   single-operator project at this scale, but that only holds if they're
+   actually rotated on a schedule instead of "set once, forgotten."
+   Rotate all three **annually**, or immediately after any suspected
+   exposure (rule 2 below). Rotating means: generate a new value with the
+   command above, update `.env` on the server, `docker compose -f
+   docker-compose.prod.yml up -d` to pick it up, then update the matching
+   value wherever it's used as a client (the GitHub repo's webhook
+   settings for `WEBHOOK_SECRET`, whatever calls `/internal/resync` for
+   `RESYNC_TOKEN`, the GitHub App/PAT settings for `GITHUB_TOKEN`).
+2. **Any credential that ever touched a public repo's history is
+   compromised — full stop, not "probably fine."** The concrete example:
+   a GitHub PAT was briefly visible in a DevTools screenshot earlier in
+   this project. The correct response to that class of event is always
+   "rotate it," never "it probably wasn't seen." This applies to any
+   future exposure of the same shape (a screenshot, a copy-pasted log
+   line, a committed `.env`), not just that one incident.
+
+Related, worth checking periodically rather than assuming:
+
+- **HaveIBeenPwned** (haveibeenpwned.com) — check the operator's own
+  email addresses directly, or set up its free monitoring for future
+  breaches.
+- **GitHub secret scanning** — confirm it's actually enabled on the repo
+  (Settings → Code security) rather than assuming it is by default.
+
 ---
 
 ## 4. Deploy from local machine

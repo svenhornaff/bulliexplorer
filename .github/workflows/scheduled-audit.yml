@@ -1,0 +1,44 @@
+name: Scheduled dependency audit
+
+# docs/dev/security_review_owasp.md Phase 3 — bandit/detect-secrets/
+# pip-audit in ci.yml only run on a push/PR. A dependency can go from
+# "clean" to "has a disclosed CVE" on a day with no code changes at all
+# — nothing previously re-checked an untouched `develop` branch for a
+# newly-disclosed vulnerability in an existing, unchanged dependency.
+# This workflow closes that gap: it re-runs just `pip-audit` against
+# `develop` on a weekly schedule, independent of any push.
+#
+# `workflow_dispatch` is included so this can be run on demand to
+# verify it actually works, rather than waiting up to a week for the
+# first scheduled run to prove the YAML is correct.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # every Monday, 06:00 UTC
+  workflow_dispatch: {}
+
+# Least-privilege: this job only reads the repo and runs pip-audit — no
+# write access of any kind is ever needed.
+permissions:
+  contents: read
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --group security
+
+      - name: pip-audit
+        run: uv run pip-audit

@@ -1,0 +1,50 @@
+name: OWASP ZAP baseline scan
+
+# docs/dev/security_review_owasp.md Phase 6 — genuine DAST: tests the
+# live app's actual HTTP behavior, not source code. Nothing existing in
+# this project's CI does that today (bandit/pip-audit/ZAP's own SAST
+# cousins all analyze source/dependencies, never a running instance).
+#
+# Scoped to production's public, read-only homepage only — never
+# /internal/* (the resync/webhook endpoints). This is safe by
+# construction, not just by convention: the ZAP *baseline* scan (as
+# opposed to a full active scan) only passively analyzes traffic plus a
+# light spider that follows links actually present on the page — it does
+# not fuzz or guess undiscovered paths. Nothing on bulliexplorer.com's
+# public pages links to /internal/resync or /internal/webhook/github, so
+# the spider has no path to ever reach them from this target.
+#
+# workflow_dispatch only, deliberately not on a push/PR/schedule trigger
+# — this hits the real production site over the network on every run;
+# tying it to code changes or a schedule would mean unattended traffic
+# against prod with no one reviewing the report, which defeats the
+# doc's own "Done when" bar ("a security scanner nobody looks at isn't a
+# security practice"). Run manually, review the report, repeat
+# periodically by hand.
+
+on:
+  workflow_dispatch: {}
+
+# Least-privilege: `issues: write` is the one elevated permission this
+# job actually uses (zaproxy/action-baseline files/updates a results
+# issue by default) — nothing else.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  zap_scan:
+    runs-on: ubuntu-latest
+    name: ZAP baseline scan — bulliexplorer.com (public pages only)
+    steps:
+      - name: ZAP Scan
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target: "https://bulliexplorer.com/"
+          # Baseline scan only — no active/attack scan against
+          # production. allow_issue_writing defaults to true (files a
+          # GitHub issue with results) — deliberate, matches the doc's
+          # "a report reviewed at least once" bar; an artifact nobody
+          # opens isn't a practice.
+          fail_action: false

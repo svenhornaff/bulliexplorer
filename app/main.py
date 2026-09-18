@@ -129,7 +129,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         acquired_lock = await try_acquire_advisory_lock(session, _STARTUP_SYNC_LOCK_KEY)
         if acquired_lock:
             try:
-                result = await sync_posts(content_dir, session)
+                result = await sync_posts(content_dir, session, r2_public_url=settings.r2_public_url)
                 await session.commit()
             finally:
                 await release_advisory_lock(session, _STARTUP_SYNC_LOCK_KEY)

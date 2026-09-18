@@ -94,7 +94,10 @@ media_libraries:
 _TOKEN_HEADER = APIKeyHeader(name="X-Resync-Token", auto_error=False)
 
 
-def _require_resync_token(token: str | None = Depends(_TOKEN_HEADER)) -> str:  # noqa: B008 — FastAPI Depends pattern
+def _require_resync_token(
+    request: Request,
+    token: str | None = Depends(_TOKEN_HEADER),  # noqa: B008 — FastAPI Depends pattern
+) -> str:
     """Dependency: reject requests missing or carrying the wrong resync token."""
     settings = get_settings()
     # secrets.compare_digest, not `!=` — constant-time, matching the
@@ -103,6 +106,16 @@ def _require_resync_token(token: str | None = Depends(_TOKEN_HEADER)) -> str:  #
     # the public internet for this threat model, but the inconsistency
     # is exactly the kind that gets copied into the next endpoint.
     if not token or not secrets.compare_digest(token, settings.resync_token):
+        # Security logging (docs/dev/security_review_owasp.md Phase 2) —
+        # before this, a brute-force attempt against the resync token
+        # looked identical to normal traffic: no log line existed before
+        # the 401 was raised. Source IP + which check failed makes this
+        # grep-able and, if this project ever adds real alerting,
+        # filterable as its own distinct signal.
+        logger.warning(
+            "Resync auth failed: invalid or missing X-Resync-Token (source_ip=%s)",
+            request.client.host if request.client else "unknown",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-Resync-Token header",
@@ -147,7 +160,7 @@ async def resync(
     logger.info("Manual resync triggered")
 
     settings = get_settings()
-    result = await sync_posts(content_dir, db)
+    result = await sync_posts(content_dir, db, r2_public_url=settings.r2_public_url)
     # get_db_session commits on clean exit — no explicit commit needed here.
 
     amenity_sync_status = "skipped"
@@ -230,7 +243,13 @@ async def sync_status(
 _DEVELOP_REF = "refs/heads/develop"
 
 
-def _verify_github_signature(body: bytes, signature_header: str | None, secret: str) -> None:
+def _verify_github_signature(
+    body: bytes,
+    signature_header: str | None,
+    secret: str,
+    *,
+    source_ip: str = "unknown",
+) -> None:
     """Verify the X-Hub-Signature-256 header from GitHub.
 
     Raises 401 if the header is missing or the HMAC does not match.
@@ -246,8 +265,18 @@ def _verify_github_signature(body: bytes, signature_header: str | None, secret: 
         ``"sha256=abc123..."``.
     secret:
         The ``WEBHOOK_SECRET`` from Settings.
+    source_ip:
+        The requesting client's IP, included in the auth-failure warning
+        log (docs/dev/security_review_owasp.md Phase 2) — defaults to
+        ``"unknown"`` so a caller that doesn't have a real request object
+        (e.g. a unit test calling this directly) doesn't need to fabricate
+        one.
     """
     if not signature_header or not signature_header.startswith("sha256="):
+        logger.warning(
+            "Webhook auth failed: missing or malformed X-Hub-Signature-256 (source_ip=%s)",
+            source_ip,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or malformed X-Hub-Signature-256 header",
@@ -261,6 +290,14 @@ def _verify_github_signature(body: bytes, signature_header: str | None, secret: 
         ).hexdigest()
     )
     if not hmac.compare_digest(expected, signature_header):
+        # Security logging (docs/dev/security_review_owasp.md Phase 2) —
+        # same rationale as _require_resync_token above: a spoofed
+        # webhook signature previously left no distinct trace before the
+        # 401.
+        logger.warning(
+            "Webhook auth failed: invalid signature (source_ip=%s)",
+            source_ip,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid webhook signature",
@@ -300,7 +337,8 @@ async def github_webhook(
     settings = get_settings()
     body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256")
-    _verify_github_signature(body, signature, settings.webhook_secret)
+    source_ip = request.client.host if request.client else "unknown"
+    _verify_github_signature(body, signature, settings.webhook_secret, source_ip=source_ip)
 
     payload = await request.json()
     ref = payload.get("ref", "")
@@ -322,7 +360,7 @@ async def github_webhook(
     fetch_counts = await fetch_and_write(**fetch_kwargs)
 
     content_dir = main_module.BASE_DIR / "content" / "posts"
-    result = await sync_posts(content_dir, db)
+    result = await sync_posts(content_dir, db, r2_public_url=settings.r2_public_url)
 
     # Same split as the resync endpoint above: respond to GitHub as soon
     # as content sync completes, amenity discovery continues in the

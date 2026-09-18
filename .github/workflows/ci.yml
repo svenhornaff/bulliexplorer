@@ -65,3 +65,20 @@ jobs:
           a.pop('generated_at',None); b.pop('generated_at',None)
           sys.exit(0 if a==b else (print('detect-secrets: baseline mismatch',file=sys.stderr) or 1))"
           uv run pip-audit
+
+      # docs/dev/security_review_owasp.md Phase 5 — voluntary, not a CRA
+      # requirement for this project (see that doc for why). Reuses
+      # pip-audit's own already-resolved dependency data via its native
+      # --format=cyclonedx-json — no new scan, no new dependency. Not
+      # published publicly: a GitHub Actions artifact requires repo
+      # access to download, same internal-only posture as
+      # docs/dev/DATA_PROCESSING.md versus the public /datenschutz page.
+      - name: Generate SBOM (CycloneDX)
+        run: uv run pip-audit --format=cyclonedx-json -o sbom.cdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 90

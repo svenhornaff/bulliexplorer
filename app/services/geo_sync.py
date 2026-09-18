@@ -42,6 +42,7 @@ import math
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlparse
 
 import gpxpy
 import httpx
@@ -257,6 +258,7 @@ async def sync_route(
     content_dir: Path,
     *,
     http_client: httpx.AsyncClient | None = None,
+    r2_public_url: str = "",
 ) -> int | None:
     """Upsert or delete the Route row for a post.
 
@@ -289,6 +291,11 @@ async def sync_route(
         Optional ``httpx.AsyncClient`` used to fetch ``gpx_file`` when it
         is a URL.  When ``None`` a default client is created internally —
         pass an explicit client in tests to inject a mock transport.
+    r2_public_url:
+        ``Settings.r2_public_url`` — the SSRF allowlist a URL-valued
+        ``gpx_file`` is checked against (docs/dev/
+        security_review_owasp.md Phase 1). Defaults to ``""``, which
+        allows no remote fetch at all — see :func:`_is_allowed_gpx_host`.
 
     Returns
     -------
@@ -309,7 +316,7 @@ async def sync_route(
         return None
 
     # Parse the GPX file.
-    parsed = await _parse_gpx(route_fm.gpx_file, content_dir, http_client=http_client)
+    parsed = await _parse_gpx(route_fm.gpx_file, content_dir, http_client=http_client, r2_public_url=r2_public_url)
     if parsed is None:
         # Bad/missing GPX — skip, don't delete an existing row either;
         # treat as a transient error rather than a deliberate removal.
@@ -1095,7 +1102,54 @@ def _downsample_elevation_profile(
     return profile
 
 
-async def _fetch_gpx_over_http(url: str, http_client: httpx.AsyncClient | None) -> str | None:
+def _is_allowed_gpx_host(url: str, r2_public_url: str) -> bool:
+    """SSRF allowlist check (docs/dev/security_review_owasp.md Phase 1).
+
+    ``RouteFrontmatter.gpx_file`` is a plain string from Markdown
+    frontmatter — before this check existed, an ``http(s)://`` value
+    there was fetched with **no host restriction at all**, meaning
+    whoever can write to ``content/posts/*.md`` could make the server
+    fetch any URL: an internal Docker network address, a cloud metadata
+    endpoint, ``localhost`` on an unexpected port. Restricting fetches to
+    the same host as the configured R2 public URL (the only legitimate
+    source of a remote GPX file, per ``media_storage_r2.md`` Phase 2)
+    closes that off entirely.
+
+    Parameters
+    ----------
+    url:
+        The ``gpx_file`` URL a post's frontmatter asked to fetch.
+    r2_public_url:
+        ``Settings.r2_public_url`` — the only allowed host is this
+        value's own host.
+
+    Returns
+    -------
+    bool
+        ``True`` only when ``r2_public_url`` is non-empty, both URLs have
+        a parseable host, and the two hosts match case-insensitively.
+        **Fails closed**: an unconfigured ``r2_public_url`` (the
+        ``Settings`` default) allows nothing, rather than trusting every
+        host absent an explicit allowlist — the same "absence of a
+        configured trust anchor means deny, not allow" posture
+        ``AGENTS.md``'s "no working defaults for secrets" rule applies to
+        credentials.
+    """
+    if not r2_public_url:
+        return False
+    allowed_host = urlparse(r2_public_url).hostname
+    actual_host = urlparse(url).hostname
+    if not allowed_host or not actual_host:
+        return False
+    return actual_host.lower() == allowed_host.lower()
+
+
+async def _fetch_gpx_over_http(
+    url: str,
+    http_client: httpx.AsyncClient | None,
+    *,
+    r2_public_url: str = "",
+) -> str | None:
     """Fetch a GPX file's raw text over HTTP(S).
 
     Parameters
@@ -1107,12 +1161,29 @@ async def _fetch_gpx_over_http(url: str, http_client: httpx.AsyncClient | None) 
         Optional ``httpx.AsyncClient`` to reuse. When ``None`` a default
         client is created and closed internally — pass an explicit client
         in tests to inject a mock transport.
+    r2_public_url:
+        ``Settings.r2_public_url`` — ``url`` is only fetched when its
+        host matches this value's host (docs/dev/security_review_owasp.md
+        Phase 1's SSRF allowlist, see :func:`_is_allowed_gpx_host`).
+        Defaults to ``""``, which allows nothing — callers must pass the
+        real configured value to fetch anything.
 
     Returns
     -------
     The response body as text on a successful ``200``, or ``None`` on any
-    network error or non-2xx status (logged, not raised).
+    network error, non-2xx status, or a disallowed host (all logged, not
+    raised — a bad/malicious ``gpx_file`` degrades the same way a
+    genuinely unreachable one does: sync failure for that post, not a
+    crash).
     """
+    if not _is_allowed_gpx_host(url, r2_public_url):
+        logger.warning(
+            "Refusing to fetch GPX from disallowed host: %s (allowed host: %s)",
+            url,
+            urlparse(r2_public_url).hostname if r2_public_url else "<none configured>",
+        )
+        return None
+
     client = http_client
     close_client = False
     if client is None:
@@ -1137,6 +1208,7 @@ async def _parse_gpx(
     content_dir: Path,
     *,
     http_client: httpx.AsyncClient | None = None,
+    r2_public_url: str = "",
 ) -> _GpxStats | None:
     """Parse a GPX file and return geometry + ride statistics.
 
@@ -1154,6 +1226,11 @@ async def _parse_gpx(
         Optional ``httpx.AsyncClient`` used when ``gpx_file`` is a URL.
         When ``None`` a default client is created internally — pass an
         explicit client in tests to inject a mock transport.
+    r2_public_url:
+        ``Settings.r2_public_url`` — the SSRF allowlist for the HTTP(S)
+        branch (docs/dev/security_review_owasp.md Phase 1). Ignored when
+        ``gpx_file`` isn't a URL. Defaults to ``""``, which allows no
+        remote fetch at all — see :func:`_is_allowed_gpx_host`.
 
     Returns
     -------
@@ -1164,7 +1241,7 @@ async def _parse_gpx(
     with elevation data.
     """
     if gpx_file.startswith(("http://", "https://")):
-        gpx_text = await _fetch_gpx_over_http(gpx_file, http_client)
+        gpx_text = await _fetch_gpx_over_http(gpx_file, http_client, r2_public_url=r2_public_url)
         if gpx_text is None:
             return None
         source = gpx_file
