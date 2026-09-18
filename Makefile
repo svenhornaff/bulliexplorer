@@ -7,10 +7,17 @@ SSH := ssh -i $(SSH_KEY)
 # Never rsync it: the Black Forest file is 265MB and the Europe extract is
 # 22.8GB, both pointless to duplicate onto the server and the latter alone
 # is bigger than the box's free disk.
+# .env.prod is excluded too, deliberately: it's pushed to the server as
+# .env via `make push-env` (scp, not rsync) — see that target below and
+# docs/dev/deployment.md's "Editing production .env" section for why
+# (avoids the exact .env corruption class this project hit once
+# already: an editor/terminal line-wrap turning one long LEGAL_* value
+# into two lines, one of which then isn't a valid KEY= line and breaks
+# every `docker compose` invocation that reads .env).
 RSYNC_EXCLUDE := --exclude='.venv' --exclude='__pycache__' --exclude='.git' \
 	--exclude='.pytest_cache' --exclude='.ruff_cache' --exclude='.coverage' \
-	--exclude='htmlcov' --exclude='.env' --exclude='.pi' --exclude='.DS_Store' \
-	--exclude='static/pmtiles'
+	--exclude='htmlcov' --exclude='.env' --exclude='.env.prod' --exclude='.pi' \
+	--exclude='.DS_Store' --exclude='static/pmtiles'
 
 .PHONY: build-env
 build-env: ## Create .venv + install all dependencies
@@ -100,3 +107,9 @@ deploy-status: ## Check production container status
 .PHONY: deploy-ssh
 deploy-ssh: ## SSH into the server
 	$(SSH) $(REMOTE)
+
+.PHONY: push-env
+push-env: ## Push local .env.prod to the server as .env (scp, not manual paste — see docs/dev/deployment.md)
+	ls .env.prod > /dev/null
+	scp -i $(SSH_KEY) .env.prod $(REMOTE):~/bulliexplorer/.env
+	$(SSH) $(REMOTE) 'cd ~/bulliexplorer && docker compose -f docker-compose.prod.yml up -d'

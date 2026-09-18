@@ -55,10 +55,6 @@ def _render_legal(request: Request, page: str, title: str) -> HTMLResponse:
             "name": settings.legal_name or "Sven Hornaff",
             "address": settings.legal_address,
             "email": settings.legal_email,
-            "hosting": settings.legal_hosting,
-            "log_retention": settings.legal_log_retention,
-            "cloudflare_details": settings.legal_cloudflare_details,
-            "sentry_details": settings.legal_sentry_details,
         }
         if page == "datenschutz":
             # GDPR Art. 13(1)(a) requires "the identity and the contact
@@ -74,9 +70,20 @@ def _render_legal(request: Request, page: str, title: str) -> HTMLResponse:
             # below (§ 5 DDG Impressumspflicht requires the address for a
             # commercial offering) — only /datenschutz's separate GDPR duty
             # is relaxed here.
-            required = ["email", "hosting", "log_retention", "cloudflare_details"]
-            if settings.sentry_dsn:
-                required.append("sentry_details")
+            #
+            # No LEGAL_HOSTING/LOG_RETENTION/CLOUDFLARE_DETAILS/SENTRY_DETAILS
+            # here (removed 2026-09-18, see
+            # docs/dev/legal_gdpr_classification_refactor.md Phase 5) —
+            # datenschutz.md now uses static, abstracted recipient
+            # categories ("European hosting provider", "error-monitoring
+            # service provider", "CDN/object-storage provider") per GDPR
+            # Art. 13(1)(e)'s "recipients or categories of recipients"
+            # wording, not env-templated vendor-specific text. Concrete
+            # facts moved to docs/dev/DATA_PROCESSING.md (internal
+            # RoPA-style record, never published). A category change
+            # (e.g. a genuinely new non-EU recipient) is a content edit,
+            # not an env var flip.
+            required = ["email"]
         else:
             # Commercial /impressum: address stays required (§ 5 DDG).
             required = ["address", "email"]
@@ -99,10 +106,6 @@ def _render_legal(request: Request, page: str, title: str) -> HTMLResponse:
         if key == "address" and page == "datenschutz" and not value:
             continue
         html = html.replace("{{" + key + "}}", escape(value).replace("\n", "<br>"))
-    if page == "datenschutz" and not settings.sentry_dsn:
-        start = html.index("<h2>Fehlerüberwachung mit Sentry</h2>")
-        end = html.index("<h2>Cloudflare R2</h2>", start)
-        html = html[:start] + html[end:]
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="legal.html",
@@ -118,5 +121,5 @@ async def impressum(request: Request) -> HTMLResponse:
 
 @router.get("/datenschutz", response_class=HTMLResponse)
 async def datenschutz(request: Request) -> HTMLResponse:
-    """Serve the privacy notice matching configured monitoring."""
+    """Serve the privacy notice."""
     return _render_legal(request, "datenschutz", "Datenschutzerklärung")

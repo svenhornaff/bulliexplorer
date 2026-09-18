@@ -1,6 +1,6 @@
 # Datenschutzerklärung
 
-Stand: 17. September 2026
+Stand: 18. September 2026
 
 ## Verantwortlicher
 
@@ -15,7 +15,7 @@ Beim Abruf verarbeitet die Infrastruktur technisch notwendige Verbindungsdaten,
 insbesondere IP-Adresse, Zeitpunkt, angefragte Ressource und HTTP-Metadaten.
 Ohne diese Angaben können Inhalte nicht ausgeliefert werden.
 
-Hosting und Empfänger: {{hosting}}
+Wir nutzen für den Betrieb einen europäischen Hosting- und Infrastrukturanbieter.
 
 Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO. Das berechtigte Interesse liegt
 in der sicheren, zuverlässigen Bereitstellung der Website. Eine Verpflichtung,
@@ -23,57 +23,60 @@ die Website zu besuchen oder Daten für andere Zwecke bereitzustellen, besteht n
 
 ## Betriebs- und Fehlerprotokolle
 
-Die im Projekt verwendete Caddy-Konfiguration aktiviert keine HTTP-Zugriffsprotokolle.
-Die Produktionsanwendung deaktiviert auch Uvicorn-Zugriffsprotokolle.
-Betriebs- und Fehlerprotokolle können bei Störungen dennoch technische oder
-personenbezogene Angaben enthalten. Sie dienen der Sicherheit und Fehlerbehebung,
-nicht der Analyse des individuellen Nutzungsverhaltens.
-
-Speicherdauer und Löschung: {{log_retention}}
+Bei Störungen können Betriebs- und Fehlerprotokolle technische oder
+personenbezogene Angaben enthalten. Sie dienen ausschließlich der Sicherheit
+und Fehlerbehebung, nicht der Analyse des individuellen Nutzungsverhaltens.
+Die Protokolle werden nur so lange aufbewahrt, wie dies für diesen Zweck
+erforderlich ist, und danach automatisch überschrieben bzw. gelöscht.
 
 Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO; berechtigtes Interesse ist die
 Sicherheit und Funktionsfähigkeit des Angebots.
 
-## Fehlerüberwachung mit Sentry
+## Fehlerüberwachung und Sicherheit
 
-Für serverseitige Fehlerberichte wird Sentry (Functional Software, Inc.) eingesetzt.
-Das SDK übermittelt Fehlerart, Stacktraces und technische Kontextinformationen.
-Performance-Tracing ist deaktiviert. Automatische PII-Erfassung, Stackframe-Lokalvariablen
-und Request-Bodies sind deaktiviert. Vor dem Versand werden Benutzerkontext,
-zusätzlicher Kontext, Breadcrumbs und Request-Header entfernt; Request-URLs werden
-von Zugangsdaten, Query-Parametern und Fragmenten bereinigt. Fehlermeldungen oder
-URL-Pfade können trotzdem personenbezogene Angaben enthalten.
+Zur Erkennung und Behebung technischer Fehler können begrenzte technische
+Diagnoseinformationen verarbeitet werden, insbesondere Fehlerart und
+technische Kontextinformationen. Ein externer Dienstleister für
+Fehlerüberwachung kann diese Informationen im Auftrag verarbeiten, soweit dies
+für Betrieb und Fehlerdiagnose erforderlich ist.
 
-Empfänger, Datenregion, Speicherdauer, Auftragsverarbeitung und gegebenenfalls
-Drittlandtransfer einschließlich einschlägiger Garantien und Bezugsmöglichkeit:
-{{sentry_details}}
+Automatische Erfassung personenbezogener Daten, lokaler Variablen aus
+Stacktraces und Request-Bodies ist deaktiviert; Benutzerkontext,
+zusätzlicher Kontext, Breadcrumbs und Request-Header werden vor dem Versand
+entfernt, Request-URLs von Zugangsdaten, Query-Parametern und Fragmenten
+bereinigt. Fehlermeldungen oder URL-Pfade können trotzdem in Einzelfällen
+personenbezogene Angaben enthalten. Die Diagnosedaten werden auf das
+erforderliche Maß beschränkt und nicht zur Analyse individuellen
+Besucherverhaltens genutzt.
 
 Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO; berechtigtes Interesse ist die
 Erkennung und Behebung technischer Fehler.
-Weitere Informationen: [Sentry Datenschutz](https://sentry.io/privacy/).
 
-## Cloudflare R2
+## Karten und Medien
 
-Kartenarchive (PMTiles) und gegebenenfalls Medien werden über Cloudflare R2
-bereitgestellt. Bei direktem Abruf erhält Cloudflare insbesondere die IP-Adresse,
-die angefragte Ressource und technische HTTP-Metadaten. Das dient der zuverlässigen
-Auslieferung der Karten und Medien, auf Grundlage von Art. 6 Abs. 1 lit. f DSGVO.
+BulliExplorer stellt Karten, Routeninformationen, Bilder und weitere Medien
+über einen externen Anbieter für Objekt-Speicherung und Auslieferung (CDN)
+bereit. Beim direktem Abruf solcher Ressourcen kann diesem Anbieter die
+technisch notwendige Verbindungsinformation, insbesondere die IP-Adresse,
+übermittelt werden.
 
-Konkreter Vertragspartner, Speicherdauer der Request-Daten, Bucket-Jurisdiktion,
-Auftragsverarbeitung und gegebenenfalls Drittlandtransfer einschließlich der
-anwendbaren Garantien und Bezugsmöglichkeit: {{cloudflare_details}}
+Diese Informationen werden von BulliExplorer nicht für Werbung, Tracking
+oder Profiling verwendet. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO;
+berechtigtes Interesse ist die zuverlässige Auslieferung der Karten und
+Medien.
 
-Eine EU-Speicherjurisdiktion für Objekte bedeutet nicht automatisch, dass sämtliche
-Request-, Support- und Kontodaten ausschließlich in der EU verarbeitet werden.
-Weitere Informationen: [Cloudflare Datenschutz](https://www.cloudflare.com/privacypolicy/).
+Die Karten verwenden OpenStreetMap-Daten. Kartendaten:
+© OpenStreetMap-Mitwirkende, ODbL.
 
-## Karten und geografische Daten
+## Internationale Datenübermittlung
 
-Die Karten verwenden OpenStreetMap-Daten. MapLibre, PMTiles-Bibliotheken und
-Schriftarten werden lokal ausgeliefert. Nominatim und Overpass werden durch den
-Server bei der Inhaltsverarbeitung abgefragt; normale Seitenaufrufe übertragen
-keine Besucher-IP an diese Dienste. Die Kartenarchive werden wie oben beschrieben
-bereitgestellt. Kartendaten: © OpenStreetMap-Mitwirkende, ODbL.
+Einige der oben beschriebenen Dienstleister können in Drittländern,
+insbesondere den USA, niedergelassen sein. Soweit personenbezogene Daten an
+solche Anbieter übermittelt werden, bestehen geeignete Garantien,
+insbesondere eine Zertifizierung nach dem EU-U.S. Data Privacy Framework
+oder Standardvertragsklauseln nach Art. 46 DSGVO. Informationen zu den
+jeweils angewendeten Garantien können über die oben genannte
+Kontaktadresse angefragt werden.
 
 ## Darstellungspräferenz und Gerätespeicher
 
@@ -86,7 +89,7 @@ Die Speicherung und der Zugriff dienen der ausdrücklich gewählten Darstellungs
 (§ 25 Abs. 2 Nr. 2 TDDDG).
 
 BulliExplorer setzt auf öffentlichen Leseseiten keine Analyse- oder Marketing-Cookies,
-Werbetracker oder browserseitige Sentry-Skripte ein.
+Werbetracker oder browserseitige Diagnose-Skripte ein.
 
 ## Kontakt per E-Mail
 
@@ -100,10 +103,11 @@ keine gesetzliche Aufbewahrungspflicht oder konkret erforderliche Nachweissicher
 
 Externe Links stellen erst nach Anklicken eine Verbindung zum verlinkten Anbieter
 her. Dort gilt dessen Datenschutzerklärung. Diese Erklärung bezieht sich auf die
-öffentlichen Leseseiten; der Editor ist ein separates Betreiberwerkzeug, das
-insbesondere GitHub und gegebenenfalls Cloudflare zur Inhaltsverwaltung verwendet.
-Öffentliche Routen stammen aus redaktionell bereitgestellten Inhalten. Auf den
-Leseseiten ist kein Upload persönlicher Tracks durch Besucher vorgesehen.
+öffentlichen Leseseiten. Der Editor ist ein separates, ausschließlich intern
+genutztes Betreiberwerkzeug zur Inhaltsverwaltung, über das keine
+personenbezogenen Besucherdaten verarbeitet werden. Öffentliche Routen stammen
+aus redaktionell bereitgestellten Inhalten. Auf den Leseseiten ist kein Upload
+persönlicher Tracks durch Besucher vorgesehen.
 
 ## Ihre Rechte
 

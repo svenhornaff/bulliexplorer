@@ -66,7 +66,13 @@
         {% block content %}{% endblock %}
         <!-- Footer -->
         <footer class="site-footer">
-            <div class="container">© {{ year }} BulliExplorer · <a href="/impressum">Impressum</a> · <a href="/datenschutz">Datenschutz</a></div>
+            <!-- Label is "Rechtliche Hinweise", not "Impressum" — the
+                 personal/family classification (§ 18 Abs. 1 MStV) means
+                 this project deliberately does not present a commercial
+                 Impressum; the URL path stays /impressum unchanged (no
+                 existing links break), only the visible label changed.
+                 See docs/dev/legal_gdpr_classification_refactor.md Phase 5. -->
+            <div class="container">© {{ year }} BulliExplorer · <a href="/impressum">Rechtliche Hinweise</a> · <a href="/datenschutz">Datenschutz</a></div>
         </footer>
         <!-- Dark-mode toggle: reflects/updates the pre-paint script's choice,
          persists it to localStorage so it overrides the OS preference on

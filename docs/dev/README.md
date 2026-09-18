@@ -25,6 +25,8 @@ change, not a separate chore.
 | `cloudflare_r2_setup.md` | R2 bucket/CORS/credentials setup reference. |
 | `review_17SEP2026.md` | The most recent full-codebase review — findings, tech-debt register, and the implementation log working through them. |
 | `prompts.md` | Prompt template for implementing one phase of a multi-phase doc — reusable process, not tied to one feature. |
+| `legal_gdpr.md` | Legal/GDPR release notes — required `LEGAL_*` env vars, the `LEGAL_ADDRESS`/virtual-address reasoning, classification semantics. Consult before touching `/impressum` or `/datenschutz`. |
+| `DATA_PROCESSING.md` | Internal RoPA-style record of concrete infrastructure facts (hosting entity/location, monitoring vendor/region/plan, storage vendor/region hint, log rotation) — never published. The source of truth `datenschutz.md`'s abstracted categories trace back to; keep current as the stack changes. |
 
 ## Historical — implemented; kept as the record of what was decided and why
 
@@ -47,6 +49,7 @@ something that already exists, not to decide what to do next.
 | `editor_cms.md` | Sveltia CMS integration (`/editor/`) + GitHub webhook auto-publish design. |
 | `ui_ux_refresh.md` | 2026 UI/UX refresh concept — bucket #2 (signed off; Phase 1 not started, still current for *when* it starts). |
 | `issues_phase4.md` | Bugs found and fixed after `ui_ux_refresh.md` Phase 4 — all resolved. |
+| `legal_gdpr_classification_refactor.md` | Legal classification decision (`LEGAL_CLASSIFICATION=personal`), the deploy/passthrough bugs that followed, `LEGAL_ADDRESS` becoming optional for `/datenschutz`, and the later de-detailing of the public notice to recipient categories only. |
 
 ## Documented false leads — kept deliberately, not deleted
 

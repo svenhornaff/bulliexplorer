@@ -13,10 +13,24 @@ Set public disclosure values in the server `.env` (forwarded by production Compo
 | `LEGAL_NAME` | Operator's full name (fallback: Sven Hornaff) |
 | `LEGAL_ADDRESS` | Optional — see "`LEGAL_ADDRESS` specifically" below; only enforced by the commercial `/impressum` (§ 5 DDG), never by `/datenschutz` |
 | `LEGAL_EMAIL` | Operator contact email, not automatically the package author's work email |
-| `LEGAL_HOSTING` | Actual hosting provider/legal entity, location, data recipients and transfer details |
-| `LEGAL_LOG_RETENTION` | Actual log deletion criteria/retention, including hosting-level logs |
-| `LEGAL_CLOUDFLARE_DETAILS` | Actual entity, DPA, object jurisdiction, request-data retention and transfer safeguards/access to copies |
-| `LEGAL_SENTRY_DETAILS` | Actual entity, DPA, region, event retention and transfer safeguards/access to copies; needed when DSN set |
+
+`LEGAL_HOSTING`/`LEGAL_LOG_RETENTION`/`LEGAL_CLOUDFLARE_DETAILS`/
+`LEGAL_SENTRY_DETAILS` **were removed 2026-09-18** (see
+`legal_gdpr_classification_refactor.md` Phase 5) — `/datenschutz` no
+longer interpolates vendor-specific text from env vars. Per an explicit
+operator instruction after reviewing the live page, the public notice
+now uses static, abstracted recipient *categories* ("European hosting
+provider", "error-monitoring service provider", "CDN/object-storage
+provider") instead — GDPR Art. 13(1)(e) explicitly permits "recipients
+or categories of recipients", not a named-vendor inventory, and the
+previous version had drifted into publishing what amounted to an
+infrastructure blueprint (hosting entity + city, web/app server
+products, exact log-rotation config, monitoring vendor + endpoint +
+region + plan tier, storage vendor + region hint). The concrete facts
+those fields used to hold now live in `docs/dev/DATA_PROCESSING.md`, an
+internal RoPA-style record that is deliberately never linked from the
+public site. See `AGENTS.md`'s "Legal disclosure pages" section for the
+governing rule this established for future changes here.
 
 Production legal endpoints return 503 when their required values are missing;
 other application endpoints keep working. The 503 renders the site's own HTML

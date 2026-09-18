@@ -336,6 +336,99 @@ remain `503` in production until the operator sets it (see Phase 3's
 note above). Setting it is the only remaining step to actually publish
 both pages.
 
+### Phase 5 — `/datenschutz` de-detailed to recipient categories, not an infra blueprint — done
+
+Operator instruction (2026-09-18), after reviewing the live
+`/datenschutz` page directly: the page had drifted into publishing
+specific infrastructure facts — hosting provider entity and server
+city, web/app server product names, the exact Docker log-rotation
+config, the monitoring vendor's ingest endpoint/region/plan tier, and
+the object-storage vendor's location hint — none of which GDPR Art. 13
+requires. The operator drew a distinction between *security risk* and
+*unnecessary technical disclosure*: publishing this level of detail
+turns a privacy notice into free reconnaissance for anyone probing the
+site, without being legally required. Cited EDPB guidance: Art. 13(1)(e)
+explicitly permits "recipients **or categories of** recipients" — the
+disjunction is deliberate, and WP260 rev.01 confirms categories are
+acceptable when specific enough for a data subject to understand *who*
+might receive their data.
+
+**Governing rule established** (now in `AGENTS.md`'s "Legal disclosure
+pages" section, verbatim from the operator): minimize publicly
+disclosed infrastructure details while fully satisfying GDPR
+transparency requirements. `/datenschutz` MUST describe purposes, data
+categories, legal bases, recipient categories, retention criteria,
+transfers, and data-subject rights — MUST NOT serve as infrastructure
+documentation. Move implementation-specific detail to internal
+documentation unless a specific provider/location disclosure is legally
+necessary. Never weaken actual technical privacy controls to simplify
+the public notice.
+
+**What moved and where**:
+- `docs/dev/DATA_PROCESSING.md` (new) — internal RoPA-style record
+  holding every concrete fact removed from the public page: Hetzner
+  Online GmbH + Helsinki server location, Caddy/Uvicorn with access
+  logging disabled, Docker `json-file` 5×10MB rotation, Sentry
+  (Functional Software, Inc.) on the free Developer plan via
+  `ingest.de.sentry.io` / EU-Frankfurt region (confirmed directly in
+  the Sentry dashboard's Data Storage Location setting, not inferred
+  from the hostname) with 30-day retention, Cloudflare R2 with a
+  `WEUR` *location hint* (not a binding jurisdiction — confirmed via
+  endpoint pattern) for PMTiles/media, and the GitHub/Cloudflare
+  editor-tool path explicitly scoped out as operator-only (no visitor
+  data reaches it). Never linked from the public site.
+- `content/legal/datenschutz.md` (rewritten) — sections now read as
+  "europäischer Hosting- und Infrastrukturanbieter", "externer
+  Dienstleister für Fehlerüberwachung", "externer Anbieter für
+  Objekt-Speicherung und Auslieferung (CDN)" instead of naming
+  products, endpoints, or regions. Added a dedicated
+  **"Internationale Datenübermittlung"** section — abstracting
+  recipients under Art. 13(1)(e) must not silently drop the *separate*
+  Art. 13(1)(f) duty to disclose third-country transfers (Cloudflare
+  and the monitoring vendor are both US companies even though
+  processing is EU-region); worded at the same abstraction level
+  (third countries, in particular the US; DPF certification or SCCs as
+  safeguard; right to request specifics), reviewed and confirmed with
+  the operator as its own explicit check before shipping, per the
+  advisor's recommendation to treat this one paragraph as the item
+  needing sign-off rather than the whole rewrite.
+
+**Env vars removed**: `LEGAL_HOSTING`, `LEGAL_LOG_RETENTION`,
+`LEGAL_CLOUDFLARE_DETAILS`, `LEGAL_SENTRY_DETAILS` — deleted from
+`Settings` (`app/core/config.py`), `docker-compose.prod.yml`'s
+environment passthrough, and `.env.example`. `/datenschutz`'s
+required-field check is now just `["email"]`, same as `/impressum`
+under `personal` classification. `LEGAL_NAME`/`LEGAL_ADDRESS`/
+`LEGAL_EMAIL`/`LEGAL_CLASSIFICATION` are unaffected — genuine
+per-deployment/per-operator identity fields, kept.
+
+**Other changes**: footer link relabelled from "Impressum" to
+"Rechtliche Hinweise" (`templates/base.html`) — the personal/family
+classification means the site shouldn't present as having a
+commercial-style Impressum; the `/impressum` URL path is unchanged, so
+no existing links break, only the visible label. `app/routes/legal.py`
+dropped the Sentry-section HTML-stripping logic that existed only
+because the old page named Sentry conditionally on `SENTRY_DSN` being
+set — no longer needed since the new copy never names Sentry at all.
+
+**Testing**: `test_datenschutz_uses_abstracted_categories_not_vendor_names`
+(new) asserts the abstracted category phrases are present and a fixed
+list of vendor/product/region/config strings are absent from the
+rendered page — the regression guard against this drifting back
+toward an infra blueprint. `test_legal_pages_and_footer` extended to
+assert the footer says "Rechtliche Hinweise", not "Impressum". Removed
+tests referencing the four deleted env vars; replaced with
+`test_classification_personal_datenschutz_only_needs_email`. `make ci`
+green: 336 tests, 96.10% coverage. `.secrets.baseline` regenerated
+(line-number-only diff from the four-line removal in `config.py`, same
+known false-positive finding).
+
+**Files touched**: `content/legal/datenschutz.md`,
+`docs/dev/DATA_PROCESSING.md` (new), `app/routes/legal.py`,
+`app/core/config.py`, `docker-compose.prod.yml`, `.env.example`,
+`templates/base.html`, `tests/unit/test_legal.py`, `AGENTS.md`,
+`docs/dev/legal_gdpr.md`, `.secrets.baseline`, this file.
+
 ## Explicitly out of scope
 
 - **Building only the "personal" path and removing the existing

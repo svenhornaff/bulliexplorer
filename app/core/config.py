@@ -17,13 +17,18 @@ class Settings(BaseSettings):
     log_json: bool = False
 
     # Public legal contact; do not reuse a workplace address from package metadata.
+    # legal_hosting/legal_log_retention/legal_cloudflare_details/
+    # legal_sentry_details existed briefly as env-templated fields for
+    # datenschutz.md's now-removed vendor-specific paragraphs — removed
+    # 2026-09-18 (docs/dev/legal_gdpr_classification_refactor.md Phase 5)
+    # in favour of static, abstracted recipient categories in the
+    # Markdown source itself (GDPR Art. 13(1)(e) permits "recipients or
+    # categories of recipients", not a named-vendor inventory). The
+    # concrete facts they used to hold live in docs/dev/DATA_PROCESSING.md
+    # now, an internal record, not a deploy-time config value.
     legal_name: str = "Sven Hornaff"
     legal_address: str = ""
     legal_email: str = ""
-    legal_hosting: str = ""
-    legal_log_retention: str = ""
-    legal_cloudflare_details: str = ""
-    legal_sentry_details: str = ""
     # Unset (None) is a deliberate non-default — see docs/dev/legal_gdpr_classification_refactor.md.
     # "personal": /impressum renders the no-address personal/family notice (§ 18 Abs. 1 MStV).
     # "commercial": /impressum renders the full operator Impressum, LEGAL_ADDRESS required.

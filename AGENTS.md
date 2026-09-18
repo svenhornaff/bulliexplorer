@@ -101,6 +101,28 @@ intentional, documented in the tech concept doc. Don't remove or weaken any
 of it as a side effect of an unrelated change — if a task seems to require
 that, stop and flag it rather than proceeding.
 
+## Legal disclosure pages — transparency without an infrastructure blueprint
+
+Operator decision (2026-09-18, see `docs/dev/legal_gdpr_classification_refactor.md`
+Phase 5): **minimize publicly disclosed infrastructure details while fully
+satisfying GDPR transparency requirements.** `/datenschutz` MUST describe
+purposes, data categories, legal bases, recipient *categories*, retention
+*criteria*, transfers, and data-subject rights (GDPR Art. 13's actual,
+abstract-permitting requirement — EDPB WP260 rev.01 explicitly allows
+"recipients or categories of recipients", not a named-vendor inventory).
+It MUST NOT serve as infrastructure documentation. Move
+implementation-specific information — product names, software
+components, endpoints, hosting topology, storage regions, logging
+configuration, operational limits/thresholds — to
+`docs/dev/DATA_PROCESSING.md` (internal, never linked from the public
+site) unless disclosure of a specific provider or location is legally
+necessary for transparency. Never weaken the actual technical privacy
+controls (PII scrubbing, log rotation, access-log disabling, etc.)
+merely to simplify the public notice — this rule is about *disclosure*,
+not about *doing* less privacy engineering. Don't drop the separate
+Art. 13(1)(f) third-country-transfer disclosure while abstracting
+recipients under Art. 13(1)(e) — they're different duties.
+
 ## PR / change checklist
 
 1. Code change made.
