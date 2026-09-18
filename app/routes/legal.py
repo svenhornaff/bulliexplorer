@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from markdown_it import MarkdownIt
 
@@ -12,6 +12,28 @@ from app.core.config import get_settings
 
 router = APIRouter()
 _LEGAL_DIR = Path(__file__).resolve().parents[2] / "content" / "legal"
+
+_UNAVAILABLE_DETAIL = "Rechtliche Angaben werden vervollständigt."
+
+
+class LegalContentUnavailable(Exception):
+    """Raised instead of ``HTTPException`` for the legal-page 503 case.
+
+    A plain ``HTTPException`` renders FastAPI's default JSON error body
+    (``{"detail": ...}``), which is correct for API endpoints but wrong
+    here — /impressum and /datenschutz are HTML pages, and a bare JSON
+    503 looks like a broken API endpoint to a site visitor rather than
+    site content that isn't published yet. A dedicated exception type
+    scopes the HTML-error-page handler to exactly these two routes,
+    without touching how every other endpoint's ``HTTPException`` (health
+    checks, the webhook, future API routes) is rendered — see
+    app/main.py's registered handler for
+    ``LegalContentUnavailable``.
+    """
+
+    def __init__(self, title: str) -> None:
+        self.title = title
+        super().__init__(_UNAVAILABLE_DETAIL)
 
 
 def _render_legal(request: Request, page: str, title: str) -> HTMLResponse:
@@ -22,7 +44,7 @@ def _render_legal(request: Request, page: str, title: str) -> HTMLResponse:
     # Refuse to publish rather than guess in production; dev keeps today's
     # behaviour (full/commercial Impressum) so local work isn't blocked.
     if settings.is_production and classification is None:
-        raise HTTPException(status_code=503, detail="Rechtliche Angaben werden vervollständigt.")
+        raise LegalContentUnavailable(title)
     source_page = page
     if page == "impressum" and classification == "personal":
         source_page = "impressum_personal"
@@ -45,7 +67,7 @@ def _render_legal(request: Request, page: str, title: str) -> HTMLResponse:
                 required.append("sentry_details")
     # Do not publish invented provider commitments or unfinished legal notices.
     if settings.is_production and any(not values[key].strip() for key in required):
-        raise HTTPException(status_code=503, detail="Rechtliche Angaben werden vervollständigt.")
+        raise LegalContentUnavailable(title)
     source = (_LEGAL_DIR / f"{source_page}.md").read_text(encoding="utf-8")
     for key, value in values.items():
         # Render Markdown first, then escape configured text to prevent HTML

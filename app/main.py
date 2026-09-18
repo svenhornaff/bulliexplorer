@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -186,8 +186,23 @@ def create_app() -> FastAPI:
     from app.routes.home import router as home_router
     from app.routes.internal import _internal as internal_router
     from app.routes.internal import router as editor_router
+    from app.routes.legal import LegalContentUnavailable
     from app.routes.legal import router as legal_router
     from app.routes.posts import router as posts_router
+
+    # /impressum and /datenschutz are HTML pages, not an API — a bare JSON
+    # 503 body (FastAPI's HTTPException default) reads as a broken API
+    # endpoint to a site visitor, not "content not published yet". Scoped
+    # to this one exception type only: every other route's HTTPException
+    # (health, webhook, future API routes) keeps rendering as JSON.
+    @app.exception_handler(LegalContentUnavailable)
+    async def _legal_content_unavailable(request: Request, exc: LegalContentUnavailable):  # noqa: ANN202 — Starlette's own untyped handler signature
+        return app.state.templates.TemplateResponse(
+            request=request,
+            name="legal_unavailable.html",
+            context={"title": exc.title},
+            status_code=503,
+        )
 
     app.include_router(legal_router)
     app.include_router(home_router)

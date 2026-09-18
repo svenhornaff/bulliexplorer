@@ -19,7 +19,11 @@ Set public disclosure values in the server `.env` (forwarded by production Compo
 | `LEGAL_SENTRY_DETAILS` | Actual entity, DPA, region, event retention and transfer safeguards/access to copies; needed when DSN set |
 
 Production legal endpoints return 503 when their required values are missing;
-other application endpoints keep working. Development displays explicit placeholders.
+other application endpoints keep working. The 503 renders the site's own HTML
+shell (`LegalContentUnavailable` + its handler in `app/main.py`, see
+`docs/dev/legal_gdpr_classification_refactor.md`'s Phase 3), not a bare JSON
+error body — a naked `{"detail": ...}` reads as a broken API endpoint to a
+site visitor, not unpublished content. Development displays explicit placeholders.
 Sentry disclosure is omitted when `SENTRY_DSN` is empty. Cloudflare remains disclosed
 because authored content can contain direct R2 image links independent of settings.
 Do not deploy this draft until the missing values have been reviewed and supplied.

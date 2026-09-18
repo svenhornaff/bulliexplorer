@@ -195,6 +195,68 @@ actually be checked against, not just in this doc's history. ✅
 `docs/dev/legal_gdpr.md` → "Legal classification (personal vs.
 commercial)" → "Regression guard".
 
+### Phase 3 — Closing the deployment gap (code shipped, production wasn't actually live) — done
+
+Phase 1 shipped `LEGAL_CLASSIFICATION` in `app/core/config.py` and the
+server's `.env` was updated to `personal` (2026-09-17), but the site was
+still 503ing live — the same "code ready, deployment isn't" gap this
+project has hit before (`docs/dev/monitoring_ops.md` Phase 4's restore-test
+gap is the same shape). Two independent causes, both found by SSHing into
+the production host and checking what the running container actually saw,
+not just what the repo/docs claimed:
+
+1. **`docker-compose.prod.yml` never passed `LEGAL_CLASSIFICATION`
+   through to the container.** Commit 9980066 added the setting to
+   `app/core/config.py` and updated `.env`/`.env.example`/docs, but never
+   added the matching `LEGAL_CLASSIFICATION=${LEGAL_CLASSIFICATION:-}`
+   line to the compose file's `app.environment` block — the same block
+   every other `LEGAL_*` var already passes through. `docker compose exec
+   app env | grep LEGAL` on the server confirmed the var simply wasn't
+   present inside the container, so `settings.legal_classification`
+   silently evaluated to `None` regardless of what `.env` said. Fixed by
+   adding the passthrough line. **Regression guard**: a new
+   `tests/unit/test_config.py::test_docker_compose_prod_passes_through_every_legal_setting`
+   parses `docker-compose.prod.yml` and asserts every `legal_*`
+   `Settings` field has a matching `LEGAL_*` passthrough line — the next
+   `legal_*` field added to `config.py` without a compose-file update now
+   fails CI instead of silently 503ing in production.
+2. **The 503 rendered as bare JSON** (`{"detail": "Rechtliche Angaben
+   werden vervolländigt."}`), FastAPI's default `HTTPException` body —
+   reported by the operator as "an API endpoint is showing when touching
+   the url", correctly: to a site visitor a naked JSON error looks like a
+   broken API, not unpublished HTML content. `/impressum` and
+   `/datenschutz` are the only HTML-rendered routes with a
+   raise-on-missing-config path; every other route's `HTTPException`
+   (health checks, the webhook, future API routes) is correctly JSON and
+   must stay that way. Fixed with a dedicated `LegalContentUnavailable`
+   exception (raised only by `app/routes/legal.py`) and an
+   `app.exception_handler(LegalContentUnavailable)` registered in
+   `app/main.py`'s `create_app()` that renders the site's own
+   `templates/legal_unavailable.html` shell at `503` — scoped to exactly
+   these two routes, zero change to how any other endpoint's errors render.
+
+**Done when** — verified against the live host, not just tests:
+- `curl -s https://bulliexplorer.com/impressum` and `/datenschutz` both
+  return `200` with the site's HTML chrome (nav/footer), not a bare JSON
+  body.
+- `make ci` stays green with the new compose-passthrough guard and the
+  new `test_production_unavailable_renders_branded_html_not_json` test
+  (branded-HTML-503 regression coverage) — 336 tests, 96.19% coverage.
+
+**Files touched**: `docker-compose.prod.yml`, `app/routes/legal.py`
+(`LegalContentUnavailable`), `app/main.py` (handler registration),
+`templates/legal_unavailable.html` (new), `tests/unit/test_config.py`,
+`tests/unit/test_legal.py`.
+
+**Still open — not resolved by this phase**: fixing the passthrough and
+the error page makes `/impressum` publishable (it only needs
+`LEGAL_EMAIL`), but **`/datenschutz` still requires `LEGAL_ADDRESS`**,
+which remains deliberately empty on the server per `legal_gdpr.md`'s
+unresolved "ladungsfähige Anschrift" question — the `personal`
+classification does not and was never designed to relax `/datenschutz`'s
+GDPR Art. 13 controller-identification requirement. See the open
+question raised to the operator alongside this phase.
+
 ## Explicitly out of scope
 
 - **Building only the "personal" path and removing the existing

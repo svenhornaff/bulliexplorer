@@ -118,3 +118,22 @@ async def test_classification_commercial_matches_existing_behaviour(client, monk
     assert response.status_code == 200
     assert "Sven Hornaff" in response.text
     assert "personal travel and tour diary" not in response.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["/impressum", "/datenschutz"])
+async def test_production_unavailable_renders_branded_html_not_json(client, monkeypatch, path):
+    """The 503 for missing legal disclosures must render the site's own HTML
+    shell (LegalContentUnavailable + its exception_handler), not FastAPI's
+    default bare-JSON HTTPException body — a JSON {"detail": ...} response
+    reads as a broken API endpoint to a site visitor, not unpublished content.
+    """
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LEGAL_ADDRESS", "")
+    get_settings.cache_clear()
+    response = await client.get(path)
+    assert response.status_code == 503
+    assert "text/html" in response.headers["content-type"]
+    assert '<html lang="de">' in response.text
+    assert '{"detail"' not in response.text
+    assert "vervollständigt" in response.text
