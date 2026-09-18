@@ -111,9 +111,17 @@ project's legal work has been built so far:
 
 ## Phased plan
 
-**Status: implemented.** `LEGAL_CLASSIFICATION=personal` decided (Phase 0)
-and shipped; see `docs/dev/legal_gdpr.md`'s "Legal classification" section
-for the operative summary and the regression guard.
+**Status: code implemented and deployed (Phases 0–3); production
+content still blocked on two operator-owned `.env` values, not a code
+gap.** `LEGAL_CLASSIFICATION=personal` decided (Phase 0) and shipped;
+see `docs/dev/legal_gdpr.md`'s "Legal classification" section for the
+operative summary and the regression guard. Phase 3 closed the
+code/deployment gap between "config value decided" and "actually live"
+(missing compose passthrough + bare-JSON 503) — both confirmed fixed by
+direct `curl` against production on 2026-09-18. `/impressum` and
+`/datenschutz` still return `503` in production, correctly, pending the
+operator setting `LEGAL_EMAIL` and `LEGAL_ADDRESS` respectively — see
+Phase 3's "Still open" note for the concrete decision each is waiting on.
 
 ### Phase 0 — The classification decision itself (not a code task)
 
@@ -248,14 +256,32 @@ not just what the repo/docs claimed:
 `templates/legal_unavailable.html` (new), `tests/unit/test_config.py`,
 `tests/unit/test_legal.py`.
 
-**Still open — not resolved by this phase**: fixing the passthrough and
-the error page makes `/impressum` publishable (it only needs
-`LEGAL_EMAIL`), but **`/datenschutz` still requires `LEGAL_ADDRESS`**,
-which remains deliberately empty on the server per `legal_gdpr.md`'s
-unresolved "ladungsfähige Anschrift" question — the `personal`
-classification does not and was never designed to relax `/datenschutz`'s
-GDPR Art. 13 controller-identification requirement. See the open
-question raised to the operator alongside this phase.
+**Still open — not resolved by this phase, both confirmed live on
+2026-09-18**: fixing the passthrough and the error page did not by
+itself make either page publishable, because the *content* values are
+still missing on the server — verified with `curl https://bulliexplorer.com/impressum`
+and `/datenschutz`, both still `503` (branded HTML now, not bare JSON).
+
+- **`/impressum`** needs only `LEGAL_EMAIL` under `personal`
+  classification (no address required) — confirmed empty on the server
+  (`docker compose exec app env | grep LEGAL_EMAIL` → empty). **Operator
+  decision (2026-09-18): will set it directly on the server** — no code
+  change, `.env` is gitignored/protected from automated edits by design.
+- **`/datenschutz` still requires `LEGAL_ADDRESS`** regardless of
+  classification — the `personal` classification does not and was never
+  designed to relax `/datenschutz`'s GDPR Art. 13
+  controller-identification requirement, only `/impressum`'s § 5 DDG/
+  § 18 MStV provider-ID requirement. **Operator decision (2026-09-18):
+  will obtain a commercial virtual/business address service** — the
+  documented safe path in `legal_gdpr.md`'s "`LEGAL_ADDRESS` specifically"
+  section (a plain home address or PO box carries real Abmahnung risk) —
+  and set `LEGAL_ADDRESS` on the server once acquired.
+
+Both remain deliberate, operator-owned `.env` edits outside this repo,
+not a follow-up code task. Re-run the same live-`curl` check after either
+is set to confirm the page actually renders `200`, not just that `.env`
+was edited — the passthrough bug this phase fixed is exactly why
+"`.env` says X" and "the container sees X" aren't the same claim.
 
 ## Explicitly out of scope
 
