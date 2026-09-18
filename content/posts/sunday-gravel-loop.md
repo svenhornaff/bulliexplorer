@@ -12,6 +12,13 @@ tags:
   - KöWi
   - Köln
 draft: false
+route:
+  name: KöWi - Köln - KöWi
+  gpx_file: https://pub-95f3f9a68cdd43998a000b1a75b2ce4c.r2.dev/media/Königswinter_Cologne.gpx
+  description: ''
+points_of_interest: []
+galleries: []
+callouts: []
 ---
 
 Am Sonntag ging's um kurz nach halb neun los: 94,25 km entlang des Rheins, rauf bis kurz vor Köln und über die andere Seite wieder zurück Richtung Siegburg.
