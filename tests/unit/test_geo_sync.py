@@ -27,6 +27,7 @@ from app.services.geo_sync import (  # noqa: PLC2701
     _amenity_query_bboxes,
     _buffered_bbox,
     _check_tile_coverage,
+    _downsample_elevation_profile,
     _geocode,
     _parse_gpx,
     _resolve_gpx_path,
@@ -185,7 +186,7 @@ async def test_parse_gpx_geometry(tmp_path):
 
     result = await _parse_gpx("test.gpx", tmp_path)
     assert result is not None
-    linestring, _dist, _gain, _loss, _dur = result
+    linestring, _dist, _gain, _loss, _dur, _profile = result
 
     coords = list(linestring.coords)
     assert len(coords) == 2
@@ -201,7 +202,7 @@ async def test_parse_gpx_distance(tmp_path):
 
     result = await _parse_gpx("test.gpx", tmp_path)
     assert result is not None
-    _, distance_km, _, _, _ = result
+    _, distance_km, _, _, _, _ = result
 
     # 2D straight-line between (8.0,48.0) and (8.1,48.1) is roughly 12–13 km.
     assert distance_km > 0.0
@@ -216,10 +217,50 @@ async def test_parse_gpx_elevation_gain(tmp_path):
 
     result = await _parse_gpx("test.gpx", tmp_path)
     assert result is not None
-    _, _, elevation_gain_m, elevation_loss_m, _ = result
+    _, _, elevation_gain_m, elevation_loss_m, _, _ = result
 
     assert elevation_gain_m == pytest.approx(100.0)
     assert elevation_loss_m == pytest.approx(0.0)
+
+
+@pytest.mark.unit
+async def test_parse_gpx_elevation_profile_present(tmp_path):
+    """_parse_gpx's 6th tuple element is a [distance_km, elevation_m] profile
+    for a fixture GPX that has elevation on every point."""
+    gpx_file = tmp_path / "test.gpx"
+    gpx_file.write_text(_MINIMAL_GPX, encoding="utf-8")
+
+    result = await _parse_gpx("test.gpx", tmp_path)
+    assert result is not None
+    _, _, _, _, _, elevation_profile = result
+
+    assert elevation_profile is not None
+    assert elevation_profile == [[0.0, 200.0], pytest.approx([13.33, 300.0], abs=0.5)]
+
+
+@pytest.mark.unit
+async def test_parse_gpx_elevation_profile_none_without_elevation_data(tmp_path):
+    """A GPX with no <ele> tags at all yields elevation_profile=None, not an
+    all-zero flat line — the template gates the chart on this being present."""
+    no_elevation_gpx = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test"
+     xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <trkseg>
+      <trkpt lat="48.0" lon="8.0"></trkpt>
+      <trkpt lat="48.1" lon="8.1"></trkpt>
+    </trkseg>
+  </trk>
+</gpx>
+"""
+    gpx_file = tmp_path / "no_ele.gpx"
+    gpx_file.write_text(no_elevation_gpx, encoding="utf-8")
+
+    result = await _parse_gpx("no_ele.gpx", tmp_path)
+    assert result is not None
+    _, _, _, _, _, elevation_profile = result
+    assert elevation_profile is None
 
 
 @pytest.mark.unit
@@ -230,7 +271,7 @@ async def test_parse_gpx_duration(tmp_path):
 
     result = await _parse_gpx("test.gpx", tmp_path)
     assert result is not None
-    _, _, _, _, duration_minutes = result
+    _, _, _, _, duration_minutes, _ = result
 
     assert duration_minutes is not None
     assert duration_minutes == pytest.approx(60.0)
@@ -244,7 +285,7 @@ async def test_parse_gpx_no_timestamps_duration_none(tmp_path):
 
     result = await _parse_gpx("no_ts.gpx", tmp_path)
     assert result is not None
-    _, _, _, _, duration_minutes = result
+    _, _, _, _, duration_minutes, _ = result
     assert duration_minutes is None
 
 
@@ -280,6 +321,84 @@ async def test_parse_gpx_single_point_returns_none(tmp_path):
     gpx_file.write_text(one_point, encoding="utf-8")
     result = await _parse_gpx("one.gpx", tmp_path)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# _downsample_elevation_profile (docs/dev/elevation_profile_chart.md Tier 1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_downsample_elevation_profile_short_input_passed_through():
+    """A route with fewer points than max_points is capped/passed through
+    unchanged, never padded or upsampled."""
+    points = [(8.0, 48.0, 200.0), (8.05, 48.05, 250.0), (8.1, 48.1, 300.0)]
+    profile = _downsample_elevation_profile(points, max_points=300)
+    assert profile is not None
+    assert len(profile) == 3
+    assert profile[0] == [0.0, 200.0]
+    assert profile[-1][1] == pytest.approx(300.0)
+
+
+@pytest.mark.unit
+def test_downsample_elevation_profile_fixed_output_length_regardless_of_input_size():
+    """A route with far more points than max_points is capped at exactly
+    max_points — same output length whether the input is 1,000 or 10,000
+    points."""
+    small_input = [(8.0 + i * 0.0001, 48.0 + i * 0.0001, 200.0 + i) for i in range(1_000)]
+    large_input = [(8.0 + i * 0.00001, 48.0 + i * 0.00001, 200.0 + i / 10) for i in range(10_000)]
+
+    small_profile = _downsample_elevation_profile(small_input, max_points=300)
+    large_profile = _downsample_elevation_profile(large_input, max_points=300)
+
+    assert small_profile is not None
+    assert large_profile is not None
+    assert len(small_profile) == 300
+    assert len(large_profile) == 300
+
+
+@pytest.mark.unit
+def test_downsample_elevation_profile_correct_distance_elevation_pairing():
+    """A small, hand-built input downsamples to a profile whose distance
+    values are monotonically increasing and whose elevations trace the
+    known climb."""
+    points = [
+        (8.0, 48.0, 200.0),
+        (8.001, 48.0, 210.0),
+        (8.002, 48.0, 220.0),
+        (8.003, 48.0, 230.0),
+        (8.004, 48.0, 240.0),
+    ]
+    profile = _downsample_elevation_profile(points, max_points=3)
+    assert profile is not None
+    assert len(profile) == 3
+    distances = [d for d, _ in profile]
+    assert distances == sorted(distances)
+    assert profile[0][1] == pytest.approx(200.0)
+    assert profile[-1][1] == pytest.approx(240.0)
+
+
+@pytest.mark.unit
+def test_downsample_elevation_profile_none_with_fewer_than_two_elevation_points():
+    """Fewer than 2 points with elevation data — nothing meaningful to plot."""
+    assert _downsample_elevation_profile([(8.0, 48.0, None), (8.1, 48.1, None)]) is None
+    assert _downsample_elevation_profile([(8.0, 48.0, 200.0), (8.1, 48.1, None)]) is None
+    assert _downsample_elevation_profile([]) is None
+
+
+@pytest.mark.unit
+def test_downsample_elevation_profile_ignores_points_without_elevation():
+    """Points with elevation=None are skipped, not treated as 0m — a
+    partially-tagged GPX shouldn't produce spurious drops to sea level."""
+    points = [
+        (8.0, 48.0, 200.0),
+        (8.001, 48.0, None),
+        (8.002, 48.0, 210.0),
+    ]
+    profile = _downsample_elevation_profile(points, max_points=300)
+    assert profile is not None
+    assert all(elev != 0.0 for _, elev in profile)
+    assert [elev for _, elev in profile] == [pytest.approx(200.0), pytest.approx(210.0)]
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +443,7 @@ async def test_parse_gpx_fetches_https_url(tmp_path):
         )
 
     assert result is not None
-    linestring, _dist, _gain, _loss, _dur = result
+    linestring, _dist, _gain, _loss, _dur, _profile = result
     coords = list(linestring.coords)
     assert len(coords) == 2
     assert len(transport.requests) == 1

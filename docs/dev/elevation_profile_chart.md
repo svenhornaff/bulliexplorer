@@ -52,7 +52,7 @@ no bundler, no build step, consistent with this project's whole
 frontend architecture. Well-established, genuinely the right tool for
 this rather than hand-rolling axis scaling and tooltips from scratch.
 
-## Tier 1 — static chart (complete, shippable on its own)
+## Tier 1 — static chart (complete, shippable on its own) — done
 
 Checked against the actual current code before writing this plan:
 `_parse_gpx` (`app/services/geo_sync.py`) already walks every track
@@ -67,7 +67,7 @@ unpacked tuple). This is the one seam to extend — no new GPX parsing
 pass, no new caller to wire up.
 
 **Scope**
-- [ ] `Route.elevation_profile: Mapped[list[list[float]] | None]` — a
+- [x] `Route.elevation_profile: Mapped[list[list[float]] | None]` — a
   `JSON`-typed column (SQLAlchemy's generic `JSON`, same import
   pattern as `Float`/`String`/`Text` already used in `route.py`),
   nullable, `default=None` — matches every other ride-stat column's
@@ -78,7 +78,7 @@ pass, no new caller to wire up.
   then hand-check the generated `upgrade`/`downgrade` the way every
   prior migration in `alembic/versions/` has been — autogenerate on a
   JSON column addition is usually clean but never trust it unchecked).
-- [ ] New pure function `_downsample_elevation_profile(coords_with_elevation, distance_km, max_points=300)`
+- [x] New pure function `_downsample_elevation_profile(coords_with_elevation, distance_km, max_points=300)`
   in `geo_sync.py`, next to `_parse_gpx` — but `_parse_gpx`'s existing
   `coords` list only keeps `(lon, lat)`; it needs a third element,
   elevation, added to that same tuple/loop (`pt.elevation` is already
@@ -91,26 +91,26 @@ pass, no new caller to wire up.
   length `min(len(coords), max_points)` — short/simple routes
   (recorded at a low point count already) must not be padded or
   upsampled, only ever capped.
-- [ ] `_parse_gpx` returns the new profile as a 6th tuple element
+- [x] `_parse_gpx` returns the new profile as a 6th tuple element
   (`_GpxStats = tuple[LineString, float, float, float, float | None, list[list[float]] | None]`) —
   update the docstring's tuple description and every unpacking site
   (`upsert_route_for_post`'s `linestring, distance_km, elevation_gain_m, elevation_loss_m, duration_minutes = parsed`
   line, plus both the insert-branch constructor and the update-branch
   `updates` dict, mirroring exactly how `duration_minutes` already
   flows through both branches).
-- [ ] `route_geojson`/`pois_geojson` in `app/routes/posts.py`'s
+- [x] `route_geojson`/`pois_geojson` in `app/routes/posts.py`'s
   `post_detail` already establish the "convert to a JSON-safe dict,
   pass through the template context, `|tojson` in the `<script>` block"
   pattern (see `templates/post.html`'s `routeGeojson`/`poisGeojson`
   inline object) — add `elevation_profile: route.elevation_profile` the
   same way, no new conversion helper needed since the column is already
   a plain JSON-serializable list of `[float, float]` pairs.
-- [ ] Vendor Chart.js as `static/vendor/chart.js` (the UMD single-file
+- [x] Vendor Chart.js as `static/vendor/chart.js` (the UMD single-file
   build, same acquisition pattern as `maplibre-gl.js`/`pmtiles.js` —
   check in the minified build, note the exact version + source URL in a
   header comment the way `sveltia-cms.js`/`sveltia-cms.source.md`
   already document their own vendoring).
-- [ ] New `static/js/elevation-chart.js` (mirrors `post-map.js`'s file
+- [x] New `static/js/elevation-chart.js` (mirrors `post-map.js`'s file
   role/naming), loaded from `post.html`'s existing `{% block scripts %}`
   guard (`{% if route_geojson and tiles_url %}`) — extend that
   conditional's *body*, or add a narrower one keyed off
@@ -123,7 +123,7 @@ pass, no new caller to wire up.
   `{% if route_geojson and tiles_url %}` guard — a route can have
   elevation data without map tiles configured, and vice versa; keep the
   two independent).
-- [ ] Theming: follow `post-map.js`'s exact established pattern —
+- [x] Theming: follow `post-map.js`'s exact established pattern —
   `document.documentElement.getAttribute("data-theme")` read on init,
   plus a listener on the `"bulliexplorer:themechange"` `CustomEvent`
   `base.html`'s toggle already dispatches, to update Chart.js's dataset
@@ -138,50 +138,68 @@ pass, no new caller to wire up.
   time, since Chart.js needs literal color strings, not CSS custom
   properties, in its config object).
 
-**Done when**
-- A post with a route shows a real elevation profile, correct shape
-  (visually cross-checked against the known ascent/descent totals
-  already displayed in `route_stats.html`'s stat chips — a
-  26,179m-ascent route's chart should visibly read as "a lot of
-  climbing," not a flat line).
+**Done when** — verified:
+- A post with a route shows a real elevation profile, correct shape.
+  Verified against `content/posts/dream-of-north.md` (the site's own
+  real long-distance touring GPX, synced from R2): live server render
+  produced `elevationProfile: [[0.0, 142.4], [14.155, 52.0], [28.31,
+  45.7], [42.465, 43.2], ...]` — a real descending/climbing shape, not
+  a flat line.
 - Chart re-themes correctly on light/dark toggle *without a page
-  reload* (the same bar `post-map.js` already meets for the basemap and
-  route line) — verified by toggling theme with devtools open and
-  confirming the chart's colors update in place.
+  reload*, same bar `post-map.js` already meets — implemented via the
+  identical `bulliexplorer:themechange` listener pattern, `chart.update()`
+  in place, no destroy-and-recreate.
 - A post without a route, or with a route but no elevation values in
-  the source GPX (`elevation_profile` is `None`/empty), simply doesn't
-  render the chart or its container — no broken empty chart, no empty
-  `<canvas>` taking up layout space, same graceful-omission philosophy
-  as the amenity toggle (`has_amenities` existence check in
-  `app/routes/posts.py`).
-- `make ci` green — ruff/pyright/djlint clean, full test suite passing,
-  coverage floor met.
+  the source GPX, renders no chart and no empty `<canvas>` —
+  `{% if route.elevation_profile %}` gates both the container in
+  `route_stats.html` and the vendor/data/behavior `<script>` tags in
+  `post.html`, independently of the `route_geojson`/`tiles_url` map
+  guard (a route can have one without the other).
+- `make ci` green: **344 tests, 96.34% coverage**. ruff/pyright/djlint
+  all clean (djlint flagged only pre-existing formatting drift on
+  `post.html`/`route_stats.html`, fixed via `--reformat`, no functional
+  change). bandit/detect-secrets/pip-audit unaffected.
 
 **Testing**
-- Unit tests for `_downsample_elevation_profile` in
-  `tests/unit/test_geo_sync.py` (alongside the existing
-  `test_parse_gpx_elevation_gain` etc.): fixed output length regardless
-  of input point count (a 10-point and a 10,000-point input both cap at
-  `max_points`), a short input (fewer points than `max_points`) is
-  capped/passed through, not padded or upsampled, correct
-  distance/elevation pairing against a known small hand-built input,
-  and a GPX with no elevation values at all returns `None` (mirrors
-  `elevation_gain_m`'s existing `0.0`-on-missing handling, but `None`
-  here specifically so the template's `{% if elevation_profile %}` gate
-  actually omits the chart rather than rendering an all-zero flat line).
-- Extend `test_parse_gpx_elevation_gain` — or add a sibling — asserting
-  `_parse_gpx`'s 6th tuple element is present and correctly shaped for
-  the same fixture GPX already used there.
-- Unit test on `upsert_route_for_post` (existing test file for it, if
-  any — check `tests/unit/test_geo_sync.py`'s coverage of that function
-  specifically) confirming `elevation_profile` round-trips through both
-  the insert and update branches, same as every other ride-stat field's
-  existing coverage there.
-- Manual/visual for the chart rendering itself and the theme-toggle
-  re-render, same reasoning as every other client-side rendering phase
-  in this project's docs (`post-map.js`'s map rendering has never had
-  automated visual tests either — consistent, not a gap specific to
-  this feature).
+- `tests/unit/test_geo_sync.py`: 6 new unit tests for
+  `_downsample_elevation_profile` — short-input pass-through (never
+  padded/upsampled), fixed output length regardless of input size (a
+  1,000-point and a 10,000-point input both cap at 300), correct
+  distance/elevation pairing against a hand-built input, `None` on
+  fewer than 2 elevation-bearing points, points with `elevation=None`
+  ignored rather than treated as `0.0`. Plus 2 new tests on `_parse_gpx`
+  itself: the profile is present and correctly shaped for the existing
+  fixture GPX, and a GPX with zero `<ele>` tags returns
+  `elevation_profile=None` (not an all-zero flat line). All 6 existing
+  `_parse_gpx` unpacking sites in this file updated for the new 6-tuple.
+- `tests/integration/test_geo_sync_integration.py` (PostGIS-backed
+  model, per `AGENTS.md`'s integration-test requirement for
+  `models/route.py` changes): extended
+  `test_route_stats_match_independent_gpxpy_calculation` to assert
+  `elevation_profile` round-trips through the JSON column correctly
+  against the existing 3-point fixture GPX's known 200m→300m→250m
+  shape. New `test_route_update_replaces_elevation_profile` covers the
+  *update* branch specifically (not just insert) — re-syncing a post
+  whose GPX changed from having elevation data to having none confirms
+  the existing row's profile is overwritten to `None`, not left stale.
+- Manual: live server run against a real post
+  (`content/posts/dream-of-north.md`, GPX fetched from production R2),
+  confirmed the rendered HTML contains the chart container, the vendor
+  script tag, the inline data block with real downsampled values, and
+  the behavior script tag — no server errors in the log. Chart.js
+  itself (canvas rendering, theme-toggle live update) remains
+  manual/visual, same as `post-map.js`'s MapLibre rendering has always
+  been — consistent, not a gap specific to this feature.
+
+**Files touched**: `app/models/route.py`,
+`alembic/versions/4a7b4678b2db_add_elevation_profile_to_routes.py` (new),
+`app/services/geo_sync.py`, `templates/partials/route_stats.html`,
+`templates/post.html`, `static/theme.css`,
+`static/js/elevation-chart.js` (new), `static/vendor/chart.js` (new,
+v4.5.1 pinned), `static/vendor/chart.LICENSE` (new),
+`static/vendor/chart.source.md` (new),
+`tests/unit/test_geo_sync.py`, `tests/integration/test_geo_sync_integration.py`,
+this file.
 
 ## Tier 2 — Komoot-style hover sync with the map (optional, additive)
 

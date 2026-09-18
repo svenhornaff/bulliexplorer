@@ -36,8 +36,10 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import datetime
+import itertools
 import logging
 import math
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
@@ -305,7 +307,7 @@ async def sync_route(
         )
         return existing.id if existing is not None else None
 
-    linestring, distance_km, elevation_gain_m, elevation_loss_m, duration_minutes = parsed
+    linestring, distance_km, elevation_gain_m, elevation_loss_m, duration_minutes, elevation_profile = parsed
     _check_tile_coverage(linestring, post_id, route_fm.name)
 
     if existing is None:
@@ -318,6 +320,7 @@ async def sync_route(
             elevation_gain_m=elevation_gain_m,
             elevation_loss_m=elevation_loss_m,
             duration_minutes=duration_minutes,
+            elevation_profile=elevation_profile,
         )
         session.add(route)
         logger.debug("Inserted Route for post_id=%d", post_id)
@@ -331,6 +334,7 @@ async def sync_route(
             "elevation_gain_m": elevation_gain_m,
             "elevation_loss_m": elevation_loss_m,
             "duration_minutes": duration_minutes,
+            "elevation_profile": elevation_profile,
         }
         for attr, value in updates.items():
             if getattr(existing, attr) != value:
@@ -960,7 +964,68 @@ def _resolve_gpx_path(gpx_file: str, content_dir: Path) -> Path:
     return (content_dir / gpx_file).resolve()
 
 
-_GpxStats = tuple[LineString, float, float, float, float | None]
+_GpxStats = tuple[LineString, float, float, float, float | None, list[list[float]] | None]
+
+_MAX_ELEVATION_PROFILE_POINTS = 300
+
+
+def _downsample_elevation_profile(
+    points: Sequence[tuple[float, float, float | None]],
+    max_points: int = _MAX_ELEVATION_PROFILE_POINTS,
+) -> list[list[float]] | None:
+    """Downsample raw (lon, lat, elevation) track points to a fixed-size
+    distance/elevation profile for the chart.
+
+    Uses fixed-interval resampling by cumulative 2D distance (not by point
+    index) so the shape of the profile is faithful even when a GPX has an
+    uneven point density along the track. Never upsamples: a route
+    recorded at a lower point count than ``max_points`` is passed through
+    unchanged, only ever capped, never padded.
+
+    Parameters
+    ----------
+    points:
+        ``(lon, lat, elevation_m)`` tuples in track order.  ``elevation_m``
+        may be ``None`` per-point for a partially-tagged GPX.
+    max_points:
+        Upper bound on the returned profile's length.
+
+    Returns
+    -------
+    A list of ``[distance_km, elevation_m]`` pairs, or ``None`` if fewer
+    than 2 points have elevation data at all (nothing meaningful to plot).
+    """
+    usable = [(lon, lat, elev) for lon, lat, elev in points if elev is not None]
+    if len(usable) < 2:
+        return None
+
+    # Cumulative 2D distance in km along the *usable* points, using the
+    # same planar-degrees-to-metres approximation gpxpy itself uses
+    # internally for length_2d() (adequate at ride-track scale; this is a
+    # chart shape, not a survey-grade distance figure — distance_km on
+    # the Route row, computed by gpxpy directly, remains authoritative).
+    cumulative_km = [0.0]
+    for (lon1, lat1, _), (lon2, lat2, _) in itertools.pairwise(usable):
+        mean_lat_rad = math.radians((lat1 + lat2) / 2.0)
+        dx_km = (lon2 - lon1) * 111.320 * math.cos(mean_lat_rad)
+        dy_km = (lat2 - lat1) * 110.574
+        cumulative_km.append(cumulative_km[-1] + math.hypot(dx_km, dy_km))
+
+    total_km = cumulative_km[-1]
+    if len(usable) <= max_points or total_km <= 0:
+        return [[round(d, 3), round(elev, 1)] for d, (_, _, elev) in zip(cumulative_km, usable, strict=True)]
+
+    # Resample at N equal cumulative-distance steps, each step taking the
+    # elevation of the nearest source point at or after that distance.
+    profile: list[list[float]] = []
+    step_km = total_km / (max_points - 1)
+    source_idx = 0
+    for step in range(max_points):
+        target_km = step * step_km
+        while source_idx < len(cumulative_km) - 1 and cumulative_km[source_idx] < target_km:
+            source_idx += 1
+        profile.append([round(target_km, 3), round(usable[source_idx][2], 1)])
+    return profile
 
 
 async def _fetch_gpx_over_http(url: str, http_client: httpx.AsyncClient | None) -> str | None:
@@ -1025,9 +1090,11 @@ async def _parse_gpx(
 
     Returns
     -------
-    A 5-tuple ``(linestring, distance_km, elevation_gain_m, elevation_loss_m,
-    duration_minutes)`` on success, or ``None`` on any error.
-    ``duration_minutes`` is ``None`` when the GPX has no timestamps.
+    A 6-tuple ``(linestring, distance_km, elevation_gain_m, elevation_loss_m,
+    duration_minutes, elevation_profile)`` on success, or ``None`` on any
+    error. ``duration_minutes`` is ``None`` when the GPX has no timestamps;
+    ``elevation_profile`` is ``None`` when the GPX has fewer than 2 points
+    with elevation data.
     """
     if gpx_file.startswith(("http://", "https://")):
         gpx_text = await _fetch_gpx_over_http(gpx_file, http_client)
@@ -1052,12 +1119,16 @@ async def _parse_gpx(
         logger.error("Failed to parse GPX %s: %s", source, exc)
         return None
 
-    # Collect all track points across all tracks and segments.
+    # Collect all track points across all tracks and segments. elev is
+    # per-point (not every recorder tags every point) — kept alongside
+    # lon/lat in the same single walk, no second pass over gpx.tracks.
     coords: list[tuple[float, float]] = []
+    points_with_elevation: list[tuple[float, float, float | None]] = []
     for track in gpx.tracks:
         for segment in track.segments:
             for pt in segment.points:
                 coords.append((pt.longitude, pt.latitude))
+                points_with_elevation.append((pt.longitude, pt.latitude, pt.elevation))
 
     if len(coords) < 2:
         logger.error("GPX %s has fewer than 2 track points — cannot form a LineString", source)
@@ -1076,4 +1147,6 @@ async def _parse_gpx(
     duration_seconds = gpx.get_duration()
     duration_minutes: float | None = duration_seconds / 60.0 if duration_seconds is not None else None
 
-    return linestring, distance_km, elevation_gain_m, elevation_loss_m, duration_minutes
+    elevation_profile = _downsample_elevation_profile(points_with_elevation)
+
+    return linestring, distance_km, elevation_gain_m, elevation_loss_m, duration_minutes, elevation_profile

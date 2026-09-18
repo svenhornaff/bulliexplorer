@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime
 
 from geoalchemy2 import Geometry
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -31,6 +31,13 @@ class Route(Base):
     elevation_gain_m: Mapped[float | None] = mapped_column(Float, default=None)
     elevation_loss_m: Mapped[float | None] = mapped_column(Float, default=None)
     duration_minutes: Mapped[float | None] = mapped_column(Float, default=None)
+
+    # Downsampled [distance_km, elevation_m] pairs for the elevation
+    # profile chart (docs/dev/elevation_profile_chart.md Tier 1). None
+    # when the GPX has no elevation values at all (some bike-computer
+    # recordings omit them) — the template gates the chart on this being
+    # present, not on an all-zero flat line.
+    elevation_profile: Mapped[list[list[float]] | None] = mapped_column(JSON, default=None)
 
     # Set on every *attempted* amenity sync (success or failure), never on
     # the route sync itself — this is a per-route cooldown against

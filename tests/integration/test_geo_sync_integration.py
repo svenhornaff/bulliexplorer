@@ -261,6 +261,17 @@ Body.
     assert route.elevation_loss_m == pytest.approx(expected["elevation_loss_m"], rel=1e-3)
     assert route.duration_minutes == pytest.approx(expected["duration_minutes"], rel=1e-3)
 
+    # elevation_profile round-trips through the JSON column correctly
+    # (docs/dev/elevation_profile_chart.md Tier 1) — the fixture GPX has
+    # elevation on every point, so the profile must be present and trace
+    # the same 200m -> 300m -> 250m shape the aggregate stats confirm.
+    assert route.elevation_profile is not None
+    assert len(route.elevation_profile) == 3  # fewer points than max_points — passed through, not padded
+    elevations = [elev for _, elev in route.elevation_profile]
+    assert elevations[0] == pytest.approx(200.0)
+    assert elevations[1] == pytest.approx(300.0)
+    assert elevations[2] == pytest.approx(250.0)
+
     # Sanity-check the expected values themselves (so the test is self-documenting).
     assert expected["distance_km"] > 5.0  # at least 5 km
     assert expected["elevation_gain_m"] > 50.0  # at least 50 m climbed
@@ -384,6 +395,67 @@ Plain body.
 # A fixture post that had a route, then has it removed, causes Route row
 # deletion (not left orphaned).
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_route_update_replaces_elevation_profile(tmp_path):
+    """Re-syncing a post with a changed GPX updates the existing Route
+    row's elevation_profile (the update branch of upsert_route_for_post,
+    not just the insert branch the other tests exercise).
+    """
+    _write_gpx(tmp_path, "route.gpx")
+    _write_md(
+        tmp_path,
+        "changing-elevation-post.md",
+        """\
+---
+title: Changing Elevation Post
+slug: changing-elevation-post
+date: 2025-06-01
+route:
+  name: Changing Elevation Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await sync_posts(tmp_path, session)
+        await session.commit()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "changing-elevation-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+        original_route_id = route.id
+        assert route.elevation_profile is not None
+        original_elevations = [elev for _, elev in route.elevation_profile]
+        assert original_elevations[0] == pytest.approx(200.0)
+
+    # A GPX with no elevation data at all — the update branch must
+    # overwrite the profile with None, not leave the stale one in place.
+    no_elevation_gpx = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><trkseg>
+    <trkpt lat="48.0" lon="8.0"></trkpt>
+    <trkpt lat="48.05" lon="8.05"></trkpt>
+  </trkseg></trk>
+</gpx>
+"""
+    _write_gpx(tmp_path, "route.gpx", content=no_elevation_gpx)
+
+    async with factory() as session:
+        await sync_posts(tmp_path, session)
+        await session.commit()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "changing-elevation-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+        assert route.id == original_route_id, "same row updated, not a new one inserted"
+        assert route.elevation_profile is None
 
 
 @pytest.mark.integration
