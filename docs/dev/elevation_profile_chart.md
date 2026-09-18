@@ -419,6 +419,25 @@ gradient, incline-color segment styling, tight axis, start/end marker
 plugin, richer tooltip), `templates/post.html` (`distanceKm` added to
 the data block), `tests/unit/test_templates.py`, this file.
 
+**Correction, caught by the operator from an actual screenshot**: the
+first pass shipped `fill: false` unchanged from Tier 1, plus a
+`segment.borderColor` callback but no matching `segment.backgroundColor`.
+Both are needed for the fill area to render at all — without them the
+incline coloring only ever painted a thin 2px line with nothing
+underneath, which at multi-thousand-km scale reads as "just green"
+regardless of how correct the color-bucketing logic actually is (only a
+hairline would show any red at all). Fixed: `fill: "origin"`, plus a
+new `withAlpha(hexColor, alpha)` helper and an optional `alpha` param
+on `inclineColorForGradient` so `segment.backgroundColor` reuses the
+exact same three red/amber/green hex values as `segment.borderColor`
+(at 0.3 alpha) rather than a second hardcoded color table. Verified
+live: the served `elevation-chart.js` now contains `fill: "origin"`,
+`withAlpha`, and `backgroundColor: function` on a request against
+`feldberg-summit-loop`. New regression test
+`test_elevation_chart_js_fills_area_under_incline_colored_line` asserts
+`fill: false` is absent and both segment callbacks share the same
+color source. `make ci` green: 352 tests, 96.34% coverage.
+
 ## Explicitly out of scope
 
 - **Surface-type-synced coloring on the chart** (paved/gravel bands) —

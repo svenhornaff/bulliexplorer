@@ -36,6 +36,17 @@
 
   var INCLINE_COLORS = { green: "#3a9a4a", amber: "#d99a1f", red: "#c0392b" };
 
+  // hex -> "rgba(r, g, b, alpha)" for the translucent fill — kept as a
+  // tiny standalone helper rather than a second alpha-aware color table,
+  // so the red/amber/green hex values above stay the single source of
+  // truth for both the line and the fill under it.
+  function withAlpha(hexColor, alpha) {
+    var r = parseInt(hexColor.slice(1, 3), 16);
+    var g = parseInt(hexColor.slice(3, 5), 16);
+    var b = parseInt(hexColor.slice(5, 7), 16);
+    return "rgba(" + r + ", " + g + ", " + b + ", " + alpha + ")";
+  }
+
   // Raw point-to-point gradient on a GPS/barometric-elevation track is
   // noisy — consecutive downsampled segments zigzag between +8% and
   // -3% on ground that's actually a steady climb, which would
@@ -59,11 +70,14 @@
     return out;
   }
 
-  function inclineColorForGradient(gradientPercent) {
+  // alpha is optional: omitted (or null) returns the solid hex used for
+  // the line itself; a 0–1 value returns the same color as a
+  // translucent rgba() for the fill underneath it (Komoot's "solid line,
+  // soft-tinted fill" look, not a solid block of color).
+  function inclineColorForGradient(gradientPercent, alpha) {
     var abs = Math.abs(gradientPercent);
-    if (abs < INCLINE_GREEN_MAX) return INCLINE_COLORS.green;
-    if (abs < INCLINE_AMBER_MAX) return INCLINE_COLORS.amber;
-    return INCLINE_COLORS.red;
+    var hex = abs < INCLINE_GREEN_MAX ? INCLINE_COLORS.green : abs < INCLINE_AMBER_MAX ? INCLINE_COLORS.amber : INCLINE_COLORS.red;
+    return alpha == null ? hex : withAlpha(hex, alpha);
   }
 
   // Per-segment gradient (%) between two adjacent source points, using
@@ -129,17 +143,30 @@
           backgroundColor: colors.line,
           borderWidth: 2,
           pointRadius: 0,
-          fill: false,
+          // fill: 'origin' (not false) — without this the area under the
+          // line never renders at all, which is why a first cut of this
+          // looked like "just a thin line, mostly green" even on a route
+          // with real climbing: the segment.borderColor callback below
+          // was correctly coloring the line, but there was no fill to
+          // color in the first place.
+          fill: "origin",
           tension: 0.15,
           // Per-segment incline color-coding — Chart.js's native
           // `segment` scriptable option, no plugin needed beyond what
           // Tier 1 already vendors. ctx.p0DataIndex is the index of the
           // segment's first point in the dataset, which lines up
-          // directly with ELEVATION_PROFILE's own indices.
+          // directly with ELEVATION_PROFILE's own indices. Both
+          // borderColor (the line) and backgroundColor (the fill under
+          // it, at 0.3 alpha for the translucent look) must be set —
+          // Chart.js doesn't derive one from the other.
           segment: {
             borderColor: function (ctx) {
               var gradient = gradientPercentAt(ELEVATION_PROFILE, smoothedElevations, ctx.p0DataIndex);
               return inclineColorForGradient(gradient);
+            },
+            backgroundColor: function (ctx) {
+              var gradient = gradientPercentAt(ELEVATION_PROFILE, smoothedElevations, ctx.p0DataIndex);
+              return inclineColorForGradient(gradient, 0.3);
             },
           },
         },

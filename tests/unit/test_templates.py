@@ -696,7 +696,7 @@ def test_elevation_chart_js_defines_incline_color_coding():
     """
     js = (STATIC_DIR / "js" / "elevation-chart.js").read_text(encoding="utf-8")
     assert "function smoothElevations(profile, window)" in js
-    assert "function inclineColorForGradient(gradientPercent)" in js
+    assert "function inclineColorForGradient(gradientPercent, alpha)" in js
     assert "function gradientPercentAt(profile, smoothedElevations, index)" in js
     assert "segment:" in js
     assert "borderColor: function (ctx)" in js
@@ -704,6 +704,30 @@ def test_elevation_chart_js_defines_incline_color_coding():
     # the source comment as well as here.
     assert "INCLINE_GREEN_MAX = 5" in js
     assert "INCLINE_AMBER_MAX = 10" in js
+
+
+@pytest.mark.unit
+def test_elevation_chart_js_fills_area_under_incline_colored_line():
+    """fill must be enabled (not `false`) and segment.backgroundColor
+    must exist alongside segment.borderColor, or the incline coloring
+    only ever paints a thin 2px line with nothing underneath — at route
+    scale (thousands of km) that reads as "just green" even on a route
+    with a real climb, since only a hairline would show any color at
+    all. Regression coverage for exactly this gap.
+    """
+    js = (STATIC_DIR / "js" / "elevation-chart.js").read_text(encoding="utf-8")
+    assert 'fill: "origin"' in js
+    assert "fill: false" not in js
+    assert "segment.backgroundColor" in js or "backgroundColor: function (ctx)" in js
+    assert "function withAlpha(hexColor, alpha)" in js
+    # The fill must reuse the same three incline colors as the line
+    # (via withAlpha), not a second hardcoded color table.
+    dataset_start = js.index('type: "line"')
+    segment_start = js.index("segment: {", dataset_start)
+    segment_end = js.index("},\n        },", segment_start)
+    segment_body = js[segment_start:segment_end]
+    assert "backgroundColor: function (ctx)" in segment_body
+    assert "inclineColorForGradient(gradient, 0.3)" in segment_body
 
 
 @pytest.mark.unit
