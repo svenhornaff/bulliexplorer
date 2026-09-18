@@ -46,6 +46,7 @@ class _FakePost:
     title = "A Gravel Day in the Black Forest"
     summary = "Single-track, mud, and a very questionable coffee stop."
     published_date = datetime.date(2025, 8, 24)
+    updated_at = datetime.datetime(2025, 8, 24, 12, 0, tzinfo=datetime.UTC)
     cover_image = None
     tags = "gravel,adventure"
     body_html = "<p>Placeholder body.</p>"
@@ -61,6 +62,7 @@ class _FakeOlderPost:
     title = "An Older Ride"
     summary = "The one before this one."
     published_date = datetime.date(2025, 7, 1)
+    updated_at = datetime.datetime(2025, 7, 1, 12, 0, tzinfo=datetime.UTC)
     cover_image = None
     tags = "gravel"
     body_html = "<p>Older placeholder body.</p>"
@@ -265,6 +267,8 @@ async def client_with_route():
     with patch("app.routes.posts.get_settings") as mock_settings:
         mock_settings.return_value.tiles_url = ""  # explicitly empty — map must not render
         mock_settings.return_value.is_production = False
+        mock_settings.return_value.site_url = "https://bulliexplorer.com"
+        mock_settings.return_value.legal_name = "Sven Hornaff"
         transport = ASGITransport(app=_app(_post_with_route_session))
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
@@ -276,6 +280,8 @@ async def client_with_route_and_tiles():
     with patch("app.routes.posts.get_settings") as mock_settings:
         mock_settings.return_value.tiles_url = "pmtiles://https://example.com/tiles/black-forest.pmtiles"
         mock_settings.return_value.is_production = False
+        mock_settings.return_value.site_url = "https://bulliexplorer.com"
+        mock_settings.return_value.legal_name = "Sven Hornaff"
         transport = ASGITransport(app=_app(_post_with_route_and_pois_session))
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
@@ -287,6 +293,8 @@ async def client_with_route_no_elevation():
     with patch("app.routes.posts.get_settings") as mock_settings:
         mock_settings.return_value.tiles_url = ""
         mock_settings.return_value.is_production = False
+        mock_settings.return_value.site_url = "https://bulliexplorer.com"
+        mock_settings.return_value.legal_name = "Sven Hornaff"
         transport = ASGITransport(app=_app(_post_with_route_no_elevation_session))
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac

@@ -231,3 +231,159 @@ async def test_lifespan_runs_without_error_on_empty_content_dir():
         resp = await client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# docs/dev/seo_beyond_basics.md — robots.txt, sitemap.xml, feed.xml,
+# canonical/OG meta tags, and JSON-LD on the real DB-backed pipeline.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_robots_txt_served_at_root():
+    from app.main import create_app
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/robots.txt")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert "User-agent: GPTBot\nDisallow: /" in resp.text
+    assert "Sitemap: " in resp.text
+
+
+@pytest.mark.integration
+async def test_sitemap_xml_includes_published_post_excludes_draft(tmp_path):
+    _write_md(tmp_path, "kinzig.md", PUBLISHED_POST)
+    _write_md(tmp_path, "draft.md", DRAFT_POST)
+    await _sync(tmp_path)
+
+    from app.main import create_app
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/sitemap.xml")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/xml")
+    assert "/posts/kinzig-valley-loop" in resp.text
+    assert "/posts/unreleased-adventure" not in resp.text
+
+
+@pytest.mark.integration
+async def test_feed_xml_includes_published_post_excludes_draft(tmp_path):
+    _write_md(tmp_path, "kinzig.md", PUBLISHED_POST)
+    _write_md(tmp_path, "draft.md", DRAFT_POST)
+    await _sync(tmp_path)
+
+    from app.main import create_app
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/feed.xml")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/rss+xml")
+    assert "The Kinzig Valley Loop" in resp.text
+    assert "/posts/kinzig-valley-loop" in resp.text
+    assert "Unreleased Adventure" not in resp.text
+
+
+@pytest.mark.integration
+async def test_sitemap_and_feed_valid_with_zero_posts():
+    """An empty posts table must not 500 either endpoint."""
+    from app.main import create_app
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        sitemap_resp = await client.get("/sitemap.xml")
+        feed_resp = await client.get("/feed.xml")
+
+    assert sitemap_resp.status_code == 200
+    assert feed_resp.status_code == 200
+
+
+@pytest.mark.integration
+async def test_post_detail_has_canonical_og_and_jsonld(tmp_path):
+    """A real post detail page carries a canonical link, OpenGraph meta,
+    and a BlogPosting JSON-LD block (no Route — this fixture post has
+    no GPX, so no Trip node either).
+    """
+    _write_md(tmp_path, "kinzig.md", PUBLISHED_POST)
+    await _sync(tmp_path)
+
+    from app.main import create_app
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/posts/kinzig-valley-loop")
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert 'rel="canonical"' in body
+    assert 'href="https://bulliexplorer.com/posts/kinzig-valley-loop"' in body
+    assert 'property="og:type" content="article"' in body
+    assert 'property="og:title"' in body
+    assert "application/ld+json" in body
+    assert '"@type": "BlogPosting"' in body
+    assert '"@type": "Trip"' not in body
+
+
+@pytest.mark.integration
+async def test_post_detail_with_route_includes_trip_jsonld(tmp_path):
+    """A post with a GPX-backed route gets a Trip node alongside
+    BlogPosting in its JSON-LD — the doc's Phase 3 scope.
+    """
+    gpx = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="bulliexplorer-test"
+     xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Kinzig Valley Route</name>
+    <trkseg>
+      <trkpt lat="48.0" lon="8.0"><ele>200.0</ele></trkpt>
+      <trkpt lat="48.05" lon="8.05"><ele>300.0</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>
+"""
+    _write_md(tmp_path, "kinzig.gpx.md", PUBLISHED_POST)
+    (tmp_path / "kinzig.gpx").write_text(gpx, encoding="utf-8")
+    _write_md(
+        tmp_path,
+        "kinzig-with-route.md",
+        """\
+---
+title: Kinzig With Route
+slug: kinzig-with-route
+date: 2025-08-10
+summary: A perfect gravel day in the Black Forest.
+route:
+  name: Kinzig Valley Route
+  gpx_file: kinzig.gpx
+draft: false
+---
+
+Sixty kilometres of singletrack and forest road.
+""",
+    )
+    await _sync(tmp_path)
+
+    from app.main import create_app
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/posts/kinzig-with-route")
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert '"@type": "BlogPosting"' in body
+    assert '"@type": "Trip"' in body
+    assert "Kinzig Valley Route" in body

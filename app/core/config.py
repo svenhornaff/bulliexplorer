@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     # None: /impressum and /datenschutz both 503 in production until a classification is chosen.
     legal_classification: Literal["personal", "commercial"] | None = None
 
+    # --- SEO (docs/dev/seo_beyond_basics.md) ---------------------------------
+    # Canonical origin, no trailing slash — the single source of truth for
+    # every absolute URL this app generates (sitemap.xml, feed.xml,
+    # robots.txt's Sitemap: line, canonical/OG links, JSON-LD @id/url).
+    # Deliberately not derived from the request's Host header — a
+    # forwarded/spoofed Host would otherwise poison every generated URL;
+    # a configured value is the only trustworthy source here. Defaults to
+    # the real production domain (Caddyfile) since that's public
+    # knowledge already, not a secret — override via SITE_URL for local
+    # testing against a different origin if ever needed.
+    site_url: str = "https://bulliexplorer.com"
+
     # --- Database ------------------------------------------------------------
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5433/bulliexplorer"
 

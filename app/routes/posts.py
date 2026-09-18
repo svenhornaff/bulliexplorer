@@ -19,6 +19,7 @@ from app.models.nearby_amenity import NearbyAmenity
 from app.models.point_of_interest import PointOfInterest
 from app.models.post import Post
 from app.models.route import Route
+from app.services.seo import build_post_jsonld
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,12 @@ async def post_detail(
     route_geojson: dict[str, Any] | None = _route_to_geojson(route)
     pois_geojson: dict[str, Any] = _pois_to_geojson(list(pois))
 
+    # JSON-LD structured data (docs/dev/seo_beyond_basics.md Phase 3) —
+    # BlogPosting always, Trip layered in only when `route` is not None.
+    # Built here (not in the template) so app/services/seo.py stays
+    # framework-free and independently unit-testable.
+    jsonld = build_post_jsonld(post, route, settings.site_url, settings.legal_name or "Sven Hornaff")
+
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
@@ -121,6 +128,7 @@ async def post_detail(
             "has_amenities": has_amenities,
             "amenities_geojson_url": f"/posts/{post.slug}/amenities.geojson" if has_amenities else None,
             "tiles_url": settings.tiles_url,
+            "jsonld": jsonld,
             "year": datetime.now().year,
         },
     )

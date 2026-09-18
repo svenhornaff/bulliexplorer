@@ -7,6 +7,22 @@
         <meta name="description"
               content="{% block meta_description %}Gravel rides, campsites and routes — one van, endless roads.{% endblock %}" />
         <title>{% block title %}BulliExplorer{% endblock %}</title>
+        <!-- Canonical + OpenGraph/Twitter Card (docs/dev/seo_beyond_basics.md
+         Phase 2) — defaults here, overridden per-page below. site_url is a
+         Jinja global (app/main.py), not request.url — never derived from
+         the Host header, so a forwarded/spoofed Host can't poison these. -->
+        <link rel="canonical"
+              href="{{ site_url }}{% block canonical_path %}{{ request.url.path }}{% endblock %}" />
+        <meta property="og:site_name" content="BulliExplorer" />
+        <meta property="og:type" content="{% block og_type %}website{% endblock %}" />
+        <meta property="og:title"
+              content="{% block og_title %}{{ self.title() }}{% endblock %}" />
+        <meta property="og:description"
+              content="{% block og_description %}{{ self.meta_description() }}{% endblock %}" />
+        <meta property="og:url" content="{{ site_url }}{{ self.canonical_path() }}" />
+        {% block og_image %}{% endblock %}
+        <meta name="twitter:card"
+              content="{% block twitter_card %}summary{% endblock %}" />
         <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
         <!-- Design system: self-hosted fonts + CSS custom-property tokens.
          Replaces the previous framework-based theme and CDN font/icon

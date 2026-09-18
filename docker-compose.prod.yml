@@ -24,6 +24,7 @@ services:
       - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
       - R2_PUBLIC_URL=${R2_PUBLIC_URL:-}
       - TILES_URL=${TILES_URL:-}
+      - SITE_URL=${SITE_URL:-https://bulliexplorer.com}
       - ENABLE_AMENITY_DISCOVERY=${ENABLE_AMENITY_DISCOVERY:-false}
       - RESYNC_TOKEN=${RESYNC_TOKEN}
       - GITHUB_TOKEN=${GITHUB_TOKEN}

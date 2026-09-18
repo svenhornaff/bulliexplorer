@@ -158,6 +158,8 @@ async def test_post_with_route_renders_stats_row():
     with patch("app.routes.posts.get_settings") as mock_gs:
         mock_gs.return_value.tiles_url = "pmtiles://https://example.com/tiles.pmtiles"
         mock_gs.return_value.is_production = False
+        mock_gs.return_value.site_url = "https://bulliexplorer.com"
+        mock_gs.return_value.legal_name = "Sven Hornaff"
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/posts/kinzig-valley-loop")
@@ -184,6 +186,8 @@ async def test_post_with_route_renders_map_container():
     with patch("app.routes.posts.get_settings") as mock_gs:
         mock_gs.return_value.tiles_url = "pmtiles://https://example.com/tiles.pmtiles"
         mock_gs.return_value.is_production = False
+        mock_gs.return_value.site_url = "https://bulliexplorer.com"
+        mock_gs.return_value.legal_name = "Sven Hornaff"
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/posts/kinzig-valley-loop")
@@ -213,6 +217,8 @@ async def test_post_with_route_renders_fullscreen_toggle():
     with patch("app.routes.posts.get_settings") as mock_gs:
         mock_gs.return_value.tiles_url = "pmtiles://https://example.com/tiles.pmtiles"
         mock_gs.return_value.is_production = False
+        mock_gs.return_value.site_url = "https://bulliexplorer.com"
+        mock_gs.return_value.legal_name = "Sven Hornaff"
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/posts/kinzig-valley-loop")
@@ -244,6 +250,8 @@ async def test_post_with_route_geojson_contains_correct_coords():
     with patch("app.routes.posts.get_settings") as mock_gs:
         mock_gs.return_value.tiles_url = "pmtiles://https://example.com/tiles.pmtiles"
         mock_gs.return_value.is_production = False
+        mock_gs.return_value.site_url = "https://bulliexplorer.com"
+        mock_gs.return_value.legal_name = "Sven Hornaff"
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/posts/kinzig-valley-loop")
@@ -334,6 +342,8 @@ async def test_post_detail_no_longer_inlines_amenity_data():
     with patch("app.routes.posts.get_settings") as mock_gs:
         mock_gs.return_value.tiles_url = "pmtiles://https://example.com/tiles.pmtiles"
         mock_gs.return_value.is_production = False
+        mock_gs.return_value.site_url = "https://bulliexplorer.com"
+        mock_gs.return_value.legal_name = "Sven Hornaff"
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/posts/kinzig-valley-loop")

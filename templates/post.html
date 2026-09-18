@@ -1,36 +1,61 @@
 {% extends "base.html" %} {% block title %}{{ post.title }} — BulliExplorer{%
     endblock %} {% block meta_description %}{% if post.summary %}{{ post.summary
-    }}{% else %}{{ post.title }} — BulliExplorer{% endif %}{% endblock %} {% block
-        head %} {# Load MapLibre GL CSS only on posts that actually have a map to
+    }}{% else %}{{ post.title }} — BulliExplorer{% endif %}{% endblock %}
+{# OpenGraph/Twitter overrides (docs/dev/seo_beyond_basics.md Phase 2) —
+   article type, and the post's own cover image reused as og:image (no
+   duplicate asset), summary_large_image only when that image exists. #}
+{% block og_type %}article{% endblock %}
+{% block og_image %}
+    {% if post.cover_image %}
+        <meta property="og:image" content="{{ post.cover_image }}" />
+    {% endif %}
+{% endblock %}
+{% block twitter_card %}{{ "summary_large_image" if post.cover_image else "summary" }}{% endblock %}
+{% block
+    head %}
+    {# Load MapLibre GL CSS only on posts that actually have a map to
 render. #} {% if route_geojson and tiles_url %}
-        <link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
-    {% endif %} {% endblock %} {% block page_header %}
-    <header class="masthead {% if post.cover_image %}masthead--has-cover{% endif %}">
-        {% if post.cover_image %}
-            <img class="masthead-cover-img"
-                 src="{{ post.cover_image }}"
-                 alt=""
-                 width="1200"
-                 height="600"
-                 fetchpriority="high" />
-        {% endif %}
-        <div class="container">
-            <div class="post-heading">
-                <h1>{{ post.title }}</h1>
-                {% if post.summary %}
-                    <h2 class="subheading">{{ post.summary }}</h2>
-                {% endif %}
-                <span class="meta">
-                    Posted by Sven on
-                    <time datetime="{{ post.published_date }}">{{ post.published_date.strftime("%B %-d, %Y") }}</time>
-                </span>
-            </div>
-        </div>
-    </header>
-{% endblock %} {% block content %} {% import "partials/icons.html" as icons %}
+    <link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
+{% endif %}
+{# JSON-LD structured data (docs/dev/seo_beyond_basics.md Phase 3) —
+       BlogPosting always, Trip layered in only when the post has a
+       route (jsonld is built server-side in app/services/seo.py so no
+       schema claims content that isn't actually there). |tojson escapes
+       forward-slashes/special chars — safe inside a <script> tag, same
+       convention as BULLIEXPLORER_MAP_DATA below. #}
+{% if jsonld %}
+<script type="application/ld+json">{{ jsonld | tojson }}</script>
+{% endif %}
+{% endblock %}
+{% block page_header %}
+<header class="masthead {% if post.cover_image %}masthead--has-cover{% endif %}">
+{% if post.cover_image %}
+<img class="masthead-cover-img"
+src="{{ post.cover_image }}"
+alt=""
+width="1200"
+height="600"
+fetchpriority="high" />
+{% endif %}
+<div class="container">
+<div class="post-heading">
+<h1>{{ post.title }}</h1>
+{% if post.summary %}
+<h2 class="subheading">{{ post.summary }}</h2>
+{% endif %}
+<span class="meta">
+Posted by Sven on
+<time datetime="{{ post.published_date }}">{{ post.published_date.strftime("%B %-d, %Y") }}</time>
+</span>
+</div>
+</div>
+</header>
+{% endblock %}
+{% block content %}
+{% import "partials/icons.html" as icons %}
 {% import "partials/blocks.html" as blocks %}
 <article>
-    {# ── Body blocks (Phase 4, docs/dev/ui_ux_refresh.md §5.3)
+{# ── Body blocks (Phase 4, docs/dev/ui_ux_refresh.md §5.3)
   ───────────────────────────────────────────── post.body_blocks is the
   sync-time render plan built from body_markdown plus the
   [[route-map]]/[[gallery:id]]/[[callout:id]] markers. The route-map block
@@ -43,29 +68,29 @@ render. #} {% if route_geojson and tiles_url %}
   that never went through build_body_blocks() at all (a legacy row right after
   the migration backfill, or one inserted directly, e.g. in a test) — so this
   can never regress into silently dropping a post's map. #} {% set ns = 
-            namespace(saw_route_map=false) %} {% for block in post.body_blocks %} {% if
-            block.type == "prose" %} {{ block.html | safe }} {% elif block.type ==
-                "gallery" %} {{ blocks.render_gallery(block.images) }} {% elif block.type ==
-                "callout" %} {{ blocks.render_callout(block) }} {% elif block.type ==
-                "route-map" %} {% set ns.saw_route_map = true %} {% if route %} {% include
-                "partials/route_stats.html" %} {% endif %} {% endif %} {% endfor %} {% if
-                    route and not ns.saw_route_map %} {% include "partials/route_stats.html" %} {%
-                    endif %} {# ── End body blocks ──────────────────────────────────────── #} {%
-                    if post.tags %}
-                <div>
-                    {% for tag in post.tags.split(',') %}
-                        <span class="tag-badge">{{ tag.strip() }}</span>
-                    {% endfor %}
-                </div>
-            {% endif %}
-            <p><a href="/" class="text-muted">← Back to all posts</a></p>
-        </article>
-        {% endblock %} {% block scripts %} {% if route_geojson and tiles_url %} {#
+namespace(saw_route_map=false) %} {% for block in post.body_blocks %} {% if
+block.type == "prose" %} {{ block.html | safe }} {% elif block.type ==
+"gallery" %} {{ blocks.render_gallery(block.images) }} {% elif block.type ==
+"callout" %} {{ blocks.render_callout(block) }} {% elif block.type ==
+"route-map" %} {% set ns.saw_route_map = true %} {% if route %} {% include
+"partials/route_stats.html" %} {% endif %} {% endif %} {% endfor %} {% if
+route and not ns.saw_route_map %} {% include "partials/route_stats.html" %} {%
+endif %} {# ── End body blocks ──────────────────────────────────────── #} {%
+if post.tags %}
+<div>
+{% for tag in post.tags.split(',') %}
+<span class="tag-badge">{{ tag.strip() }}</span>
+{% endfor %}
+</div>
+{% endif %}
+<p><a href="/" class="text-muted">← Back to all posts</a></p>
+</article>
+{% endblock %} {% block scripts %} {% if route_geojson and tiles_url %} {#
 Vendor JS loaded last — only on posts that actually render a map. #}
-        <script src="/static/vendor/maplibre-gl.js"></script>
-        <script src="/static/vendor/pmtiles.js"></script>
-        <script src="/static/vendor/basemaps.js"></script>
-        <script>
+<script src="/static/vendor/maplibre-gl.js"></script>
+<script src="/static/vendor/pmtiles.js"></script>
+<script src="/static/vendor/basemaps.js"></script>
+<script>
   // Data for static/js/post-map.js (F4, docs/dev/review_17SEP2026.md) —
   // behavior lives in the cacheable static file below; only the data
   // itself (which legitimately changes per page) stays inline here.

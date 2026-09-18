@@ -181,6 +181,12 @@ def create_app() -> FastAPI:
 
     # Store templates on app.state so routes can access them
     app.state.templates = Jinja2Templates(directory=BASE_DIR / "templates")
+    # Canonical site origin available to every template without threading
+    # it through each route's context dict (docs/dev/seo_beyond_basics.md
+    # Phase 2/3) — used for canonical links, OG/Twitter URLs, and the
+    # sitemap/feed/robots.txt routes' own absolute URLs (via get_settings()
+    # directly, not this global).
+    app.state.templates.env.globals["site_url"] = settings.site_url
 
     # --- Routers -------------------------------------------------------------
     from app.routes.home import router as home_router
@@ -189,6 +195,7 @@ def create_app() -> FastAPI:
     from app.routes.legal import LegalContentUnavailable
     from app.routes.legal import router as legal_router
     from app.routes.posts import router as posts_router
+    from app.routes.seo import router as seo_router
 
     # /impressum and /datenschutz are HTML pages, not an API — a bare JSON
     # 503 body (FastAPI's HTTPException default) reads as a broken API
@@ -205,6 +212,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(legal_router)
+    app.include_router(seo_router)
     app.include_router(home_router)
     app.include_router(posts_router)
     app.include_router(editor_router)
