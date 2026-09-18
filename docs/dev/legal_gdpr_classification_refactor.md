@@ -111,17 +111,20 @@ project's legal work has been built so far:
 
 ## Phased plan
 
-**Status: code implemented and deployed (Phases 0–3); production
-content still blocked on two operator-owned `.env` values, not a code
+**Status: code implemented and deployed (Phases 0–4); production
+content still blocked on one operator-owned `.env` value, not a code
 gap.** `LEGAL_CLASSIFICATION=personal` decided (Phase 0) and shipped;
 see `docs/dev/legal_gdpr.md`'s "Legal classification" section for the
 operative summary and the regression guard. Phase 3 closed the
 code/deployment gap between "config value decided" and "actually live"
 (missing compose passthrough + bare-JSON 503) — both confirmed fixed by
-direct `curl` against production on 2026-09-18. `/impressum` and
-`/datenschutz` still return `503` in production, correctly, pending the
-operator setting `LEGAL_EMAIL` and `LEGAL_ADDRESS` respectively — see
-Phase 3's "Still open" note for the concrete decision each is waiting on.
+direct `curl` against production on 2026-09-18. Phase 4 (also
+2026-09-18) made `LEGAL_ADDRESS` optional for `/datenschutz` specifically
+— per operator decision, GDPR Art. 13 contact-details wording is
+satisfied by name + email alone for this page; `/impressum`'s separate
+§ 5 DDG address requirement is unaffected. `/impressum` and
+`/datenschutz` both still return `503` in production, correctly, pending
+only `LEGAL_EMAIL` — see Phase 3's "Still open" note.
 
 ### Phase 0 — The classification decision itself (not a code task)
 
@@ -267,21 +270,71 @@ and `/datenschutz`, both still `503` (branded HTML now, not bare JSON).
   (`docker compose exec app env | grep LEGAL_EMAIL` → empty). **Operator
   decision (2026-09-18): will set it directly on the server** — no code
   change, `.env` is gitignored/protected from automated edits by design.
-- **`/datenschutz` still requires `LEGAL_ADDRESS`** regardless of
-  classification — the `personal` classification does not and was never
-  designed to relax `/datenschutz`'s GDPR Art. 13
-  controller-identification requirement, only `/impressum`'s § 5 DDG/
-  § 18 MStV provider-ID requirement. **Operator decision (2026-09-18):
-  will obtain a commercial virtual/business address service** — the
-  documented safe path in `legal_gdpr.md`'s "`LEGAL_ADDRESS` specifically"
-  section (a plain home address or PO box carries real Abmahnung risk) —
-  and set `LEGAL_ADDRESS` on the server once acquired.
+- **`/datenschutz` originally still required `LEGAL_ADDRESS`** regardless
+  of classification at the time this note was first written — superseded
+  the same day by Phase 4 below, which made `LEGAL_ADDRESS` optional for
+  `/datenschutz` specifically. Kept here for the historical record of
+  what Phase 3's live-verification pass actually found before that
+  decision.
 
-Both remain deliberate, operator-owned `.env` edits outside this repo,
-not a follow-up code task. Re-run the same live-`curl` check after either
-is set to confirm the page actually renders `200`, not just that `.env`
-was edited — the passthrough bug this phase fixed is exactly why
-"`.env` says X" and "the container sees X" aren't the same claim.
+Set `LEGAL_EMAIL` remains a deliberate, operator-owned `.env` edit
+outside this repo, not a follow-up code task. Re-run the same live-`curl`
+check after it's set to confirm `/impressum` actually renders `200`, not
+just that `.env` was edited — the passthrough bug this phase fixed is
+exactly why "`.env` says X" and "the container sees X" aren't the same
+claim.
+
+### Phase 4 — `/datenschutz` must render without `LEGAL_ADDRESS` — done
+
+Operator instruction (2026-09-18), overriding Phase 1's original
+design: **`/datenschutz` must render without `LEGAL_ADDRESS`, full
+stop** — no residential address, and no waiting on a virtual-address
+service either. Rationale given: GDPR Art. 13(1)(a) requires "the
+identity and the contact details of the controller," but the statutory
+text does not name a postal address specifically (unlike § 5 DDG's
+explicit "ladungsfähige Anschrift" language, which is a different duty
+for a different page). Name + a dedicated BulliExplorer contact email is
+treated as sufficient contact details for `/datenschutz`'s
+Verantwortlicher section. This is a genuinely unsettled question in
+general (German legal commentary tends to expect a postal address; the
+regulation's own text does not require one explicitly) — recorded here
+as the operator's considered call for this specific personal blog, not
+as a claim that the question is settled generally.
+
+**Scope, `app/routes/legal.py`**:
+- `/datenschutz`'s `required` list drops `address` (kept: `email`,
+  `hosting`, `log_retention`, `cloudflare_details`, `sentry_details`
+  when a DSN is set) — empty `LEGAL_ADDRESS` no longer 503s
+  `/datenschutz`.
+- The commercial `/impressum` path is unchanged — `address` stays
+  required there (§ 5 DDG Impressumspflicht is a different duty for a
+  different page, untouched by this decision). This split is now an
+  explicit `if page == "datenschutz": ... else: ...` in the code, not an
+  implicit shared list, specifically so the two duties can't
+  accidentally re-merge in a future edit.
+- When `LEGAL_ADDRESS` is empty, the `{{address}}` line is stripped from
+  the rendered Markdown source entirely (not replaced with a
+  `[Noch einzutragen: address]` placeholder like every other missing
+  field) — the address is absent by design here, not a to-do item.
+
+**Testing**: `test_datenschutz_renders_without_address_in_production`
+(200 with empty `LEGAL_ADDRESS`, no placeholder text either);
+`test_classification_personal_still_requires_datenschutz_hosting_fields`
+renamed/re-scoped from the old address-focused test to assert the
+*other* required fields still 503 correctly;
+`test_production_refuses_missing_disclosures` re-scoped off
+`LEGAL_ADDRESS` onto `LEGAL_EMAIL` as the missing-field case common to
+both pages. `make ci` green: 336 tests, 96.13% coverage.
+
+**Files touched**: `app/routes/legal.py`, `tests/unit/test_legal.py`,
+`docs/dev/legal_gdpr.md` ("`LEGAL_ADDRESS` specifically" section and the
+"Legal classification" section both updated to reflect the split), this
+file.
+
+**Still open**: `LEGAL_EMAIL` is still empty on the server — both pages
+remain `503` in production until the operator sets it (see Phase 3's
+note above). Setting it is the only remaining step to actually publish
+both pages.
 
 ## Explicitly out of scope
 

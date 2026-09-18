@@ -11,7 +11,7 @@ Set public disclosure values in the server `.env` (forwarded by production Compo
 | Variable | Verified value to supply |
 | --- | --- |
 | `LEGAL_NAME` | Operator's full name (fallback: Sven Hornaff) |
-| `LEGAL_ADDRESS` | Serviceable postal address including country; no guessed home address |
+| `LEGAL_ADDRESS` | Optional — see "`LEGAL_ADDRESS` specifically" below; only enforced by the commercial `/impressum` (§ 5 DDG), never by `/datenschutz` |
 | `LEGAL_EMAIL` | Operator contact email, not automatically the package author's work email |
 | `LEGAL_HOSTING` | Actual hosting provider/legal entity, location, data recipients and transfer details |
 | `LEGAL_LOG_RETENTION` | Actual log deletion criteria/retention, including hosting-level logs |
@@ -32,8 +32,9 @@ Do not deploy this draft until the missing values have been reviewed and supplie
 
 Checked current sources rather than assumed: German law requires a
 "ladungsfähige Anschrift" — a real address actually capable of receiving
-formal/legal delivery, not just a mailing point. Consistently, across
-multiple independent current sources:
+formal/legal delivery, not just a mailing point — **for a commercial
+`/impressum` under § 5 DDG.** Consistently, across multiple independent
+current sources on that specific requirement:
 
 - **A plain PO box (Postfach) alone is commonly treated as
   insufficient** — described in more than one source as a classic
@@ -53,11 +54,25 @@ sufficient for *this* offering's specific legal classification (the
 `§ 18 MStV`/journalistic-editing question already flagged above
 interacts with this — some address requirements differ by exactly that
 classification). Worth a direct check with whichever service is
-considered, or a lawyer, before publishing — not something to infer
-from general web research alone.
+considered, or a lawyer, before publishing a commercial `/impressum` —
+not something to infer from general web research alone. `LEGAL_ADDRESS`
+stays empty (triggering the existing 503 safety net on a *commercial*
+`/impressum`) until this is actually resolved one way or the other.
 
-`LEGAL_ADDRESS` stays empty (triggering the existing 503 safety net)
-until this is actually resolved one way or the other.
+**This does not apply to `/datenschutz`.** Decided 2026-09-18: GDPR
+Art. 13(1)(a) requires "the identity and the contact details of the
+controller" — the statutory text does not name a postal address
+specifically (unlike § 5 DDG's explicit "ladungsfähige Anschrift"
+language above). BulliExplorer will not publish the operator's
+residential address for GDPR purposes; name + a dedicated contact email
+is treated as sufficient controller identification for a personal blog.
+`LEGAL_ADDRESS` is therefore optional for `/datenschutz` and never
+blocks it — when empty, the address line is omitted from the rendered
+"Verantwortlicher" block entirely (no placeholder either). If
+BulliExplorer's classification changes to commercial (with its own § 5
+DDG address obligation via `/impressum`), reassess whether a
+postal/service address should also appear on `/datenschutz` at that
+point.
 
 ## Account-side work (not accomplished by a repository change)
 
@@ -85,9 +100,13 @@ virtual address is published; `/impressum` shows only the non-commercial
 diary notice, `LEGAL_EMAIL` remains required. `/datenschutz` is unaffected
 by this setting either way — the GDPR controller-identification duty
 (Art. 13) is separate from the § 5 DDG/§ 18 MStV provider-identification
-duty the personal/family exemption addresses, so its own required fields
-(including address) still apply regardless of classification. Unset still
-503s both pages in production — no silent default to either value.
+duty the personal/family exemption addresses, so its other required
+fields (hosting, log retention, Cloudflare details, Sentry details when
+a DSN is set) still apply regardless of classification. `LEGAL_ADDRESS`
+is the one exception — see "`LEGAL_ADDRESS` specifically" above, it is
+optional for `/datenschutz` under any classification. Unset
+`LEGAL_CLASSIFICATION` still 503s both pages in production — no silent
+default to either value.
 
 ### Regression guard
 

@@ -60,21 +60,44 @@ def _render_legal(request: Request, page: str, title: str) -> HTMLResponse:
             "cloudflare_details": settings.legal_cloudflare_details,
             "sentry_details": settings.legal_sentry_details,
         }
-        required = ["address", "email"]
         if page == "datenschutz":
-            required += ["hosting", "log_retention", "cloudflare_details"]
+            # GDPR Art. 13(1)(a) requires "the identity and the contact
+            # details of the controller" — the statutory text itself does
+            # not name a postal address specifically, and BulliExplorer
+            # deliberately does not publish the operator's residential
+            # address (see docs/dev/legal_gdpr.md's "LEGAL_ADDRESS
+            # specifically" section on Abmahnung risk from an
+            # unverified/home address). Name + a dedicated contact email is
+            # treated as sufficient controller identification for this
+            # personal blog; LEGAL_ADDRESS is optional and never blocks
+            # /datenschutz. This does NOT apply to a commercial /impressum
+            # below (§ 5 DDG Impressumspflicht requires the address for a
+            # commercial offering) — only /datenschutz's separate GDPR duty
+            # is relaxed here.
+            required = ["email", "hosting", "log_retention", "cloudflare_details"]
             if settings.sentry_dsn:
                 required.append("sentry_details")
+        else:
+            # Commercial /impressum: address stays required (§ 5 DDG).
+            required = ["address", "email"]
     # Do not publish invented provider commitments or unfinished legal notices.
     if settings.is_production and any(not values[key].strip() for key in required):
         raise LegalContentUnavailable(title)
     source = (_LEGAL_DIR / f"{source_page}.md").read_text(encoding="utf-8")
+    if page == "datenschutz" and not values["address"].strip():
+        # Omit the address line entirely rather than a placeholder — see
+        # the required-fields comment above on why LEGAL_ADDRESS is
+        # optional here. "{{address}}  " is the exact source line (two
+        # trailing spaces are CommonMark's hard-line-break marker).
+        source = source.replace("{{address}}  \n", "")
     for key, value in values.items():
         # Render Markdown first, then escape configured text to prevent HTML
         # and Markdown link injection through environment-sourced fields.
         values[key] = value or f"[Noch einzutragen: {key}]"
     html = MarkdownIt("commonmark", {"html": False}).render(source)
     for key, value in values.items():
+        if key == "address" and page == "datenschutz" and not value:
+            continue
         html = html.replace("{{" + key + "}}", escape(value).replace("\n", "<br>"))
     if page == "datenschutz" and not settings.sentry_dsn:
         start = html.index("<h2>Fehlerüberwachung mit Sentry</h2>")

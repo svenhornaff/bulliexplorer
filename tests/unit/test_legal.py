@@ -41,12 +41,17 @@ async def test_legal_config_is_plain_text(client, monkeypatch):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("path", ["/impressum", "/datenschutz"])
-async def test_production_refuses_missing_disclosures(client, monkeypatch, path):
+async def test_production_refuses_missing_disclosures(client, monkeypatch):
+    """Missing LEGAL_EMAIL (required by both pages) still 503s both
+    /impressum and /datenschutz in production. LEGAL_ADDRESS is
+    deliberately excluded here — see
+    test_datenschutz_renders_without_address_in_production, address is not
+    a /datenschutz blocker by design."""
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("LEGAL_ADDRESS", "")
+    monkeypatch.setenv("LEGAL_EMAIL", "")
     get_settings.cache_clear()
-    assert (await client.get(path)).status_code == 503
+    assert (await client.get("/impressum")).status_code == 503
+    assert (await client.get("/datenschutz")).status_code == 503
     assert (await client.get("/health")).status_code == 200
 
 
@@ -99,15 +104,42 @@ async def test_classification_personal_requires_email_in_production(client, monk
 
 
 @pytest.mark.unit
-async def test_classification_personal_still_requires_datenschutz_fields(client, monkeypatch):
+async def test_classification_personal_still_requires_datenschutz_hosting_fields(client, monkeypatch):
     """The personal/family exemption is about provider ID, not GDPR — /datenschutz
-    still needs the controller address and other fields regardless of classification."""
+    still needs its other controller-identification fields (hosting,
+    retention, Cloudflare details) regardless of classification. Address is
+    excluded — see test_datenschutz_renders_without_address_in_production."""
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("LEGAL_CLASSIFICATION", "personal")
     monkeypatch.setenv("LEGAL_EMAIL", "hallo@example.org")
     monkeypatch.setenv("LEGAL_ADDRESS", "")
+    monkeypatch.setenv("LEGAL_HOSTING", "")
     get_settings.cache_clear()
     assert (await client.get("/datenschutz")).status_code == 503
+
+
+@pytest.mark.unit
+async def test_datenschutz_renders_without_address_in_production(client, monkeypatch):
+    """GDPR Art. 13(1)(a) requires "the identity and the contact details of
+    the controller" — the statutory text does not name a postal address
+    specifically. BulliExplorer deliberately does not publish the
+    operator's residential address; name + a dedicated contact email is
+    treated as sufficient controller identification for /datenschutz.
+    LEGAL_ADDRESS is optional here and must never block rendering, unlike
+    every other required field."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("LEGAL_CLASSIFICATION", "personal")
+    monkeypatch.setenv("LEGAL_ADDRESS", "")
+    monkeypatch.setenv("SENTRY_DSN", "")
+    for field in ["EMAIL", "HOSTING", "LOG_RETENTION", "CLOUDFLARE_DETAILS"]:
+        monkeypatch.setenv("LEGAL_" + field, "Verified test value")
+    get_settings.cache_clear()
+    response = await client.get("/datenschutz")
+    assert response.status_code == 200
+    assert "Sven Hornaff" in response.text
+    assert "Verified test value" in response.text
+    # No address line, and no placeholder standing in for it either.
+    assert "Noch einzutragen: address" not in response.text
 
 
 @pytest.mark.unit
