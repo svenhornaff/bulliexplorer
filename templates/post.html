@@ -91,6 +91,7 @@ no map tiles configured. #}
 <script>
   window.BULLIEXPLORER_ELEVATION_DATA = {
     elevationProfile: {{ route.elevation_profile | tojson }},
+    distanceKm: {{ route.distance_km | tojson }},
   };
 </script>
 <script src="/static/js/elevation-chart.js"></script>

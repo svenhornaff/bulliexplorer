@@ -680,6 +680,77 @@ def test_post_map_js_defines_hover_sync_interpolation():
 
 
 @pytest.mark.unit
+def test_elevation_chart_js_defines_incline_color_coding():
+    """Per-segment incline color-coding (elevation_profile_chart.md
+    Tier 3) exists and is wired into Chart.js's native `segment`
+    scriptable option — no plugin needed beyond what Tier 1 vendors.
+
+    Same testing convention as Tier 1/2 (no JS test runner in this
+    project, AGENTS.md): read the static source, assert structural
+    facts. The color-bucketing/smoothing math itself (flat → green,
+    steady climbs at known grades → correct green/amber/red bucket,
+    smoothing damps point-to-point GPS noise) was verified correct via
+    a standalone Node script during development, cross-checked against
+    Feldberg Summit Loop's real synced elevation_profile — not part of
+    CI, same reasoning as Tier 2's interpolation math.
+    """
+    js = (STATIC_DIR / "js" / "elevation-chart.js").read_text(encoding="utf-8")
+    assert "function smoothElevations(profile, window)" in js
+    assert "function inclineColorForGradient(gradientPercent)" in js
+    assert "function gradientPercentAt(profile, smoothedElevations, index)" in js
+    assert "segment:" in js
+    assert "borderColor: function (ctx)" in js
+    # Cutoffs tuned against a real route, not arbitrary — documented in
+    # the source comment as well as here.
+    assert "INCLINE_GREEN_MAX = 5" in js
+    assert "INCLINE_AMBER_MAX = 10" in js
+
+
+@pytest.mark.unit
+def test_elevation_chart_js_has_tight_x_axis_and_start_end_markers():
+    """Tight X-axis (chart max = route's actual total distance, no
+    auto-padding) and start/end marker dots — both elevation_profile_
+    chart.md Tier 3 scope items independent of the incline coloring.
+    """
+    js = (STATIC_DIR / "js" / "elevation-chart.js").read_text(encoding="utf-8")
+    assert "max: totalDistanceKm" in js
+    assert "grace: 0" in js
+    assert "elevationStartEndMarkers" in js
+    assert '["A", "B"]' in js
+
+
+@pytest.mark.unit
+def test_elevation_chart_js_tooltip_shows_incline_not_surface():
+    """Hover tooltip shows distance/elevation/cumulative-gain/incline —
+    explicitly not surface or way-type, per Tier 3's own callout that
+    this project's tile data doesn't reliably carry that
+    (gis_cycling_upgrade.md Phase 0).
+    """
+    js = (STATIC_DIR / "js" / "elevation-chart.js").read_text(encoding="utf-8")
+    assert "climbed so far" in js
+    assert "% grade" in js
+    # The tooltip's own label callback builds only elevation/gain/grade
+    # lines — checked by isolating that function's body, not the whole
+    # file, since a comment elsewhere legitimately explains *why*
+    # surface/way-type is deliberately absent (mentioning the word).
+    tooltip_label_start = js.index("label: function (item) {")
+    tooltip_label_end = js.index("},", tooltip_label_start)
+    tooltip_label_body = js[tooltip_label_start:tooltip_label_end].lower()
+    assert "surface" not in tooltip_label_body
+    assert "way-type" not in tooltip_label_body and "waytype" not in tooltip_label_body
+
+
+@pytest.mark.unit
+async def test_post_with_route_passes_distance_km_to_elevation_chart(client_with_route):
+    """route.distance_km is passed alongside elevation_profile so the
+    chart's X-axis can be set to the route's exact total distance
+    (Tier 3's tight-axis requirement needs this value)."""
+    resp = await client_with_route.get("/posts/test-post")
+    assert "distanceKm" in resp.text
+    assert "68.0" in resp.text  # _FakeRoute.distance_km
+
+
+@pytest.mark.unit
 def test_post_map_js_cycling_layers_use_kind_detail():
     """Filters on kind_detail (the OSM highway=* value), not kind itself —
     Phase 0's tile-inspection finding: kind only has 5 broad buckets, the
