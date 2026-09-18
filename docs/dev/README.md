@@ -39,6 +39,7 @@ something that already exists, not to decide what to do next.
 | `maps_gis.md` | Maps & GIS, Phases 1–5 (schema, GPX parsing, geocoding, PMTiles, rendering) — bucket #1. |
 | `gis_refactor.md` | Europe-wide basemap swap + coverage-check safeguard, following `maps_gis.md`. |
 | `gis_cycling_upgrade.md` | Cycling-specific tile layers + nearby-amenity discovery (Overpass) — bucket #1 follow-on. |
+| `elevation_profile_chart.md` | Elevation profile chart — Tier 1 (static chart, storage + rendering) not started, Tier 2 (Komoot-style hover sync) optional/additive on top. |
 | `fix_overpass_urban_density_timeout.md` | Overpass resilience: timeout → mirror → split → 429 backoff. |
 | `fix_incremental_amenity_writes.md` | Per-chunk amenity writes so partial Overpass failures don't lose completed work. |
 | `fix_startup_blocking_amenity_sync.md` | Moved amenity discovery off the startup-blocking path into a background task. |
