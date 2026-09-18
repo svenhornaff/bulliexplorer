@@ -442,6 +442,73 @@
     let routeLoaded = false;
     let amenitiesVisible = false;
 
+    // ── Chart → map hover sync (elevation_profile_chart.md Tier 2) ──────
+    // Given a target distance-km, walks ROUTE_GEOJSON's coordinates
+    // accumulating 2D segment lengths (same planar-degrees approximation
+    // used in geo_sync.py's _downsample_elevation_profile, adequate at
+    // ride-track scale — this positions a hover marker, it's not a survey)
+    // until the target is reached, then linearly interpolates between the
+    // two bracketing points. Hand-written, not Turf.js — one ~20-line
+    // function doesn't justify vendoring a whole geometry library,
+    // consistent with this file's existing Maki-icon canvas rendering
+    // taking the same "small hand-rolled helper" approach over a
+    // dependency.
+    function interpolateAlongRoute(coordinates, targetDistanceKm) {
+      if (!coordinates || coordinates.length < 2) return null;
+      if (targetDistanceKm <= 0) return coordinates[0];
+
+      var cumulativeKm = 0;
+      for (var i = 0; i < coordinates.length - 1; i++) {
+        var lon1 = coordinates[i][0], lat1 = coordinates[i][1];
+        var lon2 = coordinates[i + 1][0], lat2 = coordinates[i + 1][1];
+        var meanLatRad = ((lat1 + lat2) / 2) * (Math.PI / 180);
+        var dxKm = (lon2 - lon1) * 111.320 * Math.cos(meanLatRad);
+        var dyKm = (lat2 - lat1) * 110.574;
+        var segmentKm = Math.sqrt(dxKm * dxKm + dyKm * dyKm);
+
+        if (cumulativeKm + segmentKm >= targetDistanceKm || i === coordinates.length - 2) {
+          var remainingKm = targetDistanceKm - cumulativeKm;
+          var fraction = segmentKm > 0 ? Math.min(Math.max(remainingKm / segmentKm, 0), 1) : 0;
+          return [lon1 + (lon2 - lon1) * fraction, lat1 + (lat2 - lat1) * fraction];
+        }
+        cumulativeKm += segmentKm;
+      }
+      return coordinates[coordinates.length - 1];
+    }
+
+    var hoverMarkerEl = null;
+    var hoverMarker = null;
+
+    function showHoverMarker(lngLat) {
+      if (!hoverMarker) {
+        hoverMarkerEl = document.createElement("div");
+        hoverMarkerEl.className = "elevation-hover-marker";
+        hoverMarker = new maplibregl.Marker({ element: hoverMarkerEl }).setLngLat(lngLat).addTo(map);
+      } else {
+        hoverMarker.setLngLat(lngLat);
+      }
+      hoverMarkerEl.style.display = "block";
+    }
+
+    function hideHoverMarker() {
+      if (hoverMarkerEl) hoverMarkerEl.style.display = "none";
+    }
+
+    // elevation-chart.js dispatches these on the document (no shared
+    // module system between the two independently-loaded <script> tags
+    // in this project — same reasoning as duplicating routeLineColor()
+    // there rather than sharing a helper). Only wired up once the route
+    // is actually loaded — ROUTE_GEOJSON's coordinates aren't available
+    // before then.
+    document.addEventListener("bulliexplorer:elevationhover", function (event) {
+      if (!routeLoaded || !ROUTE_GEOJSON) return;
+      var point = interpolateAlongRoute(ROUTE_GEOJSON.geometry.coordinates, event.detail.distanceKm);
+      if (point) showHoverMarker(point);
+    });
+    document.addEventListener("bulliexplorer:elevationhoverend", function () {
+      hideHoverMarker();
+    });
+
     map.on("load", function () {
       routeLoaded = true;
 

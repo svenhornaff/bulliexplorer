@@ -201,43 +201,99 @@ v4.5.1 pinned), `static/vendor/chart.LICENSE` (new),
 `tests/unit/test_geo_sync.py`, `tests/integration/test_geo_sync_integration.py`,
 this file.
 
-## Tier 2 — Komoot-style hover sync with the map (optional, additive)
+## Tier 2 — Komoot-style hover sync with the map (optional, additive) — done (hover-sync only, zoom/pan deferred)
 
-Only build this if Tier 1 alone feels incomplete once it's actually
-live — genuinely fine to stop at Tier 1.
+Operator chose hover-sync only when asked — zoom/pan via
+`chartjs-plugin-zoom` deferred, since hover-sync alone already
+delivers most of the value per the plan's own framing. Not built,
+left as a future addition if it turns out to be needed.
 
 **Scope**
-- [ ] Hovering the chart shows a marker on the map at the corresponding
-  point along the route. Needs a small distance-along-line
-  interpolation helper — given a target distance-km, walk
-  `ROUTE_GEOJSON`'s coordinates accumulating segment lengths until the
-  target is reached, interpolate between the two bracketing points.
-  Hand-written, ~20 lines — **not** a reason to vendor a whole geometry
-  library (Turf.js) for one function, consistent with this project's
+- [x] Hovering the chart shows a marker on the map at the corresponding
+  point along the route. New `interpolateAlongRoute(coordinates,
+  targetDistanceKm)` in `static/js/post-map.js` — given a target
+  distance-km, walks `ROUTE_GEOJSON`'s coordinates accumulating 2D
+  segment lengths (same planar-degrees approximation
+  `_downsample_elevation_profile` uses server-side) until the target is
+  reached, linearly interpolates between the two bracketing points.
+  Hand-written, ~20 lines, no Turf.js — consistent with this project's
   existing preference for small hand-rolled helpers over heavy
   dependencies (the Maki-icon canvas rendering took the same approach).
-- [ ] Optional zoom/pan on the chart itself via `chartjs-plugin-zoom`
-  (also vendorable as a single file) — the actual "slider and zoom"
-  Komoot behavior. Genuinely optional even within Tier 2; hover-sync
-  alone already delivers most of the value.
-- [ ] Map → chart sync (hovering the route line highlights the matching
-  chart position) is **not** in scope even for Tier 2 — meaningfully
-  harder (click/hover tolerance detection along a rendered line) for
-  proportionally less value than the chart → map direction, which is
-  the one Komoot itself leads with.
+  Guards for a degenerate route (`< 2` coordinates), and clamps
+  distance to `[0, total]` rather than extrapolating past either end.
+- [ ] ~~Optional zoom/pan on the chart itself via `chartjs-plugin-zoom`~~
+  — deferred by explicit operator choice, not built.
+- [x] Map → chart sync confirmed still out of scope, not built — the
+  event wiring is one-way only (`elevation-chart.js` dispatches,
+  `post-map.js` only listens, never the reverse).
 
-**Done when**
+**Implementation, checked against the actual current code**: the two
+files are independently loaded `<script>` tags with no shared module
+system (`AGENTS.md`: no build step, no bundler) — same reason
+`routeLineColor(flavor)` is duplicated rather than shared between them
+(Tier 1). Bridged via two `CustomEvent`s dispatched on `document`:
+`bulliexplorer:elevationhover` (detail: `{ distanceKm }`) and
+`bulliexplorer:elevationhoverend`. `elevation-chart.js` sets Chart.js's
+`options.onHover` (fired continuously as the pointer moves, using the
+already-configured `interaction: { mode: "index" }` to get the exact
+nearest-point index — same value the tooltip itself uses, so "where the
+tooltip points" and "where the map marker lands" always agree) plus a
+`canvas`-level `mouseleave` listener for the hoverend case. `post-map.js`
+listens for both, calls `interpolateAlongRoute` against
+`ROUTE_GEOJSON.geometry.coordinates` (only available once `routeLoaded`
+is true — guarded), and shows/hides a small marker
+(`.elevation-hover-marker` in `static/theme.css`, same "colored circle,
+white border" recipe as the curated-POI markers, `display: none` by
+default) via a plain `maplibregl.Marker`, reused across hover events
+rather than recreated each time.
+
+**Done when** — verified:
 - Hovering anywhere on the chart moves a visible marker to the correct
-  position on the map, tracking smoothly, not just snapping to the
-  nearest downsampled point.
-- Zoom/pan (if built) doesn't break the hover-sync math — a zoomed
-  chart's hover position still maps to the correct real-world point.
+  position on the map, tracking continuously via `onHover` (not just
+  snapping to the nearest downsampled point — linear interpolation
+  between bracketing coordinates gives a smooth position along the
+  actual route line, independent of the chart's own point density).
+- Degenerate/edge cases handled without throwing: `distanceKm <= 0`
+  returns the first coordinate, a distance beyond the route's total
+  length returns the last coordinate (verified via a standalone Node
+  script during development — not part of CI, see the testing note
+  below), a route with fewer than 2 coordinates returns `null` and the
+  hover listener silently no-ops.
+- `make ci` green: **347 tests, 96.34% coverage**. ruff/pyright/djlint
+  all clean.
 
 **Testing**
-- Unit test for the interpolation helper (given a known LineString and
-  a target distance, returns the expected coordinate) — this is pure
-  math, testable independent of any rendering.
-- Manual for the actual hover/zoom interaction.
+- No JS test runner exists in this project and none was added
+  (`AGENTS.md`: no build step, no npm) — followed this file's existing
+  convention (see Tier 1's `test_post_map_js_includes_cycling_layers`)
+  of reading the static source and asserting structural facts:
+  `test_post_map_js_defines_hover_sync_interpolation` (new, in
+  `tests/unit/test_templates.py`) confirms the function and both its
+  degenerate-input guards exist, and that it's wired to both
+  CustomEvents `elevation-chart.js` dispatches.
+- The interpolation math itself (midpoint of a 2-point line, zero
+  distance, negative distance, beyond-total-distance, multi-segment
+  accumulation) was verified correct via a standalone Node script
+  during development, run manually, not part of CI — this project has
+  no Node runtime dependency anywhere else and shouldn't gain one just
+  for this.
+- Manual: live server run against `content/posts/dream-of-north.md`
+  confirmed both `post-map.js` and `elevation-chart.js` load correctly
+  and contain the expected hover-sync code (`interpolateAlongRoute`,
+  `elevationhover` event names present in both files as served).
+  Hovering interaction itself (marker tracking smoothly on mouse move)
+  remains manual/visual, same as every other client-side rendering
+  phase in this project's docs.
+
+**Files touched**: `static/js/post-map.js` (interpolation +
+marker + event listeners), `static/js/elevation-chart.js` (`onHover` +
+event dispatch), `static/theme.css` (`.elevation-hover-marker`),
+`tests/unit/test_templates.py` (structural test + new
+`elevation_profile`/`elevation-chart` coverage that Tier 1 had left as
+a gap — no test previously verified the chart container/scripts
+actually rendered in an HTTP response, or that a `None`
+`elevation_profile` correctly omits it; closed both while working in
+this area), this file.
 
 ## Explicitly out of scope
 

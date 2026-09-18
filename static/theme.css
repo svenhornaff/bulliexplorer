@@ -649,6 +649,21 @@ article tbody tr:last-child td {
   height: 100%;
 }
 
+/* Chart → map hover marker (docs/dev/elevation_profile_chart.md Tier 2) —
+   plain div marker, same recipe as the curated-POI markers in
+   post-map.js (colored circle, white border), but smaller and hidden by
+   default since it only appears while actively hovering the chart. */
+.elevation-hover-marker {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
 .map-toggle-btn {
   position: absolute;
   top: 0.75rem;

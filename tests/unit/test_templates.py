@@ -78,6 +78,16 @@ class _FakeRoute:
     elevation_gain_m = 1420.0
     elevation_loss_m = 1380.0
     duration_minutes = 275.0  # 4h 35min
+    elevation_profile = [[0.0, 200.0], [34.0, 900.0], [68.0, 620.0]]
+
+
+class _FakeRouteNoElevation(_FakeRoute):
+    """A route whose source GPX had no elevation values at all — the
+    chart must be omitted entirely, not rendered empty/flat
+    (elevation_profile_chart.md Tier 1's graceful-omission requirement).
+    """
+
+    elevation_profile = None
 
 
 class _FakePostWithRouteMapBlock(_FakePost):
@@ -190,6 +200,16 @@ async def _post_with_route_and_pois_session():
     )
 
 
+async def _post_with_route_no_elevation_session():
+    """Post-detail session: route present but with no elevation_profile."""
+    yield _session(
+        _result(scalar=_FakePostWithRouteMapBlock()),
+        _result(scalar=_FakeRouteNoElevation()),
+        _result(scalars_list=[]),  # POIs query
+        _result(scalar=None),  # NearbyAmenity existence check (route is not None)
+    )
+
+
 # ---------------------------------------------------------------------------
 # App fixtures
 # ---------------------------------------------------------------------------
@@ -257,6 +277,17 @@ async def client_with_route_and_tiles():
         mock_settings.return_value.tiles_url = "pmtiles://https://example.com/tiles/black-forest.pmtiles"
         mock_settings.return_value.is_production = False
         transport = ASGITransport(app=_app(_post_with_route_and_pois_session))
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+
+@pytest.fixture
+async def client_with_route_no_elevation():
+    """Post detail with a route that has no elevation_profile."""
+    with patch("app.routes.posts.get_settings") as mock_settings:
+        mock_settings.return_value.tiles_url = ""
+        mock_settings.return_value.is_production = False
+        transport = ASGITransport(app=_app(_post_with_route_no_elevation_session))
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
 
@@ -528,6 +559,33 @@ async def test_post_with_route_no_tiles_url_hides_map(client_with_route):
     assert "maplibregl" not in resp.text
 
 
+@pytest.mark.unit
+async def test_post_with_route_shows_elevation_chart_without_tiles(client_with_route):
+    """Elevation profile chart (elevation_profile_chart.md Tier 1) renders
+    even with no tiles_url — gated independently of the map guard, since a
+    route can have elevation data without map tiles configured."""
+    resp = await client_with_route.get("/posts/test-post")
+    assert 'id="elevation-chart"' in resp.text
+    assert "elevation-chart-wrap" in resp.text
+    assert "/static/vendor/chart.js" in resp.text
+    assert "/static/js/elevation-chart.js" in resp.text
+    assert "BULLIEXPLORER_ELEVATION_DATA" in resp.text
+    assert "elevationProfile" in resp.text
+
+
+@pytest.mark.unit
+async def test_post_with_route_no_elevation_data_omits_chart(client_with_route_no_elevation):
+    """A route with elevation_profile=None (GPX had no elevation values)
+    omits the chart entirely — no empty <canvas>, no vendor/behavior
+    script tags loaded for nothing."""
+    resp = await client_with_route_no_elevation.get("/posts/test-post")
+    assert resp.status_code == 200
+    assert 'id="elevation-chart"' not in resp.text
+    assert "elevation-chart-wrap" not in resp.text
+    assert "/static/vendor/chart.js" not in resp.text
+    assert "/static/js/elevation-chart.js" not in resp.text
+
+
 # ---------------------------------------------------------------------------
 # Post detail — route + tiles URL → full map renders
 # ---------------------------------------------------------------------------
@@ -590,6 +648,35 @@ def test_post_map_js_includes_cycling_layers():
     # initial load and the theme-change setStyle rebuild — not replacing
     # basemaps.layers()'s own array.
     assert js.count(".concat(cyclingLayers(") == 2
+
+
+@pytest.mark.unit
+def test_post_map_js_defines_hover_sync_interpolation():
+    """interpolateAlongRoute() (elevation_profile_chart.md Tier 2) exists
+    in post-map.js and is wired to the chart-hover CustomEvents
+    elevation-chart.js dispatches.
+
+    No JS test runner exists in this project (AGENTS.md: no build step,
+    no npm) — tests/unit/test_templates.py's existing convention for this
+    file is reading the static source and asserting structural facts
+    about it (see test_post_map_js_includes_cycling_layers above), which
+    this test follows. The interpolation math itself (midpoint,
+    zero/negative/beyond-total-distance edge cases, multi-segment
+    accumulation) was verified correct via a standalone Node script
+    during development — not part of CI, since this project has no Node
+    runtime dependency anywhere else and shouldn't gain one just for this.
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    assert "function interpolateAlongRoute(coordinates, targetDistanceKm)" in js
+    # Never upsamples/crashes on a degenerate route — explicit guards for
+    # <2 points, zero, and negative distance.
+    assert "coordinates.length < 2" in js
+    assert "targetDistanceKm <= 0" in js
+    # Wired to the events elevation-chart.js dispatches (Tier 2's
+    # "chart leads, map follows" one-way design — map-hover-syncs-chart
+    # is explicitly out of scope per the Tier 2 doc).
+    assert 'addEventListener("bulliexplorer:elevationhover"' in js
+    assert 'addEventListener("bulliexplorer:elevationhoverend"' in js
 
 
 @pytest.mark.unit

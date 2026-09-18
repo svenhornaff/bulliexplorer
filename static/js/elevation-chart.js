@@ -96,6 +96,35 @@
     },
   });
 
+  // Hover → map sync (elevation_profile_chart.md Tier 2). Chart.js's
+  // "index" interaction mode (set in options above) already tells us the
+  // exact nearest-point index per pointer move; onHover reads the same
+  // x value canvas.js's own tooltip uses, so "where the tooltip points"
+  // and "where the map marker lands" always agree. Dispatched as a
+  // CustomEvent on the document rather than calling into post-map.js's
+  // internals directly — the two files are independently loaded <script>
+  // tags with no shared module system (AGENTS.md: no build step), same
+  // reasoning as duplicating routeLineColor() here instead of exporting
+  // it. post-map.js interpolates the distance-km back to a lng/lat along
+  // ROUTE_GEOJSON and shows/hides the marker; this file has no map
+  // knowledge at all, matching its existing "only cares about elevation
+  // data" scope. Map → chart hover sync is explicitly out of scope
+  // (docs/dev/elevation_profile_chart.md Tier 2's scope notes) — this is
+  // a one-way, chart-leads dispatch only.
+  chart.options.onHover = function (_event, activeElements) {
+    if (!activeElements || !activeElements.length) {
+      document.dispatchEvent(new CustomEvent("bulliexplorer:elevationhoverend"));
+      return;
+    }
+    var distanceKm = chart.data.datasets[0].data[activeElements[0].index].x;
+    document.dispatchEvent(
+      new CustomEvent("bulliexplorer:elevationhover", { detail: { distanceKm: distanceKm } }),
+    );
+  };
+  canvas.addEventListener("mouseleave", function () {
+    document.dispatchEvent(new CustomEvent("bulliexplorer:elevationhoverend"));
+  });
+
   // Live theme swap — update in place (chart.update()), not a
   // destroy-and-recreate, same "no reload required" bar post-map.js's
   // basemap/route-line re-theming already meets.
