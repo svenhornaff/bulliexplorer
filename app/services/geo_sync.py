@@ -183,6 +183,18 @@ _MAX_AMENITY_QUERIES: int = 30
 # generous enough that no normal editing workflow hits it more than once.
 _AMENITY_SYNC_COOLDOWN = datetime.timedelta(minutes=15)
 
+# Anti-redundant-work protection (docs/dev/fix_amenity_resync_freshness.md)
+# — distinct from the cooldown above, which is anti-*burst* protection on
+# a much shorter timescale. A route whose amenity data was already
+# attempted recently AND whose geometry hasn't changed since gets skipped
+# here regardless of how long ago the cooldown window itself closed —
+# real-world amenities (campsites, shelters, water points) don't
+# meaningfully change hour to hour, but a route left untouched for months
+# should still eventually re-check rather than trust data forever. Days,
+# not minutes — a project-wide constant, not per-route (see that doc's
+# "Explicitly out of scope").
+_AMENITY_FRESHNESS_WINDOW = datetime.timedelta(days=7)
+
 _KM_PER_DEGREE_LAT: float = 111.0
 
 
@@ -311,6 +323,7 @@ async def sync_route(
     _check_tile_coverage(linestring, post_id, route_fm.name)
 
     if existing is None:
+        now = datetime.datetime.now(datetime.UTC)
         route = Route(
             post_id=post_id,
             name=route_fm.name,
@@ -321,6 +334,9 @@ async def sync_route(
             elevation_loss_m=elevation_loss_m,
             duration_minutes=duration_minutes,
             elevation_profile=elevation_profile,
+            # Initial insert counts as the geometry "just changed" — see
+            # docs/dev/fix_amenity_resync_freshness.md Phase 1.
+            track_updated_at=now,
         )
         session.add(route)
         logger.debug("Inserted Route for post_id=%d", post_id)
@@ -341,11 +357,32 @@ async def sync_route(
                 setattr(existing, attr, value)
                 changed = True
 
-        # Re-parse and compare geometry (WKB bytes may differ on minor
-        # float changes — compare the WKB hex strings as a proxy).
+        # Re-parse and compare geometry. Deliberately compares Shapely's
+        # own `.wkb` on *both* sides (re-hydrating `existing.track` via
+        # `to_shape` first) rather than the columns' raw `str()` forms —
+        # `existing.track` round-trips through PostGIS as EWKB (SRID
+        # embedded in the header, e.g. `0102000020e6100000...`) while a
+        # freshly built `from_shape(...)` is plain WKB with no such header
+        # (e.g. `010200000003000000...`), so those two string forms never
+        # matched even for byte-identical geometry — a real, previously
+        # silent bug that made this branch fire, and rewrite the row, on
+        # every single re-sync regardless of whether the track actually
+        # changed. Comparing via Shapely's own consistent encoding on both
+        # sides is the actual apples-to-apples comparison this was always
+        # meant to be — confirmed necessary while building the amenity
+        # resync freshness check (docs/dev/fix_amenity_resync_freshness.md),
+        # which depends on this branch only firing for genuine geometry
+        # changes.
+        existing_linestring = cast("LineString", to_shape(existing.track))  # type: ignore[arg-type] — WKBElement at runtime
         new_track = from_shape(linestring, srid=4326)
-        if str(existing.track) != str(new_track):
+        if existing_linestring.wkb != linestring.wkb:
             existing.track = new_track  # type: ignore[assignment] — GeoAlchemy2 WKBElement is valid at runtime
+            # Deliberately set only in this branch, not from the broader
+            # `changed` flag above (which also fires for description/name
+            # edits) — a prose-only edit must not look like a geometry
+            # change, or the amenity resync freshness check
+            # (docs/dev/fix_amenity_resync_freshness.md) is defeated.
+            existing.track_updated_at = datetime.datetime.now(datetime.UTC)
             changed = True
 
         if changed:
@@ -555,6 +592,36 @@ async def sync_amenities(
                 route.id,
                 elapsed_since_last,
                 _AMENITY_SYNC_COOLDOWN,
+            )
+            return
+
+        # Freshness check (docs/dev/fix_amenity_resync_freshness.md) — is
+        # the *most recent attempt* (success or failure, same acceptance
+        # as the cooldown above; a route rarely completes every chunk
+        # cleanly, see that doc's "Interaction with partial failures")
+        # both recent enough AND for geometry that hasn't since changed?
+        # `route.track_updated_at` is only ever bumped by a genuine
+        # geometry change (sync_route's track-comparison branch, or
+        # initial insert) — never by a content-only edit — so this can
+        # never mask a real physical-path change, regardless of how the
+        # two timestamps happen to compare.
+        # `track_updated_at` is None only for a row that predates both
+        # this column and its migration backfill (shouldn't happen in
+        # practice — see docs/dev/fix_amenity_resync_freshness.md Phase
+        # 1's backfill) — treated as "unknown, therefore not provably
+        # unchanged" rather than assumed fresh, same conservative default
+        # the backfill itself uses.
+        track_updated_at = route.track_updated_at
+        geometry_unchanged_since_last_sync = (
+            track_updated_at is not None and track_updated_at <= route.amenities_synced_at
+        )
+        is_fresh = geometry_unchanged_since_last_sync and elapsed_since_last < _AMENITY_FRESHNESS_WINDOW
+        if track_updated_at is not None and is_fresh:
+            logger.info(
+                "Amenity data for route_id=%d still fresh (synced %s ago, geometry unchanged since %s ago) — skipping",
+                route.id,
+                elapsed_since_last,
+                now - track_updated_at,
             )
             return
 

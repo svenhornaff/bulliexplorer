@@ -47,3 +47,16 @@ class Route(Base):
     # geo_sync.py's sync_amenities and docs/dev/gis_cycling_upgrade.md's
     # Phase 4 follow-up).
     amenities_synced_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    # Set only when the route's actual *geometry* changes — on initial
+    # insert, and in geo_sync.py's sync_route update branch, only inside
+    # the specific `if str(existing.track) != str(new_track):` comparison,
+    # never by the broader `changed` flag that also fires for
+    # description/name-only edits. Deliberately a separate signal from
+    # `amenities_synced_at` above: this is a "did the physical path move"
+    # marker, that one is a "when did we last ask Overpass about it"
+    # marker — the amenity-resync freshness check (docs/dev/
+    # fix_amenity_resync_freshness.md) compares the two rather than
+    # collapsing them into one flag, so a prose-only edit never looks
+    # like a geometry change and defeats the freshness skip.
+    track_updated_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), default=None)

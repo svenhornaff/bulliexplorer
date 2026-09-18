@@ -13,6 +13,7 @@ Run with: docker compose up -d && uv run pytest tests/integration/ -v
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, patch
@@ -456,6 +457,173 @@ Body.
         route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
         assert route.id == original_route_id, "same row updated, not a new one inserted"
         assert route.elevation_profile is None
+
+
+@pytest.mark.integration
+async def test_track_updated_at_set_on_initial_insert(tmp_path):
+    """A freshly-inserted Route gets track_updated_at populated — the
+    amenity resync freshness check (docs/dev/fix_amenity_resync_freshness.md
+    Phase 1) needs this set from the very first sync, not only from a
+    later update.
+    """
+    before = datetime.datetime.now(datetime.UTC)
+    _write_gpx(tmp_path, "route.gpx")
+    _write_md(
+        tmp_path,
+        "fresh-insert-post.md",
+        """\
+---
+title: Fresh Insert Post
+slug: fresh-insert-post
+date: 2025-06-01
+route:
+  name: Fresh Insert Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await sync_posts(tmp_path, session)
+        await session.commit()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "fresh-insert-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+        assert route.track_updated_at is not None
+        assert route.track_updated_at >= before
+
+
+@pytest.mark.integration
+async def test_track_updated_at_unchanged_on_description_only_edit(tmp_path):
+    """Re-syncing a post with an unchanged GPX but an edited description
+    must leave track_updated_at untouched — a prose-only edit is not a
+    geometry change, and must never look like one to the amenity resync
+    freshness check.
+    """
+    _write_gpx(tmp_path, "route.gpx")
+    md_file = _write_md(
+        tmp_path,
+        "prose-edit-post.md",
+        """\
+---
+title: Prose Edit Post
+slug: prose-edit-post
+date: 2025-06-01
+route:
+  name: Prose Edit Route
+  gpx_file: route.gpx
+  description: Original description.
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await sync_posts(tmp_path, session)
+        await session.commit()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "prose-edit-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+        original_track_updated_at = route.track_updated_at
+        assert original_track_updated_at is not None
+
+    # Content-only edit — same GPX, different description.
+    _write_md(
+        tmp_path,
+        "prose-edit-post.md",
+        """\
+---
+title: Prose Edit Post
+slug: prose-edit-post
+date: 2025-06-01
+route:
+  name: Prose Edit Route
+  gpx_file: route.gpx
+  description: Edited description, no geometry change.
+---
+
+Body.
+""",
+    )
+
+    async with factory() as session:
+        await sync_posts(tmp_path, session)
+        await session.commit()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "prose-edit-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+        assert route.description == "Edited description, no geometry change."
+        assert route.track_updated_at == original_track_updated_at, (
+            "a content-only edit must not touch track_updated_at"
+        )
+
+    assert md_file.exists()
+
+
+@pytest.mark.integration
+async def test_track_updated_at_bumped_on_real_track_change(tmp_path):
+    """Re-syncing a post with an actually-changed GPX track must bump
+    track_updated_at — the signal the amenity resync freshness check
+    relies on to detect a genuine geometry change.
+    """
+    _write_gpx(tmp_path, "route.gpx")
+    _write_md(
+        tmp_path,
+        "track-change-post.md",
+        """\
+---
+title: Track Change Post
+slug: track-change-post
+date: 2025-06-01
+route:
+  name: Track Change Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+    async with factory() as session:
+        await sync_posts(tmp_path, session)
+        await session.commit()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "track-change-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+        original_track_updated_at = route.track_updated_at
+        assert original_track_updated_at is not None
+
+    # Genuinely different track geometry.
+    changed_gpx = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><trkseg>
+    <trkpt lat="49.0" lon="9.0"><ele>100.0</ele></trkpt>
+    <trkpt lat="49.1" lon="9.1"><ele>150.0</ele></trkpt>
+  </trkseg></trk>
+</gpx>
+"""
+    _write_gpx(tmp_path, "route.gpx", content=changed_gpx)
+
+    async with factory() as session:
+        await sync_posts(tmp_path, session)
+        await session.commit()
+
+    async with factory() as session:
+        post = (await session.execute(select(Post).where(Post.slug == "track-change-post"))).scalar_one()
+        route = (await session.execute(select(Route).where(Route.post_id == post.id))).scalar_one()
+        assert route.track_updated_at is not None
+        assert route.track_updated_at > original_track_updated_at, "a real geometry change must bump track_updated_at"
 
 
 @pytest.mark.integration
@@ -918,6 +1086,130 @@ Body.
             (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route_id))).scalars().all()
         )
         assert len(amenities) == 1, "the cooldown-skipped sync must leave the first sync's row untouched"
+
+
+@pytest.mark.integration
+async def test_amenity_freshness_skips_resync_for_unchanged_route_outside_cooldown(tmp_path):
+    """A route synced well outside the 15-minute cooldown window, but
+    whose geometry hasn't changed since, is skipped by the freshness
+    check (docs/dev/fix_amenity_resync_freshness.md Phase 2) — the exact
+    scenario the cooldown alone doesn't catch: a webhook push touching
+    unrelated post content, hours after the route's last sync attempt.
+    """
+    _write_gpx(tmp_path, "route.gpx")
+    _write_md(
+        tmp_path,
+        "freshness-post.md",
+        """\
+---
+title: Freshness Post
+slug: freshness-post
+date: 2025-06-01
+route:
+  name: Freshness Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+    parsed = _parse_element(_OVERPASS_CAMPSITE)
+
+    async with factory() as session:
+        result = await sync_posts(tmp_path, session)
+        await session.commit()
+    route_id = result.amenity_route_ids[0]
+
+    with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
+        mock_query.return_value = [parsed]
+        async with factory() as session:
+            await sync_route_amenities(session, route_id)
+            await session.commit()
+
+        # Push both the last attempt AND the geometry-change timestamp
+        # back by the same 2 hours — well outside the 15-minute cooldown
+        # but still inside the multi-day freshness window, with the
+        # geometry provably unchanged since that sync (a content-only
+        # webhook push hours later, not a rapid burst, and not a real
+        # track edit either).
+        async with factory() as session:
+            route = await session.get(Route, route_id)
+            assert route is not None
+            two_hours_ago = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2)
+            route.amenities_synced_at = two_hours_ago
+            route.track_updated_at = two_hours_ago
+            await session.commit()
+
+        async with factory() as session:
+            await sync_route_amenities(session, route_id)
+            await session.commit()
+
+    assert mock_query.await_count == 1, "freshness must skip the second sync even though the cooldown has elapsed"
+
+    async with factory() as session:
+        amenities = (
+            (await session.execute(select(NearbyAmenity).where(NearbyAmenity.route_id == route_id))).scalars().all()
+        )
+        assert len(amenities) == 1, "the freshness-skipped sync must leave the first sync's row untouched"
+
+
+@pytest.mark.integration
+async def test_amenity_freshness_does_not_skip_after_real_track_change(tmp_path):
+    """A route whose track genuinely changed after its last amenity sync
+    attempt must not be skipped by freshness, even within the freshness
+    window — freshness must never mask a real geometry change.
+    """
+    _write_gpx(tmp_path, "route.gpx")
+    _write_md(
+        tmp_path,
+        "freshness-changed-post.md",
+        """\
+---
+title: Freshness Changed Post
+slug: freshness-changed-post
+date: 2025-06-01
+route:
+  name: Freshness Changed Route
+  gpx_file: route.gpx
+---
+
+Body.
+""",
+    )
+
+    factory = get_session_factory()
+    parsed = _parse_element(_OVERPASS_CAMPSITE)
+
+    async with factory() as session:
+        result = await sync_posts(tmp_path, session)
+        await session.commit()
+    route_id = result.amenity_route_ids[0]
+
+    with patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query:
+        mock_query.return_value = [parsed]
+        async with factory() as session:
+            await sync_route_amenities(session, route_id)
+            await session.commit()
+
+        # Simulate: last sync attempt happened 20 minutes ago (outside
+        # the 15-minute cooldown, so this actually reaches the freshness
+        # check), THEN the route's actual geometry changed just now (a
+        # real GPX re-upload) — track_updated_at strictly after
+        # amenities_synced_at, which must never be treated as fresh.
+        async with factory() as session:
+            route = await session.get(Route, route_id)
+            assert route is not None
+            route.amenities_synced_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=20)
+            route.track_updated_at = datetime.datetime.now(datetime.UTC)
+            await session.commit()
+
+        async with factory() as session:
+            await sync_route_amenities(session, route_id)
+            await session.commit()
+
+    assert mock_query.await_count == 2, "a real geometry change must never be masked by the freshness check"
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ Tests cover the pure helper functions:
 
 from __future__ import annotations
 
+import datetime
 import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -970,3 +971,98 @@ async def test_sync_amenities_no_backoff_without_a_429(monkeypatch):
         await sync_amenities(session=fake_session, route=route, linestring=linestring)
 
     assert _geo_module._RATE_LIMIT_BACKOFF_S not in sleep_calls
+
+
+# ---------------------------------------------------------------------------
+# sync_amenities — freshness check (docs/dev/fix_amenity_resync_freshness.md
+# Phase 2). Distinct from the cooldown tests above: these fabricate a
+# `route.amenities_synced_at` well outside the 15-minute cooldown window
+# but inside the multi-day freshness window, so the assertions below can
+# only pass if the *freshness* check is what's firing, not the cooldown.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_sync_amenities_freshness_skips_when_geometry_unchanged(caplog):
+    """A route synced well outside the cooldown window, but whose
+    geometry has not changed since that sync, and whose sync is still
+    within the freshness window, is skipped — zero Overpass calls — with
+    the distinct freshness log message (not the cooldown one), so log
+    review can tell which check actually fired.
+    """
+    now = datetime.datetime.now(datetime.UTC)
+    last_sync = now - datetime.timedelta(hours=2)  # outside the 15-min cooldown
+    route = Route(id=1, name="Test Route", amenities_synced_at=last_sync, track_updated_at=last_sync)
+    linestring = LineString([(8.0, 48.0), (8.1, 48.1)])
+    fake_session = AsyncMock(spec=AsyncSession)
+
+    with (
+        patch("app.services.geo_sync.query_nearby_amenities", new_callable=AsyncMock) as mock_query,
+        caplog.at_level(logging.INFO),
+    ):
+        await sync_amenities(session=fake_session, route=route, linestring=linestring)
+
+    mock_query.assert_not_awaited()
+    assert any("still fresh" in record.message for record in caplog.records)
+    assert not any("cooldown" in record.message for record in caplog.records)
+
+
+@pytest.mark.unit
+async def test_sync_amenities_freshness_does_not_skip_when_track_changed_after_sync():
+    """A route whose geometry changed (track_updated_at) *after* its last
+    amenity sync attempt must never be skipped by freshness, even when
+    the two timestamps are close together — freshness must never mask a
+    real geometry change.
+    """
+    now = datetime.datetime.now(datetime.UTC)
+    last_sync = now - datetime.timedelta(hours=2)
+    track_changed = last_sync + datetime.timedelta(minutes=1)  # geometry changed just after that sync
+    route = Route(id=1, name="Test Route", amenities_synced_at=last_sync, track_updated_at=track_changed)
+    linestring = LineString([(8.0, 48.0), (8.1, 48.1)])
+    fake_session = AsyncMock(spec=AsyncSession)
+    fake_session.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+    async def _fake_query_nearby_amenities(south, west, north, east, *, http_client=None, result_meta=None, **kwargs):
+        if result_meta is not None:
+            result_meta["served_index"] = 0
+            result_meta["rate_limited"] = False
+        return []
+
+    with patch(
+        "app.services.geo_sync.query_nearby_amenities",
+        side_effect=_fake_query_nearby_amenities,
+    ):
+        await sync_amenities(session=fake_session, route=route, linestring=linestring)
+
+    assert route.amenities_synced_at is not None
+    assert route.amenities_synced_at > last_sync, "a fresh sync attempt must have actually run, not been skipped"
+
+
+@pytest.mark.unit
+async def test_sync_amenities_freshness_does_not_skip_once_window_expires():
+    """A route with unchanged geometry but whose last sync attempt is
+    older than the freshness window must not be skipped — a route left
+    untouched for a long time should still eventually re-check rather
+    than trust stale data forever.
+    """
+    now = datetime.datetime.now(datetime.UTC)
+    last_sync = now - (_geo_module._AMENITY_FRESHNESS_WINDOW + datetime.timedelta(days=1))
+    route = Route(id=1, name="Test Route", amenities_synced_at=last_sync, track_updated_at=last_sync)
+    linestring = LineString([(8.0, 48.0), (8.1, 48.1)])
+    fake_session = AsyncMock(spec=AsyncSession)
+    fake_session.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
+    async def _fake_query_nearby_amenities(south, west, north, east, *, http_client=None, result_meta=None, **kwargs):
+        if result_meta is not None:
+            result_meta["served_index"] = 0
+            result_meta["rate_limited"] = False
+        return []
+
+    with patch(
+        "app.services.geo_sync.query_nearby_amenities",
+        side_effect=_fake_query_nearby_amenities,
+    ):
+        await sync_amenities(session=fake_session, route=route, linestring=linestring)
+
+    assert route.amenities_synced_at is not None
+    assert route.amenities_synced_at > last_sync, "a fresh sync attempt must have actually run, not been skipped"
