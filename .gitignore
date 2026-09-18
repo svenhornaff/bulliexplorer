@@ -37,3 +37,4 @@ build/
 static/pmtiles/
 
 .vscode/*
+.scratch/

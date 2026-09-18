@@ -187,6 +187,12 @@ def create_app() -> FastAPI:
     # sitemap/feed/robots.txt routes' own absolute URLs (via get_settings()
     # directly, not this global).
     app.state.templates.env.globals["site_url"] = settings.site_url
+    # Google Search Console verification meta tag (docs/dev/
+    # seo_search_console_registration.md Phase 1) — same global-not-
+    # threaded-context pattern as site_url above, for the same reason:
+    # every page's <head> needs this, not just specific routes' context
+    # dicts. Empty string when unset renders no tag (see base.html).
+    app.state.templates.env.globals["google_site_verification"] = settings.google_site_verification
 
     # --- Routers -------------------------------------------------------------
     from app.routes.home import router as home_router

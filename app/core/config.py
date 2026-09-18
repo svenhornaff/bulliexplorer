@@ -47,6 +47,16 @@ class Settings(BaseSettings):
     # testing against a different origin if ever needed.
     site_url: str = "https://bulliexplorer.com"
 
+    # Google Search Console site-ownership verification token
+    # (docs/dev/seo_search_console_registration.md Phase 1) — rendered
+    # as a <meta name="google-site-verification"> tag in every page's
+    # <head> when set. Empty by default, same non-required pattern as
+    # sentry_dsn/tiles_url below: this is a public value designed to be
+    # published in HTML (Google's own verification mechanism), not a
+    # secret, and its absence should degrade gracefully (no tag
+    # rendered) rather than crash the app.
+    google_site_verification: str = ""
+
     # --- Database ------------------------------------------------------------
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5433/bulliexplorer"
 

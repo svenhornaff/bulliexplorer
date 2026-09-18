@@ -23,6 +23,12 @@
         {% block og_image %}{% endblock %}
         <meta name="twitter:card"
               content="{% block twitter_card %}summary{% endblock %}" />
+        {% if google_site_verification %}
+            <!-- Google Search Console site-ownership verification
+             (docs/dev/seo_search_console_registration.md Phase 1). -->
+            <meta name="google-site-verification"
+                  content="{{ google_site_verification }}" />
+        {% endif %}
         <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
         <!-- Design system: self-hosted fonts + CSS custom-property tokens.
          Replaces the previous framework-based theme and CDN font/icon
