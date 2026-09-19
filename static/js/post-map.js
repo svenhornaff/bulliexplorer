@@ -381,6 +381,41 @@
     // collide with it), color/halo matched to the native pois.green /
     // earth tokens per flavor so it reads as one coherent label, not a
     // visually distinct bolt-on.
+    //
+    // Regression fix #2, found live in production after the first
+    // regression fix: with the crash resolved, real headless-browser
+    // introspection (queryRenderedFeatures against the real production
+    // page, then isolated by incrementally rebuilding the style from
+    // scratch) found peaks were STILL not rendering — not from the
+    // filter-dialect bug (already fixed), and not an "elevation" vs
+    // "ele" property-name mismatch (checked directly against real
+    // decoded tile bytes for Feldberg/Seebuck/Baldenweger Buck: the
+    // property is genuinely named "elevation" on every real peak
+    // feature checked). The real cause, isolated by testing the stock
+    // vendor style alone (peaks render: 1 result) versus adding this
+    // layer (peaks render: 0 results) with every other addition held
+    // constant: this layer's own presence was winning the MapLibre
+    // collision budget over the native "pois" layer's peak icon+name
+    // for the exact same feature, hiding the more important native
+    // label entirely. First attempted fix: an explicit `symbol-sort-key`
+    // deliberately set slightly worse than the native "pois" layer's
+    // own fallback, on the theory that a numerically higher (lower-
+    // priority) sort-key would make this layer defer to "pois" in any
+    // collision. Tested directly with the same isolated-rebuild method
+    // — disproven: "pois" still rendered 0 peaks with that sort-key in
+    // place, meaning MapLibre's actual cross-layer collision priority
+    // doesn't work the way that theory assumed (no single documented
+    // default/ordering rule for this case, confirmed via web search of
+    // MapLibre's own docs). Correct, verified fix: `text-allow-overlap:
+    // true` + `text-ignore-placement: true` — removes this layer from
+    // the collision system entirely rather than trying to out-rank
+    // "pois" within it. This layer's small elevation text now always
+    // draws unconditionally and can never block (or be blocked by) any
+    // other symbol, matching its "purely additive, supplementary"
+    // design intent exactly — verified with the same isolated-rebuild
+    // method: "pois" back to rendering its peak (1 result, matching the
+    // stock-style baseline), this layer still rendering its own
+    // elevation text (10 results) at the same time.
     function peakElevationLayer(flavor) {
       var textColor = flavor === "dark" ? "#30C573" : "#20834D";
       var haloColor = flavor === "dark" ? "#1f1f1f" : "#e2dfda";
@@ -397,6 +432,8 @@
           "text-size": 10,
           "text-anchor": "top",
           "text-offset": [0, 0.9],
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
         },
         paint: {
           "text-color": textColor,

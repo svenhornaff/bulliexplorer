@@ -748,6 +748,48 @@ def test_post_map_js_includes_peak_elevation_layer():
 
 
 @pytest.mark.unit
+def test_post_map_js_peak_elevation_layer_never_competes_for_collision():
+    """Real regression, found live in production after the filter-
+    dialect crash fix: peaks stopped rendering at all (not just the
+    elevation text — the native "pois" layer's own icon+name label too)
+    once this layer existed at all. Ruled out an "elevation" vs "ele"
+    property-name mismatch by checking real decoded tile bytes for
+    Feldberg/Seebuck/Baldenweger Buck directly (the property genuinely
+    is "elevation"). Isolated the real cause with a real headless
+    browser: rebuilding the style incrementally (stock vendor layers
+    alone render Feldberg's peak; adding this layer makes it disappear,
+    with every other addition held constant) proved this layer's own
+    presence was winning MapLibre's cross-layer collision budget over
+    the native "pois" layer's peak icon+name for the same feature,
+    hiding the more important native label.
+
+    A first attempted fix (an explicit `symbol-sort-key` deliberately
+    set numerically worse than "pois"'s own fallback) was tested with
+    the same method and disproven — MapLibre's cross-layer collision
+    priority didn't behave the way that theory assumed. The verified
+    fix: `text-allow-overlap: true` + `text-ignore-placement: true`,
+    removing this layer from the collision system entirely rather than
+    trying to out-rank "pois" within it — confirmed with the literal
+    extracted function from this file (not a manual reconstruction):
+    "pois" back to rendering its peak, this layer still rendering its
+    own elevation text at the same time.
+
+    Regression guard: both properties must be present together, not
+    just one — either alone leaves this layer partially back in the
+    collision system.
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    start = js.index("function peakElevationLayer(flavor)")
+    end = js.index("\n    }", start)
+    func_body = js[start:end]
+    assert '"text-allow-overlap": true' in func_body, (
+        "must not participate in MapLibre's collision system — confirmed live to "
+        "suppress the native pois layer's own peak icon+name when it does"
+    )
+    assert '"text-ignore-placement": true' in func_body
+
+
+@pytest.mark.unit
 def test_post_map_js_amenity_categories_include_cafe_and_bike_repair_station():
     """cafe/bike_repair_station (fix_peaks_cablecars_amenity_review.md
     Phase 2) have both a marker colour and an icon path — a category

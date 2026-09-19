@@ -272,6 +272,85 @@ string inclusion, nothing novel needed.
   `fix_amenity_force_resync_and_mountain_hut.md`; nothing in this
   review changes that reasoning.
 
+## Regression fix — `peakElevationLayer()` was silently suppressing the native peak label entirely
+
+**Symptom, found by the operator's own real-world comparison**: after
+the companion label-priority doc's fix landed (settlement names now
+rendering correctly, confirming that part worked), peak labels were
+**still genuinely, decisively missing** on a real route passing
+directly through the Feldberg/Seebuck summit area — not the
+elevation-text addition alone; the native icon+name label this doc's
+own Phase 1 said already existed was gone too.
+
+**Hypothesis raised, checked directly, disproven with real data**: a
+property-name mismatch (`elevation` vs OSM's raw `ele` tag). Re-ran
+the exact real tile-inspection method (`pmtiles tile` + `mapbox-
+vector-tile` decode) specifically printing full property lists for
+three real peaks (Feldberg, Seebuck, Baldenweger Buck) — every one
+genuinely has a property literally named `elevation`, not `ele`.
+Hypothesis disproven by direct evidence, not assumed correct or
+incorrect.
+
+**Real root cause, found by isolating the actual live production
+style with a real headless browser**: built the stock, unmodified
+vendor style alone (peaks render correctly: 1 result via
+`queryRenderedFeatures`), then re-added this project's own layers one
+at a time. `cyclingLayers()` and the label-priority split: no effect,
+peaks still render. The moment `peakElevationLayer()` was added: peaks
+dropped to 0 rendered results on the *native* `pois` layer — this
+layer's own presence was winning MapLibre's cross-layer collision
+budget over the native peak icon+name label for the identical
+feature, hiding the more important native label entirely, even though
+the two labels don't visually overlap by design (native is offset
+left/right, this layer's text sits below).
+
+**First attempted fix, tested directly, disproven**: an explicit
+`symbol-sort-key` on this layer, deliberately set numerically worse
+(lower priority) than the native layer's own fallback, on the theory
+that MapLibre's documented "lower sort-key wins" rule would make this
+layer defer. Re-ran the same isolated-rebuild method with that change
+in place — disproven: the native layer still rendered 0 peaks.
+MapLibre's own docs (checked via web search, not assumed) confirm
+there's no single documented default/ordering rule for the omitted-
+sort-key case this bug actually depended on — the theory didn't match
+reality.
+
+**Verified fix**: `"text-allow-overlap": true` + `"text-ignore-
+placement": true` on `peakElevationLayer()`'s layout — removes this
+layer from MapLibre's collision system entirely, rather than trying to
+out-rank the native layer within it. Re-verified with the *literal*
+function extracted from the real fixed file (not a manual
+reconstruction) against the real production page: native `pois` layer
+back to rendering "Feldberg" (1 result, matching the stock-style
+baseline), this layer still rendering its own elevation text (10
+results) at the same time — both working together, as originally
+intended.
+
+**Done when**
+- [x] The reported symptom (peak labels genuinely missing on a real
+  route through Feldberg/Seebuck) no longer reproduces — confirmed
+  with a real headless browser against the real production page and
+  the real, literal fixed function (not a reconstruction).
+- [x] The elevation-property-name hypothesis was checked directly
+  against real data, not left as an open theory either way.
+- [x] A regression test exists that would have caught this —
+  `test_post_map_js_peak_elevation_layer_never_competes_for_collision`
+  — verified it actually fails against the pre-fix code before
+  confirming it passes against the fix.
+- [x] The supplementary elevation text still renders correctly
+  alongside the restored native label, not just "native label back,
+  new feature silently broken instead."
+
+**Testing**: 1 new unit test
+(`test_post_map_js_peak_elevation_layer_never_competes_for_collision`),
+plus real, live headless-browser verification (stock-style baseline,
+incremental isolation across every layer this project adds, and final
+confirmation using the literal extracted function against the real
+production page) — the same higher-rigor approach used for the
+companion doc's filter-dialect crash fix, since this too was a runtime
+rendering behaviour static source-reading alone couldn't have caught
+directly. `make ci`: 407 passed, 96.33% coverage, security clean.
+
 ## Summary
 
 All three parts implemented, each landing at a different confidence
@@ -323,16 +402,29 @@ the one item not yet re-checked post-deploy).
 ## Leftover
 
 - **Live visual confirmation of the peak label and new marker colours
-  in an actual browser wasn't performed** — this project's own stated
-  testing convention for MapLibre-rendering work is "manual/visual
-  only" for the rendering itself (no JS test runner), and that manual
-  step is the operator's own visual check, not something this agent's
-  text-based tools can perform. The structural facts (layer exists,
-  filtered correctly, wired into both style-build call sites, colours/
-  icons present for both new categories) are unit-tested; the actual
-  pixel-level rendering in a real browser against Feldberg's post page
-  is the one remaining manual check, same as every prior MapLibre
-  styling phase in this project.
+  in an actual browser** — update after the regression fix above: this
+  *has* now been done, precisely because the reported symptom forced
+  it. A real headless browser confirmed the native peak label and this
+  layer's own elevation text both render correctly together on the
+  real production page. What's still not verified is the general
+  visual polish/colour-matching quality across every flavor (light/
+  dark) and every marker category, not just the one location this
+  regression happened to be reported against — that broader spot-
+  check remains a manual step.
+- **Regression: `peakElevationLayer()`'s first implementation
+  silently suppressed the native peak label entirely** (see
+  "Regression fix" section above) — an unset `symbol-sort-key`
+  interacting with MapLibre's cross-layer collision system in an
+  undocumented way. Found and fixed after the operator's own real-
+  world comparison caught it, with a disproven property-name
+  hypothesis and a disproven first fix attempt along the way — both
+  checked directly against real data/behaviour rather than assumed.
+  Worth noting for anyone adding another symbol layer that shares a
+  source-layer/anchor point with an existing native layer: don't
+  assume a new symbol layer is automatically "purely additive" just
+  because it doesn't touch the same style properties — check its
+  effect on the native layer's own collision outcome directly, the
+  same way this bug was actually found.
 - **`cafe`/`bike_repair_station` not added to `static/editor/
   config.yml`'s curated-POI dropdown** — this doc's own Phase 2 scope
   only covers the Overpass auto-discovery side (matching exactly what
