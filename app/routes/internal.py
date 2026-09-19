@@ -21,6 +21,7 @@ from app.services.background_sync import schedule_amenity_sync
 from app.services.github_sync import fetch_and_write
 from app.services.post_sync import sync_posts
 from app.utils.log_factory import get_logger
+from app.utils.r2_client import build_r2_client
 
 logger = get_logger(__name__)
 
@@ -160,7 +161,13 @@ async def resync(
     logger.info("Manual resync triggered")
 
     settings = get_settings()
-    result = await sync_posts(content_dir, db, r2_public_url=settings.r2_public_url)
+    result = await sync_posts(
+        content_dir,
+        db,
+        r2_public_url=settings.r2_public_url,
+        s3_client=build_r2_client(settings),
+        s3_bucket=settings.s3_bucket,
+    )
     # get_db_session commits on clean exit — no explicit commit needed here.
 
     amenity_sync_status = "skipped"
@@ -360,7 +367,13 @@ async def github_webhook(
     fetch_counts = await fetch_and_write(**fetch_kwargs)
 
     content_dir = main_module.BASE_DIR / "content" / "posts"
-    result = await sync_posts(content_dir, db, r2_public_url=settings.r2_public_url)
+    result = await sync_posts(
+        content_dir,
+        db,
+        r2_public_url=settings.r2_public_url,
+        s3_client=build_r2_client(settings),
+        s3_bucket=settings.s3_bucket,
+    )
 
     # Same split as the resync endpoint above: respond to GitHub as soon
     # as content sync completes, amenity discovery continues in the

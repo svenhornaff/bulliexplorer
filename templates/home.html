@@ -28,11 +28,15 @@ routes — one van, endless roads.{% endblock %} {% block page_header %}
             <article class="post-hero">
                 <a class="post-hero-link" href="/posts/{{ latest.slug }}">
                     {% if latest.cover_image %}
+                        {# width/height from the actual processed image dimensions
+                           when known (docs/dev/fix_lcp_image_and_static_cache.md
+                           Finding 1) — same 1200x600 fallback as before for a
+                           pre-existing post not yet re-synced since this shipped. #}
                         <img class="post-hero-cover"
                              src="{{ latest.cover_image }}"
                              alt=""
-                             width="1200"
-                             height="600"
+                             width="{{ latest.cover_image_width or 1200 }}"
+                             height="{{ latest.cover_image_height or 600 }}"
                              fetchpriority="high" />
                     {% endif %}
                     <h2 class="post-hero-title">{{ latest.title }}</h2>

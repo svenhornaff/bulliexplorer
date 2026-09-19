@@ -15,7 +15,8 @@
     head %}
     {# Load MapLibre GL CSS only on posts that actually have a map to
 render. #} {% if route_geojson and tiles_url %}
-    <link rel="stylesheet" href="/static/vendor/maplibre-gl.css" />
+    <link rel="stylesheet"
+          href="/static/vendor/maplibre-gl.css?v={{ asset_version }}" />
 {% endif %}
 {# JSON-LD structured data (docs/dev/seo_beyond_basics.md Phase 3) —
        BlogPosting always, Trip layered in only when the post has a
@@ -30,12 +31,12 @@ render. #} {% if route_geojson and tiles_url %}
 {% block page_header %}
 <header class="masthead {% if post.cover_image %}masthead--has-cover{% endif %}">
 {% if post.cover_image %}
-<img class="masthead-cover-img"
-src="{{ post.cover_image }}"
-alt=""
-width="1200"
-height="600"
-fetchpriority="high" />
+{# width/height from the actual processed image dimensions when known
+   (docs/dev/fix_lcp_image_and_static_cache.md Finding 1) — falls back
+   to the same 1200x600 placeholder as before for a pre-existing post
+   that hasn't been re-synced since this shipped (cover_image_width/
+   height NULL), so CLS doesn't regress for that transitional case. #}
+<img class="masthead-cover-img" src="{{ post.cover_image }}" alt="" width="{{ post.cover_image_width or 1200 }}" height="{{ post.cover_image_height or 600 }}" fetchpriority="high" />
 {% endif %}
 <div class="container">
 <div class="post-heading">
@@ -87,9 +88,9 @@ if post.tags %}
 </article>
 {% endblock %} {% block scripts %} {% if route_geojson and tiles_url %} {#
 Vendor JS loaded last — only on posts that actually render a map. #}
-<script src="/static/vendor/maplibre-gl.js"></script>
-<script src="/static/vendor/pmtiles.js"></script>
-<script src="/static/vendor/basemaps.js"></script>
+<script src="/static/vendor/maplibre-gl.js?v={{ asset_version }}"></script>
+<script src="/static/vendor/pmtiles.js?v={{ asset_version }}"></script>
+<script src="/static/vendor/basemaps.js?v={{ asset_version }}"></script>
 <script>
   // Data for static/js/post-map.js (F4, docs/dev/review_17SEP2026.md) —
   // behavior lives in the cacheable static file below; only the data
@@ -107,18 +108,18 @@ Vendor JS loaded last — only on posts that actually render a map. #}
     tilesUrl: {{ tiles_url | tojson }},
   };
 </script>
-<script src="/static/js/post-map.js"></script>
+<script src="/static/js/post-map.js?v={{ asset_version }}"></script>
 {% endif %} {% if route.elevation_profile %} {# Elevation profile chart
 (docs/dev/elevation_profile_chart.md Tier 1) — gated independently of the
 map block above; loaded even on a post whose route has elevation data but
 no map tiles configured. #}
-<script src="/static/vendor/chart.js"></script>
+<script src="/static/vendor/chart.js?v={{ asset_version }}"></script>
 <script>
   window.BULLIEXPLORER_ELEVATION_DATA = {
     elevationProfile: {{ route.elevation_profile | tojson }},
     distanceKm: {{ route.distance_km | tojson }},
   };
 </script>
-<script src="/static/js/elevation-chart.js"></script>
+<script src="/static/js/elevation-chart.js?v={{ asset_version }}"></script>
 {% endif %}
 {% endblock %}

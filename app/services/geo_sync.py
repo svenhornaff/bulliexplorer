@@ -57,6 +57,7 @@ from app.models.point_of_interest import PointOfInterest
 from app.models.post_schema import PoiFrontmatter, RouteFrontmatter
 from app.models.route import Route
 from app.services.overpass import AmenityResult, query_nearby_amenities
+from app.utils.url_safety import is_allowed_r2_host
 
 logger = logging.getLogger(__name__)
 
@@ -1105,43 +1106,14 @@ def _downsample_elevation_profile(
 def _is_allowed_gpx_host(url: str, r2_public_url: str) -> bool:
     """SSRF allowlist check (docs/dev/security_review_owasp.md Phase 1).
 
-    ``RouteFrontmatter.gpx_file`` is a plain string from Markdown
-    frontmatter — before this check existed, an ``http(s)://`` value
-    there was fetched with **no host restriction at all**, meaning
-    whoever can write to ``content/posts/*.md`` could make the server
-    fetch any URL: an internal Docker network address, a cloud metadata
-    endpoint, ``localhost`` on an unexpected port. Restricting fetches to
-    the same host as the configured R2 public URL (the only legitimate
-    source of a remote GPX file, per ``media_storage_r2.md`` Phase 2)
-    closes that off entirely.
-
-    Parameters
-    ----------
-    url:
-        The ``gpx_file`` URL a post's frontmatter asked to fetch.
-    r2_public_url:
-        ``Settings.r2_public_url`` — the only allowed host is this
-        value's own host.
-
-    Returns
-    -------
-    bool
-        ``True`` only when ``r2_public_url`` is non-empty, both URLs have
-        a parseable host, and the two hosts match case-insensitively.
-        **Fails closed**: an unconfigured ``r2_public_url`` (the
-        ``Settings`` default) allows nothing, rather than trusting every
-        host absent an explicit allowlist — the same "absence of a
-        configured trust anchor means deny, not allow" posture
-        ``AGENTS.md``'s "no working defaults for secrets" rule applies to
-        credentials.
+    Thin wrapper kept under this original name/module for backward
+    compatibility with existing call sites/tests — the actual check now
+    lives in :func:`app.utils.url_safety.is_allowed_r2_host`, shared with
+    ``cover_image_sync.py``'s identical need
+    (docs/dev/fix_lcp_image_and_static_cache.md Finding 1) rather than a
+    second, subtly-different reimplementation.
     """
-    if not r2_public_url:
-        return False
-    allowed_host = urlparse(r2_public_url).hostname
-    actual_host = urlparse(url).hostname
-    if not allowed_host or not actual_host:
-        return False
-    return actual_host.lower() == allowed_host.lower()
+    return is_allowed_r2_host(url, r2_public_url)
 
 
 async def _fetch_gpx_over_http(

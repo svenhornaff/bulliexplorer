@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -21,8 +22,28 @@ from app.core.db import (
 from app.services.background_sync import cancel_amenity_sync_tasks, schedule_amenity_sync
 from app.services.post_sync import SyncResult, sync_posts
 from app.utils.log_factory import configure_logging, get_logger
+from app.utils.r2_client import build_r2_client
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Static assets version-stamped with ?v= (docs/dev/fix_lcp_image_and_
+# static_cache.md Finding 2) — every CSS/JS reference in templates that
+# gets this suffix. Deliberately just the specific files actually
+# referenced from HTML <link>/<script> tags, not every file under
+# static/ recursively — e.g. fonts (referenced from *inside* theme.css
+# via @font-face, not from a template) aren't in this list; see the
+# doc's own Leftover for why that's a deliberate scope decision, not an
+# oversight.
+_VERSIONED_ASSET_PATHS = (
+    "theme.css",
+    "vendor/maplibre-gl.css",
+    "vendor/maplibre-gl.js",
+    "vendor/pmtiles.js",
+    "vendor/basemaps.js",
+    "js/post-map.js",
+    "vendor/chart.js",
+    "js/elevation-chart.js",
+)
 logger = get_logger(__name__)
 
 # Arbitrary fixed key for the startup-sync advisory lock (F5,
@@ -123,13 +144,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # other worker sees it already held and skips straight through with
     # an empty SyncResult (no amenity_route_ids, so it schedules no
     # redundant amenity-discovery task either).
+    # Cover image processing (docs/dev/fix_lcp_image_and_static_cache.md
+    # Finding 1) stays inline/blocking here too, unlike amenity discovery
+    # — a fundamentally different performance profile: amenity discovery
+    # is *iterative*, rate-limited Overpass calls that can take minutes
+    # for a route with many chunks; cover image processing is a single
+    # fetch+resize+upload per post, and idempotent-skips entirely (zero
+    # network calls) for the common case of an unchanged cover_image on
+    # every deploy after the first. Only a genuinely new/changed cover
+    # image costs anything, and that cost is a few seconds, not minutes.
     content_dir = BASE_DIR / "content" / "posts"
     session_factory = get_session_factory()
+    r2_client = build_r2_client(settings)
     async with session_factory() as session:
         acquired_lock = await try_acquire_advisory_lock(session, _STARTUP_SYNC_LOCK_KEY)
         if acquired_lock:
             try:
-                result = await sync_posts(content_dir, session, r2_public_url=settings.r2_public_url)
+                result = await sync_posts(
+                    content_dir,
+                    session,
+                    r2_public_url=settings.r2_public_url,
+                    s3_client=r2_client,
+                    s3_bucket=settings.s3_bucket,
+                )
                 await session.commit()
             finally:
                 await release_advisory_lock(session, _STARTUP_SYNC_LOCK_KEY)
@@ -151,6 +188,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await dispose_engine()
 
 
+def _compute_asset_version(static_dir: Path) -> str:
+    """Short content hash over every versioned static asset's bytes.
+
+    docs/dev/fix_lcp_image_and_static_cache.md Finding 2. Computed once,
+    at process start, from the files' actual content — not the git
+    commit SHA (which the doc offers as an alternative): a content hash
+    changes the instant a versioned file's bytes change, including
+    mid-development with `--reload` before anything is committed,
+    whereas a SHA only changes on a real commit. Requires zero new
+    deploy-pipeline plumbing (no build-arg threading through Dockerfile/
+    docker-compose.prod.yml) — entirely self-contained here, consistent
+    with this project's "no build step" architecture.
+
+    Missing files (e.g. in a minimal test fixture directory) degrade to
+    hashing whatever *does* exist rather than raising — a version string
+    still needs to exist even in an unusual environment; it just won't
+    change when a missing file would have.
+    """
+    digest = hashlib.sha256()
+    for rel_path in _VERSIONED_ASSET_PATHS:
+        path = static_dir / rel_path
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            continue
+    return digest.hexdigest()[:10]
+
+
 def create_app() -> FastAPI:
     """Application factory."""
     settings = get_settings()
@@ -165,18 +230,36 @@ def create_app() -> FastAPI:
     # --- Static files & templates -------------------------------------------
     app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
+    # docs/dev/fix_lcp_image_and_static_cache.md Finding 2 — the single
+    # source of truth for every versioned static asset's ?v= suffix,
+    # exposed as a Jinja global the same way site_url/google_site_
+    # verification already are below.
+    asset_version = _compute_asset_version(BASE_DIR / "static")
+
     # StaticFiles doesn't set Cache-Control on its own — only ETag/
     # Last-Modified, so browsers fall back to heuristic caching (which can
     # hold a stale CSS/JS file indefinitely with no revalidation, notably
-    # in Safari). `no-cache` forces a conditional GET on every request;
-    # ETag/Last-Modified are already there, so an unchanged file gets a
-    # cheap 304, and a changed one (right after a deploy) is never served
-    # stale.
+    # in Safari). `no-cache` used to be unconditional here — correct but
+    # meant *every* request revalidated via a conditional GET, even for a
+    # vendored library that hadn't changed in weeks (the doc's own
+    # "efficient cache lifetimes" finding, the single largest saving on
+    # the whole PageSpeed report). A request carrying a ?v= query
+    # parameter is safe to cache aggressively and immutably: a changed
+    # asset gets a new URL the instant its content changes (via
+    # asset_version above), so nothing stale can ever be served under an
+    # old URL — the staleness bug becomes structurally impossible rather
+    # than something a short cache lifetime protects against reactively.
+    # `no-cache` stays the fallback for any request without one (a direct
+    # hit on a static path, or an asset deliberately left unversioned —
+    # see the doc's Leftover for what's still unversioned and why).
     @app.middleware("http")
     async def _static_cache_headers(request, call_next):  # noqa: ANN001, ANN202 — Starlette's own untyped middleware signature
         response = await call_next(request)
         if request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = "no-cache"
+            if "v" in request.query_params:
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                response.headers["Cache-Control"] = "no-cache"
         return response
 
     # Store templates on app.state so routes can access them
@@ -193,6 +276,10 @@ def create_app() -> FastAPI:
     # every page's <head> needs this, not just specific routes' context
     # dicts. Empty string when unset renders no tag (see base.html).
     app.state.templates.env.globals["google_site_verification"] = settings.google_site_verification
+    # docs/dev/fix_lcp_image_and_static_cache.md Finding 2 — every
+    # versioned static asset reference in templates appends
+    # ?v={{ asset_version }}, computed once above.
+    app.state.templates.env.globals["asset_version"] = asset_version
 
     # --- Routers -------------------------------------------------------------
     from app.routes.home import router as home_router

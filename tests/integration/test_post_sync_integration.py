@@ -262,3 +262,116 @@ async def test_multiple_posts_all_upserted(tmp_path):
 
     slugs = {r.slug for r in rows}
     assert slugs == {"test-ride", "second-ride"}
+
+
+# ---------------------------------------------------------------------------
+# Cover image processing (docs/dev/fix_lcp_image_and_static_cache.md
+# Finding 1) — the full sync_posts() → DB round-trip, real Postgres
+# columns, not just resolve_cover_image()'s own unit-tested logic in
+# isolation. httpx and boto3 are still mocked (AGENTS.md: no real R2 in
+# tests) — this test's job is proving the DB columns/wiring are correct
+# end to end, not re-proving resolve_cover_image()'s own behaviour.
+# ---------------------------------------------------------------------------
+
+COVER_IMAGE_POST = """\
+---
+title: Cover Image Ride
+slug: cover-image-ride
+date: 2025-08-01
+cover_image: https://pub-example.r2.dev/media/cover.jpg
+---
+
+A post with a real cover image.
+"""
+
+
+def _make_jpeg_bytes() -> bytes:
+    import io
+
+    from PIL import Image
+
+    img = Image.new("RGB", (2000, 1000), color=(60, 90, 130))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return buf.getvalue()
+
+
+@pytest.mark.integration
+async def test_sync_posts_processes_cover_image_into_real_db_columns(tmp_path):
+    """A post with a cover_image gets it fetched, resized/converted, and
+    the real Postgres row ends up with cover_image (the served/processed
+    URL), cover_image_source_url (the raw frontmatter value), and real
+    width/height — not just what resolve_cover_image() returns in
+    isolation (already covered by tests/unit/test_cover_image_sync.py).
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    _write_md(tmp_path, "cover-image-ride.md", COVER_IMAGE_POST)
+
+    fake_response = MagicMock()
+    fake_response.content = _make_jpeg_bytes()
+    fake_response.raise_for_status = MagicMock()
+    fake_client = AsyncMock()
+    fake_client.get = AsyncMock(return_value=fake_response)
+    fake_client.aclose = AsyncMock()
+
+    s3_client = MagicMock()
+
+    factory = get_session_factory()
+    async with factory() as session:
+        with patch("app.services.cover_image_sync.httpx.AsyncClient", return_value=fake_client):
+            counts = await sync_posts(
+                tmp_path,
+                session,
+                r2_public_url="https://pub-example.r2.dev",
+                s3_client=s3_client,
+                s3_bucket="bulliexplorer",
+            )
+        await session.commit()
+
+    assert counts.upserted == 1
+    s3_client.put_object.assert_called_once()
+
+    async with factory() as session:
+        result = await session.execute(select(Post).where(Post.slug == "cover-image-ride"))
+        post = result.scalar_one_or_none()
+
+    assert post is not None
+    assert post.cover_image_source_url == "https://pub-example.r2.dev/media/cover.jpg"
+    assert post.cover_image is not None
+    assert post.cover_image.startswith("https://pub-example.r2.dev/media/processed/cover-image-ride-")
+    assert post.cover_image_width == 1800  # MAX_COVER_WIDTH
+    assert post.cover_image_height == 900
+
+
+@pytest.mark.integration
+async def test_sync_posts_reruns_skip_unchanged_cover_image(tmp_path):
+    """Re-running sync_posts with the same file must not re-fetch/re-
+    upload the cover image — the idempotency check works through the
+    real DB round-trip, not just resolve_cover_image() called once.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    _write_md(tmp_path, "cover-image-ride.md", COVER_IMAGE_POST)
+
+    fake_response = MagicMock()
+    fake_response.content = _make_jpeg_bytes()
+    fake_response.raise_for_status = MagicMock()
+    fake_client = AsyncMock()
+    fake_client.get = AsyncMock(return_value=fake_response)
+    fake_client.aclose = AsyncMock()
+    s3_client = MagicMock()
+
+    factory = get_session_factory()
+    with patch("app.services.cover_image_sync.httpx.AsyncClient", return_value=fake_client):
+        async with factory() as session:
+            await sync_posts(tmp_path, session, r2_public_url="https://pub-example.r2.dev", s3_client=s3_client)
+            await session.commit()
+
+        # Second sync, same unchanged file — must not fetch/upload again.
+        async with factory() as session:
+            await sync_posts(tmp_path, session, r2_public_url="https://pub-example.r2.dev", s3_client=s3_client)
+            await session.commit()
+
+    assert fake_client.get.await_count == 1, "cover image must only be fetched once across two identical syncs"
+    assert s3_client.put_object.call_count == 1

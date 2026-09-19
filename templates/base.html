@@ -33,7 +33,9 @@
         <!-- Design system: self-hosted fonts + CSS custom-property tokens.
          Replaces the previous framework-based theme and CDN font/icon
          scripts (Phase 1, docs/dev/ui_ux_refresh.md). -->
-        <link href="/static/theme.css" rel="stylesheet" />
+        {# ?v= (docs/dev/fix_lcp_image_and_static_cache.md Finding 2) —
+           see app/main.py's asset_version Jinja global for what this is. #}
+        <link href="/static/theme.css?v={{ asset_version }}" rel="stylesheet" />
         <!-- No-flash theme pre-paint (Phase 2, §5.4): read the persisted choice
          (or fall back to the OS preference) and set data-theme before the
          browser paints anything, so there is no light->dark flash on load.

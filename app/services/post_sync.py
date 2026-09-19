@@ -20,7 +20,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
+import httpx
 import yaml
 from pydantic import ValidationError
 from sqlalchemy import delete, select
@@ -30,6 +32,7 @@ from app.models.point_of_interest import PointOfInterest
 from app.models.post import Post
 from app.models.post_schema import PostFrontmatter
 from app.models.route import Route
+from app.services.cover_image_sync import resolve_cover_image
 from app.services.geo_sync import sync_pois, sync_route
 from app.services.post_blocks import build_body_blocks
 from app.utils.log_factory import get_logger
@@ -71,6 +74,8 @@ async def sync_posts(
     session: AsyncSession,
     *,
     r2_public_url: str = "",
+    s3_client: Any = None,
+    s3_bucket: str = "bulliexplorer",
 ) -> SyncResult:
     """Reconcile ``content_dir/*.md`` files with the ``posts`` table.
 
@@ -99,6 +104,20 @@ async def sync_posts(
         ``""``, which allows no remote GPX fetch at all — callers that
         want R2-hosted GPX files to actually resolve must pass the real
         configured value.
+    s3_client:
+        A boto3 S3 client already configured for the R2 endpoint (see
+        ``scripts/backup_db.py``'s own client-construction pattern), or
+        ``None`` (the default) — threaded down to :func:`_upsert_post` /
+        :func:`app.services.cover_image_sync.resolve_cover_image` for
+        cover-image processing (docs/dev/fix_lcp_image_and_static_cache.md
+        Finding 1). ``None`` degrades to serving each post's
+        ``cover_image`` frontmatter value unprocessed — the same
+        graceful-degradation posture as every other missing-credential
+        path in this codebase, not a crash.
+    s3_bucket:
+        The bucket to upload processed cover images into. Defaults to
+        ``"bulliexplorer"``, matching ``Settings.s3_bucket``'s own
+        default.
 
     Returns
     -------
@@ -123,7 +142,7 @@ async def sync_posts(
 
     # ── 2. Upsert all successfully parsed posts ──────────────────────────────
     for _slug, pp in parsed.items():
-        post = await _upsert_post(session, pp)
+        post = await _upsert_post(session, pp, r2_public_url=r2_public_url, s3_client=s3_client, s3_bucket=s3_bucket)
         # Flush so ``post.id`` is available for FK references in geo rows.
         await session.flush()
         route_id = await sync_route(
@@ -227,8 +246,31 @@ def _parse_file(path: Path) -> _ParsedPost | None:
 # ---------------------------------------------------------------------------
 
 
-async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> Post:
+async def _upsert_post(
+    session: AsyncSession,
+    pp: _ParsedPost,
+    *,
+    r2_public_url: str = "",
+    s3_client: Any = None,
+    s3_bucket: str = "bulliexplorer",
+    http_client: httpx.AsyncClient | None = None,
+) -> Post:
     """Insert or update a single post row by slug.
+
+    Cover image processing (docs/dev/fix_lcp_image_and_static_cache.md
+    Finding 1) happens here, before the row is written, so both the
+    insert and update paths store the *resolved* (possibly processed)
+    values in one place rather than duplicating the logic across both
+    branches.
+
+    Parameters
+    ----------
+    r2_public_url, s3_client, s3_bucket, http_client:
+        Threaded straight through to
+        :func:`app.services.cover_image_sync.resolve_cover_image` — see
+        that function's own docstring. ``s3_client=None`` (the default)
+        degrades to serving ``fm.cover_image`` unprocessed, the same as
+        every other missing-credential path in this codebase.
 
     Returns
     -------
@@ -242,6 +284,19 @@ async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> Post:
 
     tags_str = ",".join(fm.tags) if fm.tags else None
 
+    cover = await resolve_cover_image(
+        slug=fm.slug,
+        new_source_url=fm.cover_image,
+        existing_source_url=existing.cover_image_source_url if existing else None,
+        existing_served_url=existing.cover_image if existing else None,
+        existing_width=existing.cover_image_width if existing else None,
+        existing_height=existing.cover_image_height if existing else None,
+        r2_public_url=r2_public_url,
+        s3_client=s3_client,
+        s3_bucket=s3_bucket,
+        http_client=http_client,
+    )
+
     if existing is None:
         post = Post(
             slug=fm.slug,
@@ -250,7 +305,10 @@ async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> Post:
             body_markdown=pp.body_markdown,
             published_date=fm.published_date,
             tags=tags_str,
-            cover_image=fm.cover_image,
+            cover_image=cover.served_url,
+            cover_image_source_url=cover.source_url,
+            cover_image_width=cover.width,
+            cover_image_height=cover.height,
             is_draft=fm.draft,
         )
         session.add(post)
@@ -266,7 +324,10 @@ async def _upsert_post(session: AsyncSession, pp: _ParsedPost) -> Post:
             "body_markdown": pp.body_markdown,
             "published_date": fm.published_date,
             "tags": tags_str,
-            "cover_image": fm.cover_image,
+            "cover_image": cover.served_url,
+            "cover_image_source_url": cover.source_url,
+            "cover_image_width": cover.width,
+            "cover_image_height": cover.height,
             "is_draft": fm.draft,
         }
         for attr, value in fields.items():
