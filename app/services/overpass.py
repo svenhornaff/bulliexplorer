@@ -113,10 +113,30 @@ _TAG_TO_CATEGORY: dict[tuple[str, str], str] = {
     # was never actually fetched by the auto-discovery query below — a
     # real gap in the auto-discovered set, not a missing frontend
     # feature. amenity=restaurant is OSM's standard tag for a
-    # sit-down restaurant; amenity=fast_food and amenity=cafe are
-    # deliberately separate OSM tags for a different kind of place and
-    # stay out of scope (see that doc's Leftover).
+    # sit-down restaurant. amenity=fast_food stays out of scope.
     ("amenity", "restaurant"): "restaurant",
+    # Cafe (docs/dev/fix_peaks_cablecars_amenity_review.md Phase 2) —
+    # that doc's own prior comment above said cafe "stays out of
+    # scope" alongside fast_food; revisited specifically for cafe, not
+    # both, with real reasoning: a coffee/pastry stop is arguably more
+    # relevant to a typical touring day than a sit-down restaurant
+    # (shorter, more frequent), and distinct enough to warrant its own
+    # category rather than folding into "restaurant". fast_food remains
+    # deliberately excluded — restaurant + cafe already cover "sit-down
+    # meal" and "quick stop"; a third, narrower sustenance category
+    # trades category clarity for completeness (see that doc's
+    # Explicitly-deferred section).
+    ("amenity", "cafe"): "cafe",
+    # Public bicycle repair station (docs/dev/
+    # fix_peaks_cablecars_amenity_review.md Phase 2) — genuinely new,
+    # no overlap with bike_shop: amenity=bicycle_repair_station is OSM's
+    # tag for a free, public, unstaffed tools+pump stand; bike_shop
+    # (shop=bicycle below) is a commercial business. Kept as a distinct
+    # category value (not folded into bike_shop) since they answer a
+    # different practical question — "where can I fix my bike myself
+    # for free" vs. "where's a shop" — even though they share a visual
+    # family in post-map.js.
+    ("amenity", "bicycle_repair_station"): "bike_repair_station",
 }
 
 
@@ -145,7 +165,7 @@ def _build_query(south: float, west: float, north: float, east: float) -> str:
         f"[out:json][timeout:{_OVERPASS_QL_TIMEOUT_S}];"
         "("
         f'nwr["tourism"~"^(camp_site|wilderness_hut)$"]({bbox});'
-        f'nwr["amenity"~"^(shelter|drinking_water|fuel|restaurant)$"]({bbox});'
+        f'nwr["amenity"~"^(shelter|drinking_water|fuel|restaurant|cafe|bicycle_repair_station)$"]({bbox});'
         f'nwr["shop"="bicycle"]({bbox});'
         ");"
         "out tags center;"

@@ -43,10 +43,21 @@
       campsite:    "#4CAF50",  // green
       shelter:     "#795548",  // brown
       restaurant:  "#FF9800",  // orange
+      // cafe (fix_peaks_cablecars_amenity_review.md Phase 2) — shares
+      // restaurant's colour: same "food-related stop" visual family,
+      // distinguished by name/popup rather than a wholly new colour,
+      // same principle already applied to wilderness_hut->shelter.
+      cafe:        "#FF9800",  // orange, same as restaurant
       hotel:       "#2196F3",  // blue
       gas_station: "#9C27B0",  // purple
       viewpoint:   "#00BCD4",  // cyan
       bike_shop:   "#F44336",  // red
+      // bike_repair_station (fix_peaks_cablecars_amenity_review.md
+      // Phase 2) — shares bike_shop's colour, same reasoning as cafe
+      // above: a free public repair stand and a commercial bike shop
+      // are distinct categories (kept as separate NearbyAmenity rows,
+      // separate popup text) but the same visual family.
+      bike_repair_station: "#F44336",  // red, same as bike_shop
       water_point: "#03A9F4",  // light-blue
       other:       "#607D8B",  // slate
     };
@@ -68,6 +79,8 @@
       viewpoint:   "M6.02,8.425a2.3859,2.3859,0,0,0-.46.44l-4.55-3.5a7.9976,7.9976,0,0,1,1.51-1.51Zm6.46-4.56-3.5,4.55a2.3971,2.3971,0,0,1,.45.45l4.56-3.5A7.945,7.945,0,0,0,12.48,3.865ZM7.3042,10.0129a1.5,1.5,0,1,0,1.6829,1.2914h0A1.5,1.5,0,0,0,7.3042,10.0129ZM6.43,2.235a7.9329,7.9329,0,0,0-2.06.55l2.2,5.32a2.0438,2.0438,0,0,1,.61-.17Zm2.14.01-.75,5.69a2.49,2.49,0,0,1,.61.16l2.2-5.3A7.2129,7.2129,0,0,0,8.57,2.245Z",
       bike_shop:   "M7.5,2c-0.6761-0.01-0.6761,1.0096,0,1H9v1.2656l-2.8027,2.334L5.2226,4H5.5c0.6761,0.01,0.6761-1.0096,0-1h-2c-0.6761-0.01-0.6761,1.0096,0,1h0.6523L5.043,6.375C4.5752,6.1424,4.0559,6,3.5,6C1.5729,6,0,7.5729,0,9.5S1.5729,13,3.5,13S7,11.4271,7,9.5c0-0.6699-0.2003-1.2911-0.5293-1.8242L9.291,5.3262l0.4629,1.1602C8.7114,7.0937,8,8.2112,8,9.5c0,1.9271,1.5729,3.5,3.5,3.5S15,11.4271,15,9.5S13.4271,6,11.5,6c-0.2831,0-0.5544,0.0434-0.8184,0.1074L10,4.4023V2.5c0-0.2761-0.2239-0.5-0.5-0.5H7.5z M3.5,7c0.5923,0,1.1276,0.2119,1.5547,0.5527l-1.875,1.5625c-0.5109,0.4273,0.1278,1.1945,0.6406,0.7695l1.875-1.5625C5.8835,8.674,6,9.0711,6,9.5C6,10.8866,4.8866,12,3.5,12S1,10.8866,1,9.5S2.1133,7,3.5,7L3.5,7z M11.5,7C12.8866,7,14,8.1134,14,9.5S12.8866,12,11.5,12S9,10.8866,9,9.5c0-0.877,0.4468-1.6421,1.125-2.0879l0.9102,2.2734c0.246,0.6231,1.1804,0.2501,0.9297-0.3711l-0.9082-2.2695C11.2009,7.0193,11.3481,7,11.5,7L11.5,7z",
       water_point: "M6,1A2,2,0,0,0,4,3V6.5a.5.5,0,0,0,.5.5h2A.5.5,0,0,0,7,6.5v-2A.5.5,0,0,1,7.5,4H14V1ZM7,15H4a.5.5,0,0,1-.48-.38L2,8.62a.5.5,0,0,1,.365-.606A.558.558,0,0,1,2.5,8h6a.5.5,0,0,1,.514.485A.47.47,0,0,1,9,8.62l-1.5,6A.5.5,0,0,1,7,15ZM3.65,11H7.36l.5-2H3.14Z",
+      cafe:        "M3.5,0l-1,5.5c-0.1464,0.805,1.7815,1.181,1.75,2L4,14c-0.0384,0.9993,1,1,1,1s1.0384-0.0007,1-1L5.75,7.5c-0.0314-0.8176,1.7334-1.1808,1.75-2L6.5,0H6l0.25,4L5.5,4.5L5.25,0h-0.5L4.5,4.5L3.75,4L4,0H3.5z M12,0c-0.7364,0-1.9642,0.6549-2.4551,1.6367C9.1358,2.3731,9,4.0182,9,5v2.5c0,0.8182,1.0909,1,1.5,1L10,14c-0.0905,0.9959,1,1,1,1s1,0,1-1V0z",
+      bike_repair_station: "M7.5,2c-0.6761-0.01-0.6761,1.0096,0,1H9v1.2656l-2.8027,2.334L5.2226,4H5.5c0.6761,0.01,0.6761-1.0096,0-1h-2c-0.6761-0.01-0.6761,1.0096,0,1h0.6523L5.043,6.375C4.5752,6.1424,4.0559,6,3.5,6C1.5729,6,0,7.5729,0,9.5S1.5729,13,3.5,13S7,11.4271,7,9.5c0-0.6699-0.2003-1.2911-0.5293-1.8242L9.291,5.3262l0.4629,1.1602C8.7114,7.0937,8,8.2112,8,9.5c0,1.9271,1.5729,3.5,3.5,3.5S15,11.4271,15,9.5S13.4271,6,11.5,6c-0.2831,0-0.5544,0.0434-0.8184,0.1074L10,4.4023V2.5c0-0.2761-0.2239-0.5-0.5-0.5H7.5z M3.5,7c0.5923,0,1.1276,0.2119,1.5547,0.5527l-1.875,1.5625c-0.5109,0.4273,0.1278,1.1945,0.6406,0.7695l1.875-1.5625C5.8835,8.674,6,9.0711,6,9.5C6,10.8866,4.8866,12,3.5,12S1,10.8866,1,9.5S2.1133,7,3.5,7L3.5,7z M11.5,7C12.8866,7,14,8.1134,14,9.5S12.8866,12,11.5,12S9,10.8866,9,9.5c0-0.877,0.4468-1.6421,1.125-2.0879l0.9102,2.2734c0.246,0.6231,1.1804,0.2501,0.9297-0.3711l-0.9082-2.2695C11.2009,7.0193,11.3481,7,11.5,7L11.5,7z",
     };
 
     // Builds a "colored circle, white glyph" marker element — falls back
@@ -264,6 +277,54 @@
       ];
     }
 
+    // Peak elevation labels (fix_peaks_cablecars_amenity_review.md
+    // Phase 1). Real tile inspection (pmtiles tile + mapbox-vector-tile
+    // decode, z14 over Feldberg) found peaks live on the "pois"
+    // source-layer as kind="peak", NOT a "physical_point" layer as the
+    // doc's initial research assumed — that layer doesn't exist in this
+    // basemap's actual schema at all (confirmed vector_layers list:
+    // boundaries, buildings, earth, landcover, landuse, places, pois,
+    // roads, water). Feldberg's own peak feature: elevation 1494,
+    // min_zoom 12 — real data, not assumed.
+    //
+    // basemaps.layers()'s own built-in "pois" symbol layer (light/dark
+    // flavors only — white/grayscale/black have no pois color palette)
+    // already renders a peak icon + name label for kind="peak", shared
+    // with ~30 other POI kinds in one layer. Deliberately NOT
+    // duplicating that icon/name/halo/zoom-fade logic in a second full
+    // peak layer (would risk visually diverging from the other 30 kinds
+    // sharing the native layer, and double-render a name label already
+    // shown). This layer is purely additive: elevation text only,
+    // positioned below the native icon+name (native uses a horizontal
+    // left/right text-offset, so a below-anchored addition doesn't
+    // collide with it), color/halo matched to the native pois.green /
+    // earth tokens per flavor so it reads as one coherent label, not a
+    // visually distinct bolt-on.
+    function peakElevationLayer(flavor) {
+      var textColor = flavor === "dark" ? "#30C573" : "#20834D";
+      var haloColor = flavor === "dark" ? "#1f1f1f" : "#e2dfda";
+      return {
+        id: "peak-elevation-labels",
+        type: "symbol",
+        source: "protomaps",
+        "source-layer": "pois",
+        minzoom: 11,
+        filter: ["all", ["==", ["get", "kind"], "peak"], ["has", "elevation"]],
+        layout: {
+          "text-field": ["concat", ["get", "elevation"], " m"],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 10,
+          "text-anchor": "top",
+          "text-offset": [0, 0.9],
+        },
+        paint: {
+          "text-color": textColor,
+          "text-halo-color": haloColor,
+          "text-halo-width": 1,
+        },
+      };
+    }
+
     const flavor = currentFlavor();
     const ROUTE_LINE_COLOR = routeLineColor(flavor);
 
@@ -285,7 +346,8 @@
         },
         layers: basemaps
           .layers("protomaps", basemaps.namedFlavor(flavor), { lang: "de" })
-          .concat(cyclingLayers(flavor)),
+          .concat(cyclingLayers(flavor))
+          .concat([peakElevationLayer(flavor)]),
       },
       // Rough centre — overridden once the map loads and fits to the route.
       center: [8.1, 48.1],
@@ -704,7 +766,8 @@
             },
           },
           layers: basemaps.layers("protomaps", basemaps.namedFlavor(nextFlavor), { lang: "de" })
-            .concat(cyclingLayers(nextFlavor)),
+            .concat(cyclingLayers(nextFlavor))
+            .concat([peakElevationLayer(nextFlavor)]),
         },
         {
           // transformStyle carries the route source/layers over from the

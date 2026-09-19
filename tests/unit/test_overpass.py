@@ -122,6 +122,22 @@ _RESTAURANT_NODE = {
     "tags": {"amenity": "restaurant", "name": "Test Restaurant"},
 }
 
+_CAFE_NODE = {
+    "type": "node",
+    "id": 790,
+    "lat": 48.08,
+    "lon": 8.15,
+    "tags": {"amenity": "cafe", "name": "Test Cafe"},
+}
+
+_BIKE_REPAIR_STATION_NODE = {
+    "type": "node",
+    "id": 791,
+    "lat": 48.09,
+    "lon": 8.16,
+    "tags": {"amenity": "bicycle_repair_station", "name": "Test Repair Stand"},
+}
+
 
 # ---------------------------------------------------------------------------
 # _build_query
@@ -145,6 +161,8 @@ def test_build_query_includes_all_target_tags():
     assert "drinking_water" in query
     assert "fuel" in query
     assert "restaurant" in query
+    assert "cafe" in query
+    assert "bicycle_repair_station" in query
     assert '"shop"="bicycle"' in query
 
 
@@ -193,6 +211,41 @@ def test_parse_element_restaurant_maps_to_restaurant_category():
         lat=48.07,
         lon=8.14,
         tags={"amenity": "restaurant", "name": "Test Restaurant"},
+    )
+
+
+@pytest.mark.unit
+def test_parse_element_cafe_maps_to_cafe_category():
+    """amenity=cafe (docs/dev/fix_peaks_cablecars_amenity_review.md
+    Phase 2) is a tracked category, distinct from restaurant."""
+    result = _parse_element(_CAFE_NODE)
+    assert result == AmenityResult(
+        osm_element_type="node",
+        osm_element_id=790,
+        category="cafe",
+        name="Test Cafe",
+        lat=48.08,
+        lon=8.15,
+        tags={"amenity": "cafe", "name": "Test Cafe"},
+    )
+
+
+@pytest.mark.unit
+def test_parse_element_bicycle_repair_station_maps_to_bike_repair_station_category():
+    """amenity=bicycle_repair_station (docs/dev/
+    fix_peaks_cablecars_amenity_review.md Phase 2) maps to
+    "bike_repair_station", kept distinct from "bike_shop" (shop=bicycle)
+    since a free public stand and a commercial shop answer different
+    practical questions."""
+    result = _parse_element(_BIKE_REPAIR_STATION_NODE)
+    assert result == AmenityResult(
+        osm_element_type="node",
+        osm_element_id=791,
+        category="bike_repair_station",
+        name="Test Repair Stand",
+        lat=48.09,
+        lon=8.16,
+        tags={"amenity": "bicycle_repair_station", "name": "Test Repair Stand"},
     )
 
 

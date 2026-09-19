@@ -674,6 +674,43 @@ def test_post_map_js_includes_cycling_layers():
 
 
 @pytest.mark.unit
+def test_post_map_js_includes_peak_elevation_layer():
+    """peakElevationLayer() (fix_peaks_cablecars_amenity_review.md
+    Phase 1) is defined and appended to both the initial style and the
+    theme-swap setStyle call, same pattern as cyclingLayers() above.
+    Filtered on kind=="peak" against the real "pois" source-layer
+    (confirmed via direct tile inspection — no "physical_point" layer
+    exists in this basemap's actual schema, contrary to the doc's
+    initial research-phase assumption).
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    assert "function peakElevationLayer(flavor)" in js
+    assert '"source-layer": "pois"' in js
+    assert '["==", ["get", "kind"], "peak"]' in js
+    assert js.count(".concat([peakElevationLayer(") == 2
+
+
+@pytest.mark.unit
+def test_post_map_js_amenity_categories_include_cafe_and_bike_repair_station():
+    """cafe/bike_repair_station (fix_peaks_cablecars_amenity_review.md
+    Phase 2) have both a marker colour and an icon path — a category
+    present in one but not the other would silently fall back to a
+    plain dot or the wrong colour rather than erroring, so both need an
+    explicit regression check, not just "the key exists somewhere".
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    colours_start = js.index("const CATEGORY_COLOURS = {")
+    colours_end = js.index("};", colours_start)
+    colours_body = js[colours_start:colours_end]
+    icons_start = js.index("const CATEGORY_ICON_PATHS = {")
+    icons_end = js.index("};", icons_start)
+    icons_body = js[icons_start:icons_end]
+    for category in ("cafe", "bike_repair_station"):
+        assert f"{category}:" in colours_body, f"{category} missing a marker colour"
+        assert f"{category}:" in icons_body, f"{category} missing an icon path"
+
+
+@pytest.mark.unit
 def test_post_map_js_defines_hover_sync_interpolation():
     """interpolateAlongRoute() (elevation_profile_chart.md Tier 2) exists
     in post-map.js and is wired to the chart-hover CustomEvents
