@@ -88,6 +88,10 @@ clean: ## Remove caches and build artefacts
 	find . -type d -name .pytest_cache -exec rm -rf {} +
 	find . -type d -name htmlcov -exec rm -rf {} +
 
+.PHONY: e2e
+e2e: ## Playwright smoke tests (docs/dev/playwright_e2e_smoke_tests.md) — needs docker compose up -d + DATABASE_URL; a separate tier from `test`, not folded into `ci`/`deploy` (own real browser + real app-process dependency, see the doc's own "Where this fits" section)
+	uv run --group e2e pytest tests/e2e -m e2e --browser-channel=chrome --no-cov
+
 .PHONY: ci
 ci: lint test security ## Full CI pipeline
 

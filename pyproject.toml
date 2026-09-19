@@ -44,6 +44,9 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.16.4",
 ]
+e2e = [
+    "pytest-playwright>=0.9.0",
+]
 security = [
     "bandit>=1.9.4",
     "detect-secrets>=1.5.0",
@@ -91,10 +94,17 @@ addopts = [
     "--cov=app",
     "--cov-report=term-missing",
     "--cov-fail-under=60",
+    # tests/e2e/ needs a real running app process + real browser
+    # (docs/dev/playwright_e2e_smoke_tests.md) — a heavier, separate
+    # tier, run explicitly via `make e2e`, not part of the default
+    # `pytest`/`make test`/`make ci` invocation that unit + integration
+    # share.
+    "--ignore=tests/e2e",
 ]
 markers = [
     "unit: no external dependencies",
     "integration: database or external services",
+    "e2e: real app process + real browser, run via make e2e",
 ]
 
 [tool.coverage.run]

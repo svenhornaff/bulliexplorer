@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="bulliexplorer-e2e-fixture"
+     xmlns="http://www.topografix.com/GPX/1/1">
+  <!--
+    Minimal, stable, checked-in GPX for the Playwright e2e smoke-test
+    tier (docs/dev/playwright_e2e_smoke_tests.md). Deliberately not a
+    real ride — a short synthetic loop with enough points, elevation
+    variation, and timestamps that the elevation chart has non-trivial
+    content to render, without depending on any real blog post that
+    could be edited or deleted over time.
+  -->
+  <trk>
+    <trkseg>
+      <trkpt lat="47.8780" lon="8.0000"><ele>1200.0</ele><time>2026-01-01T08:00:00Z</time></trkpt>
+      <trkpt lat="47.8785" lon="8.0010"><ele>1240.0</ele><time>2026-01-01T08:05:00Z</time></trkpt>
+      <trkpt lat="47.8790" lon="8.0025"><ele>1310.0</ele><time>2026-01-01T08:10:00Z</time></trkpt>
+      <trkpt lat="47.8800" lon="8.0040"><ele>1380.0</ele><time>2026-01-01T08:15:00Z</time></trkpt>
+      <trkpt lat="47.8810" lon="8.0060"><ele>1420.0</ele><time>2026-01-01T08:20:00Z</time></trkpt>
+      <trkpt lat="47.8815" lon="8.0080"><ele>1460.0</ele><time>2026-01-01T08:25:00Z</time></trkpt>
+      <trkpt lat="47.8810" lon="8.0100"><ele>1400.0</ele><time>2026-01-01T08:30:00Z</time></trkpt>
+      <trkpt lat="47.8800" lon="8.0110"><ele>1330.0</ele><time>2026-01-01T08:35:00Z</time></trkpt>
+      <trkpt lat="47.8790" lon="8.0090"><ele>1270.0</ele><time>2026-01-01T08:40:00Z</time></trkpt>
+      <trkpt lat="47.8780" lon="8.0050"><ele>1220.0</ele><time>2026-01-01T08:45:00Z</time></trkpt>
+      <trkpt lat="47.8780" lon="8.0000"><ele>1200.0</ele><time>2026-01-01T08:50:00Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

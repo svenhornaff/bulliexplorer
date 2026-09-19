@@ -45,6 +45,20 @@ jobs:
       - name: Install dependencies
         run: uv sync --group security
 
+      # Real, pre-existing gap found while implementing
+      # docs/dev/playwright_e2e_smoke_tests.md: this service container is
+      # fresh/unmigrated on every run, and neither the app's own lifespan
+      # nor any test fixture applies migrations. Reproduced locally against
+      # a genuinely fresh postgis/postgis:16-3.4 container (not the
+      # persistent local dev DB, which already has migrations applied and
+      # so never surfaced this): every integration test touching the
+      # schema failed with UndefinedTable. This means the real GitHub
+      # Actions run has been failing at the Test step on every push this
+      # session — `make ci` run locally never caught it, since it always
+      # ran against the already-migrated persistent dev DB.
+      - name: Apply database migrations
+        run: uv run alembic upgrade head
+
       - name: Lint (ruff + pyright)
         run: |
           uv run ruff format app tests --check
@@ -55,6 +69,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ env.GITHUB_TOKEN_APP }}
         run: uv run pytest
+
+      # docs/dev/playwright_e2e_smoke_tests.md — a third tier, on top of
+      # the same real PostGIS service container already running above,
+      # against a dedicated `_e2e`-suffixed database (see
+      # tests/e2e/conftest.py's own _database_url fixture for why: this
+      # tier's fixture seeding reconciles/deletes, and must never share
+      # a database with anything real). Runs alongside, not instead of,
+      # the unit/integration Test step above — both gate merges.
+      - name: Install Playwright browser (Chromium)
+        run: uv run --group e2e playwright install --with-deps chromium
+
+      - name: E2E smoke tests (Playwright)
+        run: uv run --group e2e pytest tests/e2e -m e2e --no-cov
 
       - name: Security (bandit + detect-secrets + pip-audit)
         run: |
