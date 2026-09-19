@@ -114,6 +114,14 @@ _FUEL_WAY = {
     "tags": {"amenity": "fuel", "name": "Test Fuel"},
 }
 
+_RESTAURANT_NODE = {
+    "type": "node",
+    "id": 789,
+    "lat": 48.07,
+    "lon": 8.14,
+    "tags": {"amenity": "restaurant", "name": "Test Restaurant"},
+}
+
 
 # ---------------------------------------------------------------------------
 # _build_query
@@ -136,6 +144,7 @@ def test_build_query_includes_all_target_tags():
     assert "shelter" in query
     assert "drinking_water" in query
     assert "fuel" in query
+    assert "restaurant" in query
     assert '"shop"="bicycle"' in query
 
 
@@ -171,11 +180,28 @@ def test_parse_element_way_uses_center():
 
 
 @pytest.mark.unit
+def test_parse_element_restaurant_maps_to_restaurant_category():
+    """amenity=restaurant (docs/dev/fix_amenity_restaurant_category.md)
+    is a tracked category, not dropped — the auto-discovery gap this
+    fix closes."""
+    result = _parse_element(_RESTAURANT_NODE)
+    assert result == AmenityResult(
+        osm_element_type="node",
+        osm_element_id=789,
+        category="restaurant",
+        name="Test Restaurant",
+        lat=48.07,
+        lon=8.14,
+        tags={"amenity": "restaurant", "name": "Test Restaurant"},
+    )
+
+
+@pytest.mark.unit
 def test_parse_element_unmapped_tags_returns_none():
     """An element whose tags don't match any tracked category is dropped,
     not errored — Overpass's own tag filter is broad regex, so an
     unrelated match is expected occasionally."""
-    element = {"type": "node", "id": 1, "lat": 1.0, "lon": 1.0, "tags": {"amenity": "restaurant"}}
+    element = {"type": "node", "id": 1, "lat": 1.0, "lon": 1.0, "tags": {"amenity": "parking"}}
     assert _parse_element(element) is None
 
 

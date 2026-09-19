@@ -106,6 +106,17 @@ _TAG_TO_CATEGORY: dict[tuple[str, str], str] = {
     ("amenity", "drinking_water"): "water_point",
     ("amenity", "fuel"): "gas_station",
     ("shop", "bicycle"): "bike_shop",
+    # Restaurant (docs/dev/fix_amenity_restaurant_category.md) —
+    # "restaurant" already existed as a curated-POI category in
+    # static/editor/config.yml's dropdown and had full marker icon/color
+    # support in post-map.js's CATEGORY_COLOURS/CATEGORY_ICON_PATHS, but
+    # was never actually fetched by the auto-discovery query below — a
+    # real gap in the auto-discovered set, not a missing frontend
+    # feature. amenity=restaurant is OSM's standard tag for a
+    # sit-down restaurant; amenity=fast_food and amenity=cafe are
+    # deliberately separate OSM tags for a different kind of place and
+    # stay out of scope (see that doc's Leftover).
+    ("amenity", "restaurant"): "restaurant",
 }
 
 
@@ -134,7 +145,7 @@ def _build_query(south: float, west: float, north: float, east: float) -> str:
         f"[out:json][timeout:{_OVERPASS_QL_TIMEOUT_S}];"
         "("
         f'nwr["tourism"~"^(camp_site|wilderness_hut)$"]({bbox});'
-        f'nwr["amenity"~"^(shelter|drinking_water|fuel)$"]({bbox});'
+        f'nwr["amenity"~"^(shelter|drinking_water|fuel|restaurant)$"]({bbox});'
         f'nwr["shop"="bicycle"]({bbox});'
         ");"
         "out tags center;"

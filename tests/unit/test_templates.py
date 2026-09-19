@@ -600,6 +600,21 @@ async def test_post_with_route_no_elevation_data_omits_chart(client_with_route_n
 
 
 @pytest.mark.unit
+async def test_route_stats_renders_map_before_elevation_chart(client_with_route_and_tiles):
+    """Layout fix (docs/dev/fix_elevation_chart_below_map.md) — the map
+    must render before the elevation chart in source order, not after.
+    Both blocks stay independently gated (unchanged from
+    elevation_profile_chart.md Tier 1); only their relative order in
+    route_stats.html changed.
+    """
+    resp = await client_with_route_and_tiles.get("/posts/test-post")
+    assert resp.status_code == 200
+    map_index = resp.text.index('id="map-wrap"')
+    chart_index = resp.text.index('id="elevation-chart"')
+    assert map_index < chart_index, "map must appear before the elevation chart in the rendered HTML"
+
+
+@pytest.mark.unit
 async def test_post_with_route_and_tiles_shows_map_container(client_with_route_and_tiles):
     """When tiles_url is set and route data is present, the map div is rendered."""
     resp = await client_with_route_and_tiles.get("/posts/test-post")

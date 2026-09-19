@@ -46,6 +46,8 @@ something that already exists, not to decide what to do next.
 | `fix_amenity_overlay_performance.md` | Clustered rendering fix for 15k+-amenity routes (DOM markers → GL layers). |
 | `fix_amenity_overlay_ux.md` | Amenity popup content/category UX following the performance fix. |
 | `fix_amenity_resync_freshness.md` | Skip full Overpass amenity re-sync when a route's geometry hasn't changed — `Route.track_updated_at` + a freshness window alongside the existing cooldown; also fixed a pre-existing EWKB/WKB track-comparison bug that made every route look "changed" on every sync. |
+| `fix_elevation_chart_below_map.md` | Layout fix — swapped `route_stats.html`'s block order so the elevation profile chart renders below the map instead of above it. Source-order change only, no CSS/JS touched. |
+| `fix_amenity_restaurant_category.md` | `restaurant` already existed as a curated-POI category (editor dropdown + marker icon/color) but was never actually fetched by the Overpass auto-discovery query — added `amenity=restaurant` to `_TAG_TO_CATEGORY`/`_build_query`. Fixed an existing test that used `amenity=restaurant` as its "unmapped tag" example, now incorrect by construction. |
 | `media_storage_r2.md` | R2 media library (browser→R2 uploads via Sveltia) — bucket #5. |
 | `post_and_backend.md` | Original post/backend architecture — FastAPI + Jinja2 + Markdown sync design. |
 | `editor_cms.md` | Sveltia CMS integration (`/editor/`) + GitHub webhook auto-publish design. |

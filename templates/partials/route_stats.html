@@ -30,19 +30,9 @@ template's context. #}
                  font-size: 0.8rem">{{ route.name }}</span>
 {% endif %}
 </div>
-{# Elevation profile chart (docs/dev/elevation_profile_chart.md Tier 1) —
-gated independently of the route_geojson/tiles_url map guard below: a
-route can have elevation data without map tiles configured, or vice
-versa, so these stay two separate conditionals rather than one folded
-together. Omitted entirely (no empty canvas taking up layout space) when
-the GPX had no elevation values at all. #}
-{% if route.elevation_profile %}
-    <div class="elevation-chart-wrap">
-        <canvas id="elevation-chart"
-                aria-label="Elevation profile of {{ route.name }}"
-                role="img"></canvas>
-    </div>
-{% endif %}
+{# Map (docs/dev/layout_fixes.md — elevation chart moved below the map,
+swapped from map-first to chart-first source order; the two blocks stay
+independently gated exactly as before, only their order changed). #}
 {% if route_geojson and tiles_url %}
     <div class="map-wrap" id="map-wrap">
         <button type="button"
@@ -70,4 +60,19 @@ the GPX had no elevation values at all. #}
             Show nearby services
         </label>
     {% endif %}
+{% endif %}
+{# Elevation profile chart (docs/dev/elevation_profile_chart.md Tier 1) —
+gated independently of the route_geojson/tiles_url map guard above: a
+route can have elevation data without map tiles configured, or vice
+versa, so these stay two separate conditionals rather than one folded
+together. Omitted entirely (no empty canvas taking up layout space) when
+the GPX had no elevation values at all. Placed after the map
+(docs/dev/layout_fixes.md) so the chart reads as a detail view below
+the map, not competing with it for the first thing a reader sees. #}
+{% if route.elevation_profile %}
+    <div class="elevation-chart-wrap">
+        <canvas id="elevation-chart"
+                aria-label="Elevation profile of {{ route.name }}"
+                role="img"></canvas>
+    </div>
 {% endif %}
