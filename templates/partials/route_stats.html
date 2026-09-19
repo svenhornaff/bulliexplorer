@@ -60,6 +60,17 @@ independently gated exactly as before, only their order changed). #}
             Show nearby services
         </label>
     {% endif %}
+    {# CyclOSM optional raster layer (docs/dev/cyclosm_optional_layer.md)
+    — unconditional sibling to the amenity toggle above, deliberately not
+    gated on has_amenities: this is a third-party basemap overlay, not
+    derived from this project's own discovered-amenity data, so it's
+    available whenever the map itself renders at all. Off by default,
+    same established pattern — nothing CyclOSM-related loads until this
+    is checked. #}
+    <label class="cyclosm-toggle">
+        <input type="checkbox" id="cyclosm-toggle-input" aria-controls="post-map" />
+        Show CyclOSM cycling map
+    </label>
 {% endif %}
 {# Elevation profile chart (docs/dev/elevation_profile_chart.md Tier 1) —
 gated independently of the route_geojson/tiles_url map guard above: a

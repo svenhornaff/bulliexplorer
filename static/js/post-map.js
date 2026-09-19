@@ -470,6 +470,83 @@
       };
     }
 
+    // CyclOSM optional raster layer (docs/dev/cyclosm_optional_layer.md).
+    // Off by default, never fetched/initialized until the toggle is
+    // checked — no CyclOSM source exists on the map at all until then, so
+    // the default page load is byte-for-byte unaffected (no new requests,
+    // no new console activity). A third-party raster tile service under
+    // the same "we may block access if usage degrades the service" policy
+    // as OSM's own tiles/Overpass — but lower-stakes than the Overpass
+    // arc (fix_overpass_urban_density_timeout.md etc.): this is an
+    // optional visual, not content the page needs to be complete: a
+    // failed/slow tile just leaves a gap, never blocks anything else.
+    var CYCLOSM_HOST = "tile-cyclosm.openstreetmap.fr";
+    var CYCLOSM_SUBDOMAINS = ["a", "b", "c"];
+    var CYCLOSM_TILE_URLS = CYCLOSM_SUBDOMAINS.map(function (s) {
+      return "https://" + s + "." + CYCLOSM_HOST + "/cyclosm/{z}/{x}/{y}.png";
+    });
+    var CYCLOSM_TIMEOUT_MS = 5000; // "a few seconds", per the doc — not the multi-minute browser default
+    var CYCLOSM_SOURCE_ID = "cyclosm";
+    var CYCLOSM_LAYER_ID = "cyclosm-raster";
+
+    // Verified empirically against this exact vendored MapLibre build
+    // (v4.7.1) before relying on it: a caller-supplied AbortSignal
+    // returned from transformRequest genuinely aborts the underlying
+    // fetch — confirmed via a real headless browser pointed at a
+    // non-routable host, abort fired at ~3013ms against a 3000ms timeout,
+    // no map "error" event, no resolved-tile event, page stayed fully
+    // responsive throughout. Scoped to CyclOSM URLs only via the simple
+    // host substring check — every other request type (vector tiles,
+    // sprites, glyphs) returns unmodified, exactly as before this feature
+    // existed.
+    function transformRequest(url) {
+      if (url.indexOf(CYCLOSM_HOST) === -1) return { url: url };
+      var controller = new AbortController();
+      setTimeout(function () {
+        controller.abort();
+      }, CYCLOSM_TIMEOUT_MS);
+      return { url: url, signal: controller.signal };
+    }
+
+    // Idempotent (mirrors addAmenitiesSourceAndLayers's own reasoning) —
+    // a no-op if already active, since this is also called after a
+    // theme-swap setStyle() where transformStyle's carry-over already
+    // restored both the source and the layer.
+    function addCyclosmLayer(mapInstance) {
+      if (mapInstance.getSource(CYCLOSM_SOURCE_ID)) return;
+      mapInstance.addSource(CYCLOSM_SOURCE_ID, {
+        type: "raster",
+        tiles: CYCLOSM_TILE_URLS,
+        tileSize: 256,
+        // Required by the tile usage policy, not optional (the doc's own
+        // framing) — MapLibre's AttributionControl aggregates every
+        // active source's own attribution string automatically, so this
+        // shows/hides itself in step with the source being added/removed,
+        // no separate control-manipulation code needed.
+        attribution:
+          '<a href="https://www.cyclosm.org">CyclOSM</a> © ' +
+          '<a href="https://openstreetmap.org">OpenStreetMap</a> ' +
+          "contributors",
+      });
+      // Inserted before route-casing (the first user-content layer added
+      // in the "load" handler below) — sits above the base vector map
+      // (visibly replacing it while active, which is the point) but
+      // below the route line, POI markers, and amenity overlay, all of
+      // which must stay visible on top regardless of which basemap is
+      // active underneath (the doc's own explicit layering requirement).
+      mapInstance.addLayer({ id: CYCLOSM_LAYER_ID, type: "raster", source: CYCLOSM_SOURCE_ID }, "route-casing");
+    }
+
+    // Removes the layer entirely, not just hides it (the doc's explicit
+    // requirement) — no lingering raster tile requests continuing for a
+    // layer the reader isn't looking at. Layer must be removed before its
+    // source (MapLibre throws if a source is removed while still
+    // referenced by a layer).
+    function removeCyclosmLayer(mapInstance) {
+      if (mapInstance.getLayer(CYCLOSM_LAYER_ID)) mapInstance.removeLayer(CYCLOSM_LAYER_ID);
+      if (mapInstance.getSource(CYCLOSM_SOURCE_ID)) mapInstance.removeSource(CYCLOSM_SOURCE_ID);
+    }
+
     const flavor = currentFlavor();
     const ROUTE_LINE_COLOR = routeLineColor(flavor);
 
@@ -498,6 +575,7 @@
       // Rough centre — overridden once the map loads and fits to the route.
       center: [8.1, 48.1],
       zoom: 10,
+      transformRequest: transformRequest,
       attributionControl: false,
     });
 
@@ -649,6 +727,7 @@
 
     let routeLoaded = false;
     let amenitiesVisible = false;
+    let cyclosmVisible = false;
 
     // ── Chart → map hover sync (elevation_profile_chart.md Tier 2) ──────
     // Given a target distance-km, walks ROUTE_GEOJSON's coordinates
@@ -825,6 +904,29 @@
               });
           }
         });
+
+      }
+
+      // CyclOSM optional raster layer (docs/dev/cyclosm_optional_layer.md)
+      // — wired inside the "load" handler too, same reasoning as the
+      // amenity toggle just above: guarantees route-casing already
+      // exists (added earlier in this same handler) before
+      // addCyclosmLayer's addLayer(..., "route-casing") insertion point is
+      // ever asked to resolve. Deliberately not nested inside the
+      // amenity toggle's own "if AMENITIES_GEOJSON_URL" guard above — this
+      // is an independent, third-party layer, not derived from this
+      // project's own amenity data, so it doesn't depend on whether the
+      // route has any discovered amenities at all.
+      var cyclosmToggle = document.getElementById("cyclosm-toggle-input");
+      if (cyclosmToggle) {
+        cyclosmToggle.addEventListener("change", function () {
+          cyclosmVisible = cyclosmToggle.checked;
+          if (cyclosmVisible) {
+            addCyclosmLayer(map);
+          } else {
+            removeCyclosmLayer(map);
+          }
+        });
       }
 
       // Cluster click-to-expand (fix_amenity_overlay_ux.md Phase 1) —
@@ -936,6 +1038,25 @@
             if (previousStyle && previousStyle.sources && previousStyle.sources[AMENITIES_SOURCE_ID]) {
               carried[AMENITIES_SOURCE_ID] = previousStyle.sources[AMENITIES_SOURCE_ID];
             }
+            // CyclOSM (docs/dev/cyclosm_optional_layer.md) carried over the
+            // same way, only if it was actually active before the swap —
+            // kept as its own separate concat below (not folded into
+            // carriedLayerIds/carriedLayers) because it has a different
+            // required z-order: this project's own layers all get
+            // appended *after* nextStyle.layers (on top of the fresh base
+            // map), but cyclosm-raster must stay *below* route-casing/
+            // route-line/amenities even across a theme swap, matching
+            // addCyclosmLayer's own addLayer(..., "route-casing")
+            // insertion point at initial toggle-on.
+            var cyclosmActive = !!(previousStyle && previousStyle.sources && previousStyle.sources[CYCLOSM_SOURCE_ID]);
+            if (cyclosmActive) {
+              carried[CYCLOSM_SOURCE_ID] = previousStyle.sources[CYCLOSM_SOURCE_ID];
+            }
+            var cyclosmCarriedLayers = cyclosmActive
+              ? previousStyle.layers.filter(function (l) {
+                  return l.id === CYCLOSM_LAYER_ID;
+                })
+              : [];
             var carriedLayerIds = ["route-casing", "route-line"].concat(AMENITIES_LAYER_IDS);
             var carriedLayers = (previousStyle && previousStyle.layers)
               ? previousStyle.layers.filter(function (l) {
@@ -944,7 +1065,7 @@
               : [];
             return Object.assign({}, nextStyle, {
               sources: Object.assign({}, nextStyle.sources, carried),
-              layers: nextStyle.layers.concat(
+              layers: nextStyle.layers.concat(cyclosmCarriedLayers).concat(
                 carriedLayers.map(function (l) {
                   if (l.id !== "route-line") return l;
                   return Object.assign({}, l, {

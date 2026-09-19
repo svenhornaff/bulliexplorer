@@ -732,6 +732,26 @@ body.map-fullscreen-active {
   cursor: pointer;
 }
 
+/* CyclOSM optional raster layer toggle (docs/dev/cyclosm_optional_layer.md)
+   — same visual family as .amenity-toggle above, kept as its own class
+   rather than shared: semantically a different feature (third-party
+   basemap overlay, not derived from this project's own amenity data),
+   and this project's existing pattern is one class per toggle (compare
+   .amenity-toggle itself, defined independently of any other control). */
+.cyclosm-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: var(--space-4);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.cyclosm-toggle input {
+  cursor: pointer;
+}
+
 /* ── Body-block content (Phase 4, §5.3): gallery, callout ────────────── */
 .post-gallery {
   display: grid;

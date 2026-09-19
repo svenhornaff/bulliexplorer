@@ -10,6 +10,7 @@ the mock session helpers use side_effect to return different results per call.
 from __future__ import annotations
 
 import datetime
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -615,6 +616,37 @@ async def test_route_stats_renders_map_before_elevation_chart(client_with_route_
 
 
 @pytest.mark.unit
+async def test_post_with_route_and_tiles_shows_cyclosm_toggle_independent_of_amenities(client_with_route_and_tiles):
+    """CyclOSM optional layer toggle (docs/dev/cyclosm_optional_layer.md
+    Phase 1) — an unconditional sibling to the amenity toggle, not gated
+    on has_amenities: this fixture's own session mocks the NearbyAmenity
+    existence check to None (see _post_with_route_and_pois_session), so
+    has_amenities is False here — the amenity toggle correctly doesn't
+    render, but the CyclOSM toggle must render anyway, since it's a
+    third-party basemap overlay, not derived from this project's own
+    discovered-amenity data.
+    """
+    resp = await client_with_route_and_tiles.get("/posts/test-post")
+    assert resp.status_code == 200
+    assert 'id="cyclosm-toggle-input"' in resp.text
+    assert "Show CyclOSM cycling map" in resp.text
+    assert 'id="amenity-toggle-input"' not in resp.text, (
+        "has_amenities is False for this fixture — the amenity toggle must not render"
+    )
+
+
+@pytest.mark.unit
+async def test_post_with_route_no_tiles_omits_cyclosm_toggle(client_with_route):
+    """No map at all (no tiles_url) — the CyclOSM toggle is nested inside
+    the same {% if route_geojson and tiles_url %} guard as the map itself,
+    so it must not render for a post with a route but no map widget.
+    """
+    resp = await client_with_route.get("/posts/test-post")
+    assert resp.status_code == 200
+    assert 'id="cyclosm-toggle-input"' not in resp.text
+
+
+@pytest.mark.unit
 async def test_post_with_route_and_tiles_shows_map_container(client_with_route_and_tiles):
     """When tiles_url is set and route data is present, the map div is rendered."""
     resp = await client_with_route_and_tiles.get("/posts/test-post")
@@ -983,3 +1015,162 @@ def test_post_map_js_cycling_layers_use_kind_detail():
     # Both cycling layers read from the "roads" source-layer confirmed
     # present via direct tile inspection in Phase 0.
     assert js.count('"source-layer": "roads"') >= 2
+
+
+# ---------------------------------------------------------------------------
+# CyclOSM optional raster layer (docs/dev/cyclosm_optional_layer.md)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_post_map_js_cyclosm_not_added_at_initial_map_construction():
+    """The core design principle (the doc's own framing): CyclOSM is
+    never fetched, never initialized, never touched at all unless the
+    reader explicitly opts in. Confirmed at the source level — the Map
+    constructor's initial `style.sources`/`style.layers` must not
+    reference cyclosm at all; only addCyclosmLayer() (called later, only
+    from the toggle's change listener) may add it.
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    ctor_start = js.index("const map = new maplibregl.Map({")
+    ctor_end = js.index("\n    });", ctor_start)
+    ctor_body = js[ctor_start:ctor_end]
+    assert "cyclosm" not in ctor_body.lower(), (
+        "CyclOSM must not appear in the Map constructor's initial style — "
+        "toggling on is the only thing allowed to add it"
+    )
+
+
+@pytest.mark.unit
+def test_post_map_js_cyclosm_transform_request_scopes_only_cyclosm_host():
+    """transformRequest must return every non-CyclOSM URL unmodified
+    (`{ url: url }`, no signal) — vector tiles/sprites/glyphs must behave
+    exactly as before this feature existed. Only CyclOSM URLs get the
+    AbortController + timeout treatment.
+
+    The timeout mechanism itself was verified empirically against this
+    exact vendored MapLibre build (v4.7.1) with a real headless browser
+    before relying on it here: a caller-supplied AbortSignal returned
+    from transformRequest genuinely aborts the fetch (confirmed via a
+    non-routable host, abort fired at ~3013ms against a 3000ms timeout,
+    zero map error events, zero resolved-tile events) — this test checks
+    the source wiring, not the browser mechanism itself, which isn't
+    something a Python unit test can exercise.
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    fn_start = js.index("function transformRequest(url)")
+    fn_end = js.index("\n    }", fn_start)
+    fn_body = js[fn_start:fn_end]
+    assert "if (url.indexOf(CYCLOSM_HOST) === -1) return { url: url };" in fn_body
+    assert "new AbortController()" in fn_body
+    assert "controller.abort()" in fn_body
+    assert "CYCLOSM_TIMEOUT_MS" in fn_body
+    assert "signal: controller.signal" in fn_body
+
+
+@pytest.mark.unit
+def test_post_map_js_cyclosm_timeout_is_a_few_seconds_not_a_browser_default():
+    """docs/dev/cyclosm_optional_layer.md: "A tile request timeout (short
+    — a few seconds, this is a visual nice-to-have, not content worth
+    waiting on)" — not the browser's own multi-minute connection default.
+    Pinned as a concrete, testable range rather than just "some number".
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    match = re.search(r"CYCLOSM_TIMEOUT_MS\s*=\s*(\d+);", js)
+    assert match is not None, "CYCLOSM_TIMEOUT_MS constant not found"
+    timeout_ms = int(match.group(1))
+    assert 1000 <= timeout_ms <= 10000, f'CYCLOSM_TIMEOUT_MS={timeout_ms} is not "a few seconds"'
+
+
+@pytest.mark.unit
+def test_post_map_js_add_cyclosm_layer_inserts_below_route_casing():
+    """Layer ordering (the doc's explicit requirement): CyclOSM sits
+    below the route line/POI/amenity layers, all of which stay on top
+    regardless of which basemap is active underneath. addLayer()'s
+    second argument is MapLibre's own "insert before this id" mechanism
+    — inserting before "route-casing" (the first user-content layer
+    added in the "load" handler) is what achieves this, confirmed live
+    with a real headless browser (cyclosm-raster at index 75, immediately
+    before route-casing at 76 and route-line at 77, out of 81 total
+    layers).
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    fn_start = js.index("function addCyclosmLayer(mapInstance)")
+    fn_end = js.index("\n    }", fn_start)
+    fn_body = js[fn_start:fn_end]
+    assert '"route-casing"' in fn_body
+    assert "CYCLOSM_LAYER_ID" in fn_body
+    assert 'type: "raster", source: CYCLOSM_SOURCE_ID }, "route-casing"' in fn_body
+
+
+@pytest.mark.unit
+def test_post_map_js_add_cyclosm_layer_is_idempotent():
+    """Same reasoning as addAmenitiesSourceAndLayers's own idempotency —
+    must be a no-op if the source already exists, since this is also
+    called after a theme-swap setStyle() where transformStyle's carry-
+    over already restored both the source and the layer.
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    fn_start = js.index("function addCyclosmLayer(mapInstance)")
+    fn_end = js.index("\n    }", fn_start)
+    fn_body = js[fn_start:fn_end]
+    assert "if (mapInstance.getSource(CYCLOSM_SOURCE_ID)) return;" in fn_body
+
+
+@pytest.mark.unit
+def test_post_map_js_remove_cyclosm_layer_removes_layer_before_source():
+    """Toggling off removes the layer entirely, not just hides it (the
+    doc's explicit requirement — no lingering raster tile requests
+    continuing in the background). MapLibre throws if a source is
+    removed while still referenced by a layer, so the layer must be
+    removed first — checked here as an ordering assertion, not just
+    "both calls exist somewhere".
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    fn_start = js.index("function removeCyclosmLayer(mapInstance)")
+    fn_end = js.index("\n    }", fn_start)
+    fn_body = js[fn_start:fn_end]
+    layer_idx = fn_body.index("removeLayer(CYCLOSM_LAYER_ID)")
+    source_idx = fn_body.index("removeSource(CYCLOSM_SOURCE_ID)")
+    assert layer_idx < source_idx, "the layer must be removed before its source"
+
+
+@pytest.mark.unit
+def test_post_map_js_cyclosm_source_has_required_attribution():
+    """Required by the tile usage policy, not optional (the doc's own
+    framing) — CyclOSM/OpenStreetMap-France attribution must be present
+    on the source definition itself, so MapLibre's AttributionControl
+    picks it up automatically (confirmed live: shown while the layer is
+    active, gone once removed — no separate control-manipulation code
+    needed).
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    fn_start = js.index("function addCyclosmLayer(mapInstance)")
+    fn_end = js.index("\n    }", fn_start)
+    fn_body = js[fn_start:fn_end]
+    assert "cyclosm.org" in fn_body
+    assert "openstreetmap.org" in fn_body
+    assert "attribution:" in fn_body
+
+
+@pytest.mark.unit
+def test_post_map_js_theme_swap_carries_cyclosm_below_route_layers():
+    """Theme-swap (setStyle()) tears down every source/layer — CyclOSM
+    needs the same carry-over treatment already proven for route/
+    amenities, but with a different required z-order: this project's
+    own layers get appended *after* nextStyle.layers, while cyclosm-
+    raster must stay *below* route-casing/route-line/amenities even
+    across a theme swap. Checked as an ordering assertion in the actual
+    concat expression, not just "cyclosm is mentioned somewhere in
+    transformStyle" — confirmed live with a real headless browser
+    (CyclOSM attribution present before and after a real theme toggle
+    click, zero console errors).
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    fn_start = js.index("transformStyle: function (previousStyle, nextStyle)")
+    fn_end = js.index("\n          },", fn_start)
+    fn_body = js[fn_start:fn_end]
+    assert "cyclosmActive" in fn_body
+    assert "cyclosmCarriedLayers" in fn_body
+    concat_idx = fn_body.index("layers: nextStyle.layers.concat(cyclosmCarriedLayers).concat(")
+    assert concat_idx != -1, "cyclosmCarriedLayers must be concatenated before the route/amenities carriedLayers"
