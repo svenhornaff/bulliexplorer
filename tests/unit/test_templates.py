@@ -674,6 +674,29 @@ def test_post_map_js_includes_cycling_layers():
 
 
 @pytest.mark.unit
+def test_post_map_js_defines_locality_label_priority_split():
+    """adjustLocalityLabelPriority() (fix_label_priority_and_
+    trail_differentiation.md Phase 1-2) splits the basemap's single
+    "places_locality" layer into two: real settlement names (kept
+    exactly as the native library defines them) and hyper-local
+    field/forest micro-toponyms (kind_detail=="locality", deferred
+    behind a minzoom so they don't compete with peaks at whole-route
+    zoom — real tile inspection over Siebengebirge/Königswinter found
+    real settlements distinguished from cadastral names only by
+    kind_detail, not by kind, so a blanket minzoom raise on the whole
+    layer would have wrongly suppressed real town names too).
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    assert "function adjustLocalityLabelPriority(layers)" in js
+    assert '"places_locality_micro_toponym"' in js
+    assert '["!=", ["get", "kind_detail"], "locality"]' in js
+    assert '["==", ["get", "kind_detail"], "locality"]' in js
+    # Wired into both style-build call sites (initial + theme swap),
+    # same as cyclingLayers()/peakElevationLayer() above it.
+    assert js.count("adjustLocalityLabelPriority(") == 3  # 1 definition + 2 call sites
+
+
+@pytest.mark.unit
 def test_post_map_js_includes_peak_elevation_layer():
     """peakElevationLayer() (fix_peaks_cablecars_amenity_review.md
     Phase 1) is defined and appended to both the initial style and the

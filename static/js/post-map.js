@@ -277,6 +277,64 @@
       ];
     }
 
+    // Label priority fix (fix_label_priority_and_trail_differentiation.md
+    // Phase 1-2). Real tile inspection (pmtiles tile + mapbox-vector-tile
+    // decode over Siebengebirge/Königswinter) found the basemap's
+    // "places_locality" style layer (source-layer "places", filter
+    // kind=="locality") renders BOTH real named settlements
+    // (kind_detail: "town"/"village", e.g. Königswinter, Rott — tile
+    // data min_zoom 8-11, legitimate and wanted at that zoom) AND
+    // hyper-local cadastral field/forest-parcel names (kind_detail:
+    // "locality" — identical string to the outer kind — e.g. "Am
+    // Röbig", "Im Mantel", tile data min_zoom 13+) from the SAME style
+    // layer with the SAME filter, distinguished only by kind_detail.
+    // MapLibre's symbol-sort-key on this layer falls back to each
+    // feature's own min_zoom when no explicit sort_key exists (real,
+    // confirmed from the vendored library source, not assumed) — lower
+    // values win the cross-layer collision budget, so the much higher
+    // volume of low-min_zoom real-settlement labels (115+ in one z11
+    // tile alone) already wins most of the contest, and right at the
+    // zoom peaks start existing in the tile data (z12-13), an even
+    // larger wave of hyper-local names also turns on (144 in one z13
+    // tile), directly swamping the newly-available peak labels. Real,
+    // decisive answer to Phase 1's discovery question: "places_locality,
+    // filtered on kind==\"locality\", no minzoom cap set by the style
+    // layer itself — gated only by each feature's own tile-data
+    // min_zoom, which for real settlements starts as low as 8."
+    //
+    // Fix: split the ONE shared layer into two by kind_detail rather
+    // than raising a blanket minzoom on the whole thing (which would
+    // also suppress legitimate town/village names like Königswinter
+    // itself — the doc's own "priority fix, not a deletion" instruction
+    // applies to the real settlement names too, not just the field
+    // names). Real settlements keep rendering exactly as before,
+    // unmodified. Hyper-local field/forest names (kind_detail==
+    // "locality") get deferred behind an explicit minzoom — giving
+    // peaks a clear zoom window once they start existing in the data,
+    // without deleting the field-name data (it still renders once
+    // genuinely zoomed in, exactly as the doc requires).
+    function adjustLocalityLabelPriority(layers) {
+      var MICRO_TOPONYM_MINZOOM = 14;
+      return layers.map(function (layer) {
+        if (layer.id !== "places_locality") return layer;
+        return Object.assign({}, layer, {
+          filter: ["all", layer.filter, ["!=", ["get", "kind_detail"], "locality"]],
+        });
+      }).concat(
+        layers
+          .filter(function (layer) {
+            return layer.id === "places_locality";
+          })
+          .map(function (layer) {
+            return Object.assign({}, layer, {
+              id: "places_locality_micro_toponym",
+              minzoom: MICRO_TOPONYM_MINZOOM,
+              filter: ["all", layer.filter, ["==", ["get", "kind_detail"], "locality"]],
+            });
+          })
+      );
+    }
+
     // Peak elevation labels (fix_peaks_cablecars_amenity_review.md
     // Phase 1). Real tile inspection (pmtiles tile + mapbox-vector-tile
     // decode, z14 over Feldberg) found peaks live on the "pois"
@@ -344,8 +402,9 @@
               '<a href="https://openstreetmap.org">OpenStreetMap</a>',
           },
         },
-        layers: basemaps
-          .layers("protomaps", basemaps.namedFlavor(flavor), { lang: "de" })
+        layers: adjustLocalityLabelPriority(
+          basemaps.layers("protomaps", basemaps.namedFlavor(flavor), { lang: "de" })
+        )
           .concat(cyclingLayers(flavor))
           .concat([peakElevationLayer(flavor)]),
       },
@@ -765,7 +824,9 @@
                 '<a href="https://openstreetmap.org">OpenStreetMap</a>',
             },
           },
-          layers: basemaps.layers("protomaps", basemaps.namedFlavor(nextFlavor), { lang: "de" })
+          layers: adjustLocalityLabelPriority(
+            basemaps.layers("protomaps", basemaps.namedFlavor(nextFlavor), { lang: "de" })
+          )
             .concat(cyclingLayers(nextFlavor))
             .concat([peakElevationLayer(nextFlavor)]),
         },
