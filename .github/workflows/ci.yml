@@ -26,7 +26,8 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5433/bulliexplorer
+      DATABASE_URL: >-
+        postgresql+psycopg://postgres:postgres@localhost:5433/bulliexplorer
       SECRET_KEY: ci-test-secret-not-for-production
       RESYNC_TOKEN: ci-test-resync-token
       GITHUB_TOKEN_APP: ci-test-github-token
@@ -61,9 +62,16 @@ jobs:
           uv run detect-secrets scan app/ > /tmp/secrets-scan.json && \
             python3 -c "
           import json, sys
-          a=json.load(open('.secrets.baseline')); b=json.load(open('/tmp/secrets-scan.json'))
-          a.pop('generated_at',None); b.pop('generated_at',None)
-          sys.exit(0 if a==b else (print('detect-secrets: baseline mismatch',file=sys.stderr) or 1))"
+          with open('.secrets.baseline') as f:
+              a = json.load(f)
+          with open('/tmp/secrets-scan.json') as f:
+              b = json.load(f)
+          a.pop('generated_at', None)
+          b.pop('generated_at', None)
+          if a != b:
+              print('detect-secrets: baseline mismatch', file=sys.stderr)
+              sys.exit(1)
+          sys.exit(0)"
           uv run pip-audit
 
       # docs/dev/security_review_owasp.md Phase 5 — voluntary, not a CRA
