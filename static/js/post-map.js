@@ -313,12 +313,35 @@
     // peaks a clear zoom window once they start existing in the data,
     // without deleting the field-name data (it still renders once
     // genuinely zoomed in, exactly as the doc requires).
+    //
+    // Regression fix: the vendored basemaps library's own "places_locality"
+    // filter is legacy MapLibre filter syntax — ["==","kind","locality"]
+    // (bare property-name string), not the modern expression syntax
+    // (["==",["get","kind"],"locality"]) used everywhere else in this
+    // file's own custom layers. Nesting that legacy filter and a modern
+    // ["get", ...] expression inside the same "all" combinator produces
+    // an invalid, dialect-mixed filter that MapLibre's style validator
+    // rejects outright ("layers[N].filter[2][1]: string expected, array
+    // found") — and because this is one layer inside the single style
+    // object passed to `new maplibregl.Map({style: {...}})`, that
+    // validation failure took down the ENTIRE style load, not just this
+    // one layer: base tiles gone, map area a blank void, while
+    // elevation-chart.js kept working fine since it's a wholly separate
+    // script. Reproduced for real with a headless browser (console:
+    // exactly this error, twice — once per new layer) before applying
+    // this fix, and re-verified clean afterwards.
+    //
+    // Fix: build the "kind" check explicitly as a modern expression in
+    // both branches, instead of splicing in the vendored layer's own
+    // (legacy-syntax) `layer.filter` value. Every filter added by this
+    // function is now internally consistent modern-expression syntax.
     function adjustLocalityLabelPriority(layers) {
       var MICRO_TOPONYM_MINZOOM = 14;
+      var KIND_IS_LOCALITY = ["==", ["get", "kind"], "locality"];
       return layers.map(function (layer) {
         if (layer.id !== "places_locality") return layer;
         return Object.assign({}, layer, {
-          filter: ["all", layer.filter, ["!=", ["get", "kind_detail"], "locality"]],
+          filter: ["all", KIND_IS_LOCALITY, ["!=", ["get", "kind_detail"], "locality"]],
         });
       }).concat(
         layers
@@ -329,7 +352,7 @@
             return Object.assign({}, layer, {
               id: "places_locality_micro_toponym",
               minzoom: MICRO_TOPONYM_MINZOOM,
-              filter: ["all", layer.filter, ["==", ["get", "kind_detail"], "locality"]],
+              filter: ["all", KIND_IS_LOCALITY, ["==", ["get", "kind_detail"], "locality"]],
             });
           })
       );

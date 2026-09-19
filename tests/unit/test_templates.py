@@ -697,6 +697,40 @@ def test_post_map_js_defines_locality_label_priority_split():
 
 
 @pytest.mark.unit
+def test_post_map_js_locality_filters_never_splice_vendored_legacy_filter():
+    """Real regression, reproduced with a real headless browser before
+    this fix: the vendored basemaps library's own "places_locality"
+    filter is legacy MapLibre syntax (["==","kind","locality"], a bare
+    property-name string), not the modern expression syntax
+    (["==",["get","kind"],"locality"]) used everywhere else in this
+    file. Splicing that legacy filter directly into an "all" alongside
+    a modern ["get", ...] expression produces a filter MapLibre's style
+    validator rejects outright ("filter[2][1]: string expected, array
+    found") — and since this is one layer inside the single style
+    object passed to the Map constructor, that validation failure took
+    down the ENTIRE style load: base tiles gone, map area a blank void,
+    while elevation-chart.js (a separate script) kept working fine.
+    Confirmed with a real headless browser: exactly this console error,
+    twice, before the fix; zero errors and 15 real tile requests (200/
+    206) after it.
+
+    Regression guard: adjustLocalityLabelPriority() must never embed
+    the raw `layer.filter` value (the vendored, legacy-syntax filter)
+    inside either of the two filters it constructs — only the
+    explicit, self-built modern-expression `KIND_IS_LOCALITY` constant.
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    start = js.index("function adjustLocalityLabelPriority(layers)")
+    end = js.index("\n    }", js.index("function peakElevationLayer", start))
+    func_body = js[start:end]
+    assert "KIND_IS_LOCALITY" in func_body, "expected an explicit modern-expression kind check"
+    assert "layer.filter" not in func_body, (
+        "must not splice the vendored layer's own (legacy-syntax) filter into a new "
+        "filter array alongside modern [get, ...] expressions"
+    )
+
+
+@pytest.mark.unit
 def test_post_map_js_includes_peak_elevation_layer():
     """peakElevationLayer() (fix_peaks_cablecars_amenity_review.md
     Phase 1) is defined and appended to both the initial style and the

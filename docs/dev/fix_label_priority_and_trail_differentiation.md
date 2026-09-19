@@ -254,6 +254,82 @@ other Phase 0 discovery doc in this project.
   the goal here is fixing an actual priority mismatch for this
   project's content, not matching OSM Standard feature-for-feature.
 
+## Regression fix — legacy/modern MapLibre filter-dialect mix (real bug, found after deploy)
+
+**Symptom, reported directly by the operator**: after this doc's own
+Phase 2 deploy, the map area rendered as a blank void on post pages,
+while the elevation chart (a wholly separate script,
+`elevation-chart.js`) kept working fine — the classic signature of a
+JS exception during map initialization taking down everything
+downstream of it in `post-map.js`, without affecting unrelated scripts.
+
+**Root cause, confirmed with a real headless browser before fixing
+anything**: the vendored `static/vendor/basemaps.js` library's own
+`places_locality` layer uses **legacy MapLibre filter syntax**
+(`["==","kind","locality"]` — a bare property-name string), not the
+modern expression syntax (`["==",["get","kind"],"locality"]`) used
+everywhere else in this file's own custom layers (cycling lanes, peak
+labels). `adjustLocalityLabelPriority()` spliced that legacy filter
+directly into an `"all"` array alongside a modern `["get", ...]`
+expression — an invalid dialect mix. Reproduced the exact failure with
+a real headless Chrome (via Playwright, run as throwaway ad-hoc
+tooling per this project's own `mapbox-vector-tile` precedent, not
+added as a project dependency) against a real local post page:
+
+```
+Error: layers[69].filter[2][1]: string expected, array found
+Error: layers[71].filter[2][1]: string expected, array found
+```
+
+Because this is one layer inside the single style object passed to
+`new maplibregl.Map({style: {...}})`, MapLibre's style validator
+rejecting one layer took down the **entire** style load — base tiles
+gone too, not just the new labels. This matches the reported symptom
+exactly.
+
+**Fix**: build the `kind=="locality"` check as an explicit, self-owned
+modern expression (`KIND_IS_LOCALITY`) in both branches, instead of
+reusing the vendored layer's own (legacy-syntax) `layer.filter` value.
+
+**Done when**
+- [x] The exact reported symptom no longer reproduces — confirmed by
+  reproducing the original console errors with a real headless browser
+  against the pre-fix code, then re-running the identical check
+  post-fix: **zero console errors**, and **15 real tile network
+  requests, all `200`/`206`** (PMTiles range requests), plus a
+  substantial map-element screenshot byte size (94KB — consistent with
+  real tile imagery, not a flat blank colour).
+- [x] A regression test exists that would have caught this exact class
+  of bug, not just this one instance —
+  `test_post_map_js_locality_filters_never_splice_vendored_legacy_filter`
+  asserts the function's constructed filters never re-embed the raw
+  `layer.filter` value. Verified the test actually fails against the
+  pre-fix code (not vacuous) before confirming it passes against the
+  fix.
+- [x] No other custom layer in this file has the same dialect-mixing
+  risk — `cyclingLayers()` and `peakElevationLayer()` both build their
+  filters entirely from scratch (no vendored `layer.filter` reuse at
+  all), so this was specific to `adjustLocalityLabelPriority()` being
+  the only function that reads and modifies an existing vendored
+  layer's filter.
+
+**Testing**: 1 new unit test
+(`test_post_map_js_locality_filters_never_splice_vendored_legacy_filter`),
+plus real, live headless-browser verification (before/after) as
+described above — a stronger check than this project's usual
+"structural JS-source read, no runner" convention for `post-map.js`,
+used here specifically because the bug was a runtime style-validation
+failure that static source-reading alone couldn't have caught
+directly (the regression test catches the *pattern*, the headless
+browser check confirmed the *actual runtime behaviour*). `make ci`:
+406 passed, 96.33% coverage, security clean. `make deploy` completed;
+**re-ran the identical headless-browser check against the real
+production URL** after deploy (`https://bulliexplorer.com/posts/
+feldberg-summit-loop`): zero console errors, 16 real tile requests
+(all `200`/`206`), and a map screenshot byte size (94,323 bytes)
+matching the local post-fix verification almost exactly — the fix is
+confirmed working in production, not just locally.
+
 ## Summary
 
 Both findings resolved, at genuinely different confidence levels —
@@ -297,15 +373,28 @@ performed).
 
 - **Live visual confirmation of the label-priority fix in an actual
   browser, at the same Siebengebirge/Königswinter location used for
-  this comparison, wasn't performed** — same reasoning and same
-  category of gap as `fix_peaks_cablecars_amenity_review.md`'s own
-  Leftover: this project's stated testing convention for MapLibre
-  rendering work is manual/visual for the actual pixel result, which
-  is the operator's own check, not something this agent's text-based
-  tools can perform. The structural facts (correct filter split,
-  correct `kind_detail` conditions, correct `minzoom`, wired into both
-  call sites) are unit-tested; the actual on-screen legibility
-  improvement at that real location is the one remaining manual step.
+  this comparison, wasn't performed** — update after the regression
+  fix below: a real headless browser now *has* verified the map loads
+  and paints real tiles again at all (zero console errors, 15 real
+  tile requests). What's still not verified is the specific visual
+  legibility improvement this doc set out to make — peaks readable,
+  micro-toponyms deferred — at the exact reference zoom/location. The
+  structural facts (correct filter split, correct `kind_detail`
+  conditions, correct `minzoom`, wired into both call sites) are
+  unit-tested; that specific side-by-side legibility comparison is the
+  one remaining manual step.
+- **Regression: the first implementation of this fix broke the map
+  entirely** (see "Regression fix" section above) — a legacy/modern
+  MapLibre filter-dialect mix that MapLibre's style validator rejected,
+  taking down the whole style load. Found and fixed same-day, with
+  real headless-browser reproduction before and after, and a new
+  regression test. Worth noting for anyone touching
+  `adjustLocalityLabelPriority()` again: any future edit that reads and
+  modifies an *existing* vendored layer's `filter` (as opposed to
+  building one from scratch, like `cyclingLayers()`/
+  `peakElevationLayer()` do) needs to check the vendored filter's own
+  syntax dialect first — don't assume it matches this file's own
+  modern-expression convention.
 - **`MICRO_TOPONYM_MINZOOM = 14` is a reasoned starting point, not a
   pixel-tuned final value** — chosen from real data (one zoom level
   past where the heaviest observed micro-toponym volume was found, and
