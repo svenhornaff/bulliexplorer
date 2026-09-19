@@ -416,6 +416,28 @@
     // method: "pois" back to rendering its peak (1 result, matching the
     // stock-style baseline), this layer still rendering its own
     // elevation text (10 results) at the same time.
+    //
+    // Regression fix #3, found live in production by the operator's
+    // own side-by-side comparison against the OSM reference: the fix
+    // above stopped this layer from *hiding* the native icon+name, but
+    // introduced a different, real problem — dozens of orphaned bare
+    // elevation numbers with no icon/name next to them, scattered
+    // across minor, unnamed elevation points the native "pois" layer
+    // deliberately doesn't consider prominent enough to label yet. Real
+    // mechanism, not a guess: the native layer's own filter gates on
+    // each feature's individual `min_zoom` property (a per-feature
+    // prominence value baked into the tile data — real summits like
+    // Petersberg/Großer Ölberg/Drachenfels have a low enough min_zoom to
+    // earn their icon+name at a given zoom; minor points don't). This
+    // layer's filter had no equivalent gate — only kind=="peak" plus a
+    // flat `minzoom: 11` on the layer itself — so it fired for every
+    // peak feature in the tile regardless of that feature's own
+    // prominence, producing a number without the icon+name the native
+    // layer was correctly withholding. Fix: add the identical
+    // per-feature gate the native layer already uses, so this layer's
+    // elevation text only ever appears for peaks that also earn the
+    // native icon+name at the current zoom — genuine icon+name+
+    // elevation combos only, never an orphaned number.
     function peakElevationLayer(flavor) {
       var textColor = flavor === "dark" ? "#30C573" : "#20834D";
       var haloColor = flavor === "dark" ? "#1f1f1f" : "#e2dfda";
@@ -425,7 +447,12 @@
         source: "protomaps",
         "source-layer": "pois",
         minzoom: 11,
-        filter: ["all", ["==", ["get", "kind"], "peak"], ["has", "elevation"]],
+        filter: [
+          "all",
+          ["==", ["get", "kind"], "peak"],
+          ["has", "elevation"],
+          [">=", ["zoom"], ["+", ["get", "min_zoom"], 0]],
+        ],
         layout: {
           "text-field": ["concat", ["get", "elevation"], " m"],
           "text-font": ["Noto Sans Regular"],

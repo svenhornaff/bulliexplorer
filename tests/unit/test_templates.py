@@ -790,6 +790,44 @@ def test_post_map_js_peak_elevation_layer_never_competes_for_collision():
 
 
 @pytest.mark.unit
+def test_post_map_js_peak_elevation_layer_matches_native_prominence_gate():
+    """Regression fix #3, found live in production by a real side-by-
+    side comparison against the OSM reference at a dense real location
+    (Siebengebirge — Petersberg/Großer Ölberg/Drachenfels): once
+    regression fix #2 stopped this layer from hiding the native peak
+    label, it introduced a different real problem — dozens of orphaned
+    bare elevation numbers with no icon/name, for minor unnamed
+    elevation points the native "pois" layer deliberately doesn't
+    consider prominent enough to label yet.
+
+    Real mechanism: the native layer gates on each feature's own
+    `min_zoom` property, a per-feature prominence value baked into the
+    tile data (real summits earn a low enough min_zoom to show at a
+    given zoom; minor points don't). This layer's filter had no
+    equivalent gate, so it fired for every peak feature regardless of
+    that feature's own prominence.
+
+    Fix: add the identical `zoom >= feature.min_zoom` gate the native
+    layer already uses. Verified with a real headless browser at both
+    the original regression #2 location (Feldberg, sparse — still
+    correct) and this denser one (Siebengebirge — zero orphaned labels
+    once isolated from unrelated MapLibre collision crowding, which is
+    a separate, narrower, pre-existing trade-off of this layer's
+    text-allow-overlap design in busy areas specifically, not a bug in
+    this gate).
+    """
+    js = (STATIC_DIR / "js" / "post-map.js").read_text(encoding="utf-8")
+    start = js.index("function peakElevationLayer(flavor)")
+    end = js.index("\n    }", start)
+    func_body = js[start:end]
+    assert '[">=", ["zoom"], ["+", ["get", "min_zoom"], 0]]' in func_body, (
+        "must gate on each feature's own min_zoom, matching the native pois layer's "
+        "own prominence filter — confirmed live to otherwise produce orphaned bare "
+        "elevation numbers for minor, unnamed elevation points"
+    )
+
+
+@pytest.mark.unit
 def test_post_map_js_amenity_categories_include_cafe_and_bike_repair_station():
     """cafe/bike_repair_station (fix_peaks_cablecars_amenity_review.md
     Phase 2) have both a marker colour and an icon path — a category

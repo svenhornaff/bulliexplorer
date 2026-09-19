@@ -351,6 +351,76 @@ companion doc's filter-dialect crash fix, since this too was a runtime
 rendering behaviour static source-reading alone couldn't have caught
 directly. `make ci`: 407 passed, 96.33% coverage, security clean.
 
+## Regression fix #3 — orphaned bare elevation numbers, missing the native layer's own prominence gate
+
+**Symptom, found by the operator's own real-world comparison against
+the OSM reference at a denser real location** (Siebengebirge —
+Petersberg, Großer Ölberg, Drachenfels, near Königswinter): once
+regression fix #2 correctly restored the native peak icon+name label,
+a *different* real problem appeared — dozens of orphaned bare
+elevation numbers scattered with no icon or name next to them, for
+minor, unnamed elevation points the native `pois` layer deliberately
+doesn't consider prominent enough to label at this zoom.
+
+**Real mechanism, not a guess**: the native layer's own filter gates
+on each individual feature's `min_zoom` property — a per-feature
+prominence value baked into the tile data (real summits like
+Petersberg/Großer Ölberg/Drachenfels earn a low enough `min_zoom` to
+show at a given zoom; minor points don't). `peakElevationLayer()`'s
+filter had no equivalent gate — only `kind=="peak"` plus a flat
+`minzoom: 11` on the layer itself — so it fired for *every* peak
+feature in the tile regardless of that specific feature's own
+prominence, producing a bare number wherever the native layer was
+correctly withholding its own label.
+
+**Fix**: add the identical per-feature gate the native layer already
+uses — `[">=", ["zoom"], ["+", ["get", "min_zoom"], 0]]` — so this
+layer's elevation text only ever appears for peaks that also earn the
+native icon+name at the current zoom.
+
+**Verified with a real headless browser at two real locations**:
+- Feldberg (the original regression #2 test location, sparse area):
+  still correct after this fix — native peak renders, elevation label
+  renders, zero orphans.
+- Siebengebirge (this regression's own denser test location): with
+  the full real style, still 2 of 3 real summits showed as "orphaned"
+  by a naive same-name comparison — investigated further rather than
+  accepted at face value. Isolating just the native `pois` layer
+  against this layer alone (removing every *other* competing label)
+  showed all 3 summits rendering correctly with zero orphans,
+  confirming the apparent mismatch in the full style was ordinary
+  MapLibre collision crowding from *unrelated* labels in a busy area
+  (roads, settlements, other POIs) — not a bug in this fix. That's a
+  separate, narrower, pre-existing trade-off of regression #2's
+  `text-allow-overlap`/`text-ignore-placement` design (this layer
+  always draws regardless of collision; the native layer still
+  respects normal collision and can occasionally lose to unrelated
+  crowding in busy areas specifically) — noted honestly in Leftover
+  below rather than silently folded into "fixed."
+
+**Done when**
+- [x] The reported symptom (orphaned bare elevation numbers for minor,
+  unnamed elevation points) no longer reproduces for peaks that don't
+  meet their own prominence threshold.
+- [x] Real summits that do meet their own prominence threshold still
+  get both the native icon+name and this layer's elevation text
+  together — not a regression back to #2's original problem.
+- [x] A regression test exists
+  (`test_post_map_js_peak_elevation_layer_matches_native_prominence_gate`)
+  asserting the exact gate expression is present.
+- [x] The remaining collision-crowding nuance in dense areas is
+  investigated to a real, confirmed root cause (not left as an
+  unexplained residual difference) and disclosed honestly rather than
+  silently absorbed into "done."
+
+**Testing**: 1 new unit test
+(`test_post_map_js_peak_elevation_layer_matches_native_prominence_gate`),
+plus real, live headless-browser verification at both the sparse
+(Feldberg) and dense (Siebengebirge) locations, plus an isolation test
+(native layer alone, no other competing labels) to distinguish this
+fix's own correctness from ordinary collision crowding. `make ci`: 408
+passed, security clean.
+
 ## Summary
 
 All three parts implemented, each landing at a different confidence
@@ -425,6 +495,33 @@ the one item not yet re-checked post-deploy).
   because it doesn't touch the same style properties — check its
   effect on the native layer's own collision outcome directly, the
   same way this bug was actually found.
+- **Regression #3: `peakElevationLayer()` fired for every peak
+  regardless of that specific feature's own prominence**, producing
+  orphaned bare elevation numbers for minor, unnamed elevation points
+  the native layer deliberately doesn't label yet — fixed by adding
+  the identical per-feature `min_zoom` gate the native layer already
+  uses (see "Regression fix #3" above).
+- **A real, distinct trade-off surfaced while verifying regression
+  #3, not fully resolved and deliberately not chased further**: in
+  genuinely dense areas (verified at Siebengebirge), the native `pois`
+  layer's peak label can occasionally lose MapLibre's ordinary
+  collision fight against unrelated, more numerous nearby content
+  (roads, settlement names, other POIs) — normal, expected behaviour
+  for *any* symbol layer in a crowded scene. This layer's own
+  `text-allow-overlap`/`text-ignore-placement` (regression #2's
+  verified fix) means its elevation text keeps drawing regardless,
+  so in that specific crowded-scene edge case a bare elevation number
+  can still appear without its corresponding native icon+name right
+  next to it — not the *original* bug (this fix's own gate correctly
+  excludes low-prominence peaks), but a narrower, honestly-disclosed
+  residual mismatch inherent to regression #2's own design choice.
+  Chasing this further would mean either making this layer collision-
+  sensitive again (risking reintroducing regression #2) or querying
+  the native layer's actual runtime collision outcome per-feature
+  (meaningfully more complex, no established MapLibre mechanism for
+  it) — judged not worth the risk/complexity for a rare, cosmetic,
+  dense-area-only edge case. Flagged concretely rather than silently
+  absorbed into "done", in case it's worth revisiting later.
 - **`cafe`/`bike_repair_station` not added to `static/editor/
   config.yml`'s curated-POI dropdown** — this doc's own Phase 2 scope
   only covers the Overpass auto-discovery side (matching exactly what
