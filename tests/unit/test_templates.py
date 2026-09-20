@@ -105,6 +105,22 @@ class _FakePostWithRouteMapBlock(_FakePost):
     ]
 
 
+class _FakeOlderRoute(_FakeRoute):
+    """A second, distinct route belonging to _FakeOlderPost (post_id=2) —
+    exercises the "more rides" grid card metadata added in Phase 1 of
+    docs/dev/bulliexplorer_experience_2027.md, distinct from the hero's route
+    so a test can tell the two chip sets apart.
+    """
+
+    id = 2
+    post_id = 2
+    name = "Older Ride Loop"
+    distance_km = 42.0
+    elevation_gain_m = 310.0
+    elevation_loss_m = 305.0
+    duration_minutes = 150.0  # 2h 30min
+
+
 class _FakePOI:
     id = 1
     post_id = 1
@@ -149,7 +165,7 @@ async def _one_post_session():
     """Post-list session: 1 post, no route (1-post homepage case: hero only)."""
     yield _session(
         _result(scalars_list=[_FakePost()]),  # posts query
-        _result(scalar=None),  # latest-post route query
+        _result(scalars_list=[]),  # routes-for-all-listed-posts query
     )
 
 
@@ -157,15 +173,44 @@ async def _one_post_with_route_session():
     """Post-list session: 1 post that has a route (hero shows stat chips)."""
     yield _session(
         _result(scalars_list=[_FakePost()]),  # posts query
-        _result(scalar=_FakeRoute()),  # latest-post route query
+        _result(scalars_list=[_FakeRoute()]),  # routes-for-all-listed-posts query
     )
 
 
 async def _two_posts_session():
-    """Post-list session: 2 posts, latest has no route (2-post homepage case)."""
+    """Post-list session: 2 posts, neither has a route (2-post homepage case)."""
     yield _session(
         _result(scalars_list=[_FakePost(), _FakeOlderPost()]),  # posts query, newest first
-        _result(scalar=None),  # latest-post route query
+        _result(scalars_list=[]),  # routes-for-all-listed-posts query
+    )
+
+
+async def _two_posts_both_with_routes_session():
+    """Post-list session: 2 posts, both have routes — hero *and* grid card
+    metadata (docs/dev/bulliexplorer_experience_2027.md Phase 1) exercised
+    with distinct values so a test can tell which chip set is which.
+    """
+    yield _session(
+        _result(scalars_list=[_FakePost(), _FakeOlderPost()]),  # posts query, newest first
+        _result(scalars_list=[_FakeRoute(), _FakeOlderRoute()]),  # routes-for-all-listed-posts query
+    )
+
+
+async def _post_no_marker_with_route_session():
+    """Post-detail session: post found with a route, but body_blocks is
+    plain prose — no explicit [[route-map]] marker. This is the actual
+    shape of every real post as of Phase 1 of
+    docs/dev/bulliexplorer_experience_2027.md, and is what exercises the
+    map-first *fallback* path (as opposed to _post_with_route_session,
+    which uses _FakePostWithRouteMapBlock and so always exercised the
+    marker-based path only — the fallback path had no direct test before
+    this).
+    """
+    yield _session(
+        _result(scalar=_FakePost()),
+        _result(scalar=_FakeRoute()),
+        _result(scalars_list=[]),  # POIs query
+        _result(scalar=None),  # NearbyAmenity existence check (route is not None)
     )
 
 
@@ -260,6 +305,28 @@ async def client_with_two_posts():
     transport = ASGITransport(app=_app(_two_posts_session))
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture
+async def client_with_two_posts_both_with_routes():
+    """Homepage with 2 posts, both with routes — hero *and* grid card stats."""
+    transport = ASGITransport(app=_app(_two_posts_both_with_routes_session))
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+async def client_with_route_no_marker():
+    """Post detail with a route but no explicit [[route-map]] marker — the
+    fallback path, and the actual shape of every real post today."""
+    with patch("app.routes.posts.get_settings") as mock_settings:
+        mock_settings.return_value.tiles_url = ""
+        mock_settings.return_value.is_production = False
+        mock_settings.return_value.site_url = "https://bulliexplorer.com"
+        mock_settings.return_value.legal_name = "Sven Hornaff"
+        transport = ASGITransport(app=_app(_post_no_marker_with_route_session))
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
 
 
 @pytest.fixture
@@ -417,6 +484,39 @@ async def test_home_two_posts_older_post_not_in_hero(client_with_two_posts):
 
 
 @pytest.mark.unit
+async def test_home_two_posts_grid_card_no_route_hides_stat_chips(client_with_two_posts):
+    """Grid card metadata (docs/dev/bulliexplorer_experience_2027.md Phase 1):
+    a listed post with no Route gets no chip row, not an empty one."""
+    resp = await client_with_two_posts.get("/posts/")
+    assert "route-stats--compact" not in resp.text
+
+
+@pytest.mark.unit
+async def test_home_two_posts_grid_card_shows_route_stats(
+    client_with_two_posts_both_with_routes,
+):
+    """Grid card metadata: the older (non-hero) post's own route stats render
+    in its grid card, using its own Route row — not the hero's."""
+    resp = await client_with_two_posts_both_with_routes.get("/posts/")
+    assert resp.status_code == 200
+    assert "route-stats--compact" in resp.text
+    assert "42.0" in resp.text  # older post's Route.distance_km
+    assert "310" in resp.text  # older post's Route.elevation_gain_m
+
+
+@pytest.mark.unit
+async def test_home_two_posts_grid_card_uses_its_own_route_not_hero_route(
+    client_with_two_posts_both_with_routes,
+):
+    """Regression guard for the routes_by_post_id lookup being keyed correctly
+    — the hero's distance (68.0) must not leak into the grid card, and vice
+    versa the grid card's distance (42.0) must not appear twice as if shared."""
+    resp = await client_with_two_posts_both_with_routes.get("/posts/")
+    assert resp.text.count("68.0") == 1
+    assert resp.text.count("42.0") == 1
+
+
+@pytest.mark.unit
 async def test_post_list_links_theme_css(mock_client):
     resp = await mock_client.get("/posts/")
     assert "theme.css" in resp.text
@@ -538,6 +638,39 @@ async def test_post_with_route_shows_stats_row(client_with_route):
     resp = await client_with_route.get("/posts/test-post")
     assert resp.status_code == 200
     assert "route-stats" in resp.text
+
+
+@pytest.mark.unit
+async def test_post_with_explicit_marker_keeps_prose_before_map(client_with_route):
+    """Author-intent preservation (docs/dev/bulliexplorer_experience_2027.md
+    Phase 1): a post that explicitly authors [[route-map]] mid-body
+    (_FakePostWithRouteMapBlock, what client_with_route uses) must keep the
+    map where the author put it — after the prose — not get force-hoisted
+    to the top by the map-first fallback logic."""
+    resp = await client_with_route.get("/posts/test-post")
+    body = resp.text
+    prose_pos = body.find("Placeholder body")
+    map_pos = body.find("route-stats")
+    assert prose_pos != -1
+    assert map_pos != -1
+    assert prose_pos < map_pos
+
+
+@pytest.mark.unit
+async def test_post_with_route_no_marker_renders_map_before_prose(client_with_route_no_marker):
+    """Map-first fallback (docs/dev/bulliexplorer_experience_2027.md Phase 1):
+    a post with a route but *no* explicit [[route-map]] marker — the actual
+    shape of every real post today — must render its map/stats *before* the
+    prose, not after. This is the concrete, code-verified version of the
+    review's "trip page should read map-first" claim; the previous fallback
+    rendered this exact case after all prose, the opposite of the goal."""
+    resp = await client_with_route_no_marker.get("/posts/test-post")
+    body = resp.text
+    map_pos = body.find("route-stats")
+    prose_pos = body.find("Placeholder body")
+    assert map_pos != -1
+    assert prose_pos != -1
+    assert map_pos < prose_pos
 
 
 @pytest.mark.unit

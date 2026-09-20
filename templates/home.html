@@ -79,6 +79,7 @@ routes — one van, endless roads.{% endblock %} {% block page_header %}
                 <h2 class="post-grid-heading">More rides</h2>
                 <div class="post-grid">
                     {% for post in posts[1:] %}
+                        {% set post_route = routes_by_post_id.get(post.id) %}
                         <div class="post-preview">
                             <a href="/posts/{{ post.slug }}">
                                 <h3 class="post-title">{{ post.title }}</h3>
@@ -90,6 +91,28 @@ routes — one van, endless roads.{% endblock %} {% block page_header %}
                                 Posted by Sven on
                                 <time datetime="{{ post.published_date }}">{{ post.published_date.strftime("%B %-d, %Y") }}</time>
                             </p>
+                            {# Trip-relevant card metadata (docs/dev/bulliexplorer_experience_2027.md
+                               Phase 1) — same route stat chips as the hero card, one tier smaller,
+                               reusing existing Route columns only; "terrain type" from the review's
+                               sketch has no backing column yet, deliberately left out rather than
+                               invented here (see that doc's Leftover). #}
+                            {% if post_route %}
+                                <div class="route-stats route-stats--compact" aria-label="Ride statistics">
+                                    {% if post_route.distance_km %}
+                                        <span class="stat-item">{{ icons.icon_road() }} {{ "%.1f"|format(post_route.distance_km) }}&thinsp;km</span>
+                                    {% endif %}
+                                    {% if post_route.elevation_gain_m %}
+                                        <span class="stat-item">{{ icons.icon_arrow_up() }} {{ post_route.elevation_gain_m | int }}&thinsp;m</span>
+                                    {% endif %}
+                                    {% if post_route.duration_minutes %}
+                                        {% set dur_h = (post_route.duration_minutes / 60) | int %}
+                                        {% set dur_m = (post_route.duration_minutes % 60) | int %}
+                                        <span class="stat-item">
+                                            {{ icons.icon_clock() }} {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{ "%02d"|format(dur_m) }}min
+                                        </span>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
                         </div>
                     {% endfor %}
                 </div>

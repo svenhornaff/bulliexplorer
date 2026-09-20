@@ -35,9 +35,15 @@ async def post_list(
 
     The homepage (Phase 3, docs/dev/ui_ux_refresh.md §6.1) gives the latest
     post a larger hero treatment including its route stat chips, if it has
-    one. The route is fetched with a second, separate optional query — same
-    "never an inner join" convention as ``post_detail`` — only for the
-    latest post, not joined across the whole list.
+    one. Trip-relevant metadata (distance/elevation gain/duration) for every
+    listed post's route — not just the latest — is what
+    docs/dev/bulliexplorer_experience_2027.md Phase 1's card redesign needs
+    for the "more rides" grid, so routes for *all* listed posts are fetched
+    with one ``IN``-scoped query — still "never an inner join" against
+    ``Post``, same convention as ``post_detail``, and still exactly one
+    extra round trip regardless of post count (was already a second query
+    just for the latest post's route before this; now the same second query
+    covers every post instead of only the first).
     """
     result = await db.execute(
         select(Post)
@@ -46,16 +52,23 @@ async def post_list(
     )
     posts = result.scalars().all()
 
-    latest_route: Route | None = None
+    routes_by_post_id: dict[int, Route] = {}
     if posts:
-        route_result = await db.execute(select(Route).where(Route.post_id == posts[0].id))
-        latest_route = route_result.scalar_one_or_none()
+        routes_result = await db.execute(select(Route).where(Route.post_id.in_([p.id for p in posts])))
+        routes_by_post_id = {r.post_id: r for r in routes_result.scalars().all() if r.post_id is not None}
+
+    latest_route = routes_by_post_id.get(posts[0].id) if posts else None
 
     templates = request.app.state.templates
     return templates.TemplateResponse(
         request,
         "home.html",
-        {"posts": posts, "latest_route": latest_route, "year": datetime.now().year},
+        {
+            "posts": posts,
+            "latest_route": latest_route,
+            "routes_by_post_id": routes_by_post_id,
+            "year": datetime.now().year,
+        },
     )
 
 

@@ -444,6 +444,19 @@ p {
   margin-bottom: 0;
 }
 
+/* "More rides" grid card metadata (docs/dev/bulliexplorer_experience_2027.md
+   Phase 1) — same chip look as the hero/trip-page route-stats, scaled down
+   for a card context: less padding, smaller text, no left accent border
+   (that treatment reads right as a callout on a full-width block, too heavy
+   repeated across every card in a grid). */
+.route-stats--compact {
+  margin-top: var(--space-1);
+  margin-bottom: 0;
+  padding: 0.4rem 0.6rem;
+  border-left: none;
+  font-size: 0.8rem;
+}
+
 /* ── "More rides" grid (home.html, Phase 3, §6.1) ──────────────────────── */
 .post-grid-heading {
   margin-top: var(--space-4);
