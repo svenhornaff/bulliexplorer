@@ -477,6 +477,86 @@ invented after the fact):
    against production the same way every other phase in this doc has
    been.
 
+## Phase 2c (also elevated — audited against the full landing-page
+mockup, not just the map band) — Homepage composition gaps 📋
+researched, not implemented
+
+Asked directly whether the landing-page design was fully considered
+after Phase 2b was scoped, the honest answer was **no** — Phase 2b
+only captured the mockup's "EXPLORE THE MAP" band. Auditing the rest
+of the same mockup section-by-section against `templates/home.html`
+and `static/theme.css` surfaced three more real, previously-unlisted
+gaps. Split out into their own phase deliberately: unlike Phase 2b,
+none of these carry the MapLibre/LCP performance risk, so they don't
+need that phase's spike-first gate and can ship independently and
+sooner. **Research and scoping only, nothing below is implemented.**
+
+**Verified current-state evidence**:
+- **Hero has no call-to-action at all.** `templates/home.html`'s
+  `site-intro` block (the `page_header` override) is `<h1>` + a
+  tagline paragraph, nothing else — confirmed by direct read and by
+  `grep -n "post-hero-link\|cta\|Explore the journey" templates/
+  home.html static/theme.css` returning only the *latest-post* card's
+  own link, not a hero-level CTA. The mockup's `[ Explore the
+  journeys → ]` button doesn't exist anywhere on the page.
+- **The "latest journey" hero card has no map/route visual.** The
+  mockup shows a two-column layout (a `MAP / ROUTE` box beside the
+  title/stats/summary text); the real `post-hero` is a single stacked
+  column — cover photo, then title, then summary, then stats — with
+  zero map or route-line imagery anywhere on it. This is a *different,
+  smaller* feature from Phase 2b's aggregate all-trips map: a single
+  route's own preview, not every trip on one map.
+- **"More rides" grid cards have no photo at all.** Confirmed via
+  `grep -n "post-preview" static/theme.css` — no `background-image`
+  or `<img>` styling exists for `.post-preview`; the cards are
+  title/subtitle/date + the stat chips added in Phase 1, text-only.
+  The mockup's `[photo]` + short location/activity line
+  (`Dolomites` / `4 days · hiking`) has no visual counterpart today.
+- Nav ("Explore"/"Journal") is the fourth mockup element that doesn't
+  match reality, but it's already tracked — Phase 2b's Leftover entry
+  covers it; not repeated here.
+
+**Goal**: close the three gaps above so the homepage actually matches
+the agreed landing-page composition, independently of Phase 2b's
+larger aggregate-map feature.
+
+**Scope**
+- [ ] Add a real CTA to the hero (`[ Explore the journeys → ]` or
+  equivalent copy) — linking to Phase 2b's future map section once it
+  exists is the obvious target, but this doesn't need to wait for
+  Phase 2b: it can point at `/posts/` (today's de facto "see all
+  trips" destination) now and be repointed later. Trivial, no schema
+  or query changes.
+- [ ] Give the "latest journey" hero card an actual route-preview
+  visual. **Deliberately not a live MapLibre instance** — a static,
+  server-rendered route-overview image (already the exact "poster"
+  technique named as one of Phase 2b's technical candidates) is the
+  right fit here specifically: it's one route, doesn't need
+  interactivity, and avoids adding any MapLibre weight to the
+  homepage ahead of Phase 2b's own performance spike. Needs its own
+  small research spike: what actually generates the static image
+  (server-side rendering via a headless MapLibre/maplibre-gl-native
+  render at sync time and caching the result to R2 alongside the GPX,
+  vs. a simpler polyline-on-static-basemap image library) — not
+  decided here.
+- [ ] Add a cover-photo thumbnail to "more rides" grid cards, reusing
+  `Post.cover_image` (already exists, already used by the hero card—
+  no new field). Straightforward CSS/template work, no backend change
+  needed for this part alone.
+
+**Explicit non-goals**: the aggregate "Explore the map" band (Phase
+2b, separately gated), nav rename (Phase 2b's Leftover), country-
+flag/activity-type tags on grid cards (would need new frontmatter
+fields — `country`, `activity_type` or similar — not decided or
+scoped here; flagged as a possible Phase 2c follow-up, not assumed).
+
+**Done when**: a real browser screenshot of the homepage (same
+Playwright-with-cached-Chromium technique used for Phase 1's mobile
+verification) shows a CTA in the hero, a route-preview visual on the
+latest-journey card, and photo thumbnails on every grid card that has
+a cover image — verified visually, not just by template diff, since
+this phase is specifically about visual composition.
+
 ## Phase 3 (review's P1) — Typed content blocks ⏸️ not started this pass
 
 The real architectural evolution, building directly on the confirmed
