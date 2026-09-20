@@ -838,3 +838,27 @@ specific riskiest unknowns, acceptance criteria, and a recommended
 implementation sequence — see that section for the full scope. No
 code, tests, or config changed for this round; `make ci`/`make deploy`
 not re-run since nothing runtime changed.
+---
+
+## Open questions & decisions
+
+Every open decision surfaced across the phases above, in one place.
+Rows already resolved keep their answer in the User input column
+instead of being deleted, so the decision trail stays intact. Blank
+rows are genuinely blocking the next implementation pass on that item
+— filling them in is the fastest way to unblock this doc's Leftover
+list.
+
+| # | Phase | Question / Decision | Recommendation | User input |
+|---|-------|----------------------|-----------------|-------------|
+| 1 | Phase 2 | Keep the explicit, pattern-validated `slug` field, or drop it for Sveltia's bare `{{title}}` auto-slug default? | Keep it — auto-slug only fires at entry creation, not on later title edits, so it isn't an ongoing safety net either way; URL stability matters more than a few saved keystrokes. | **Decided 2026-09-20: keep the explicit `slug` field.** |
+| 2 | Phase 2b | Which posts appear on the homepage's aggregate map — routes only, or also POI-only posts with no GPX track? What renders for a post with neither? | Include both route posts and POI-only posts (a place-only pin beats invisibility); exclude a post entirely only if it has neither a route nor any POIs. | |
+| 3 | Phase 2b | What happens on clicking a route/marker on the aggregate map — navigate straight to the trip page, or show an inline popup (title, stats, cover thumbnail) first? | Inline popup with a link, matching the existing trip-page POI-popup pattern in `post-map.js` — consistent interaction model, one less click-vs-navigate inconsistency across the site. | |
+| 4 | Phase 2b | Where does "Explore the map" sit on the homepage — above or below the "more rides" grid? | Below the grid — keeps the existing LCP element (hero cover image) undisturbed and lets the map load only once a visitor has already scrolled past the fold. | |
+| 5 | Phase 2b | Data delivery for the aggregate map — a new `GET /trips.geojson` endpoint, or embed the aggregate directly in the homepage's own HTML? | New endpoint — mirrors the existing per-post GeoJSON pattern, is independently cacheable, and doesn't couple homepage response size to trip count as it grows. | |
+| 6 | Phase 2b | Load-timing approach for the map — `IntersectionObserver`-gated script/stylesheet injection, or a static server-rendered route-overview poster swapped for the live map on interaction? | Spike both and measure against the current ~1.45s FCP baseline before choosing — this is the phase's actual go/no-go gate, not a preference call. | |
+| 7 | Phase 2b / Leftover | Nav simplification into "Explore" / "Journal" — a same-page anchor link to the new map section, a dedicated future page, or no nav change at all? | Same-page anchor for now — cheapest, doesn't presuppose a dedicated `/explore` page that doesn't exist yet and isn't otherwise scoped. | |
+| 8 | Phase 2c | Add `country` / `activity_type` frontmatter fields to power grid-card tags (flag/activity chips), beyond what Phase 2c itself scopes? | Defer until Phase 3a's overlapping `country`/date-range decision (row 9) is made — don't add the same field twice from two different phases. | |
+| 9 | Phase 3a | Add `country` and a start/end date range to `Post`/`Route` frontmatter, replacing/supplementing the single `published_date`? | Yes, if trip pages should show "11–13 Sep 2026 · Germany" — but it's a real schema change (Pydantic schema + all 3 existing posts' frontmatter must update together, per `AGENTS.md`); worth confirming the appetite for that migration before scoping it further. | |
+| 10 | Phase 3a | "Places along the way" chip row — purely informational, or does clicking a chip scroll to / highlight the matching map marker? | Start informational-only; the interactive version edges into Phase 4's map/story-sync scope and shouldn't be built piecemeal ahead of that phase. | |
+| 11 | Phase 3a | Which of a post's `tags` (if several) counts as "the" activity-type chip shown in the stat row, versus the full tag list staying at the bottom of the article? | First tag by convention (already the de facto primary category in how tags are authored today) — avoids a new field just for this. | |
