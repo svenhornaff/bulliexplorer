@@ -57,6 +57,8 @@ jobs:
       # session — `make ci` run locally never caught it, since it always
       # ran against the already-migrated persistent dev DB.
       - name: Apply database migrations
+        env:
+          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN_APP }}
         run: uv run alembic upgrade head
 
       - name: Lint (ruff + pyright)
