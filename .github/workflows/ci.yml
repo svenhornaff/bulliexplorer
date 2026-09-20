@@ -67,6 +67,14 @@ jobs:
           uv run ruff check app tests
           uv run pyright app tests
 
+      - name: Lint templates (djlint)
+        # docs/dev/boilerplate.md §9: the authoritative linter for Jinja
+        # templates — a JS/TS-aware static analyzer will always flag
+        # `{{ ... }}` inside <script> blocks as invalid JS, but that's
+        # expected and not what this step checks. This was previously
+        # only a local `make lint` target, not a required CI gate.
+        run: uv run djlint templates/ --check
+
       - name: Test (pytest + coverage)
         env:
           GITHUB_TOKEN: ${{ env.GITHUB_TOKEN_APP }}

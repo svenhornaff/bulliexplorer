@@ -334,10 +334,23 @@ baseline:
   `HEALTHCHECK` hitting `/health`. Full deploy flow is in the tech concept
   doc's Hetzner section.
 
-**Explicitly skipped for v1:** trace-ID middleware (§6), OpenTelemetry, DAST
-(OWASP ZAP) scanning. All reasonable additions later, none earn their setup
-cost yet — same "defer until traffic/complexity justifies it" call already
-made for observability in the concept doc.
+- **Jinja templates trigger JS/TS-parser false positives, by design, not
+  by bug**: any `{{ variable | tojson }}` inside a `<script>` block (route/
+  amenity GeoJSON payloads, JSON-LD structured data) reads as invalid
+  JavaScript to a JS/TS-aware static analyzer, since it's not valid JS
+  until Jinja actually renders it. This will recur on every such block,
+  in every session — `djlint templates/ --check` is the authoritative
+  linter for this file type (now a required `ci.yml` step, not just a
+  local `make` target), and it passing is the only signal that matters.
+  Don't re-diagnose this from scratch each time it's flagged.
+
+**Explicitly skipped for v1:** trace-ID middleware (§6), OpenTelemetry.
+DAST (OWASP ZAP baseline scanning) was later added — see
+`docs/dev/security_review_owasp.md` Phase 6 (`zap-baseline.yml`,
+manually-triggered, scoped to the public homepage only). Reasonable
+additions still deferred: none earn their setup cost yet — same
+"defer until traffic/complexity justifies it" call already made for
+observability in the concept doc.
 
 ---
 
