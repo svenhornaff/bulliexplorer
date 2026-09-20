@@ -503,6 +503,73 @@ invented after the fact):
    against production the same way every other phase in this doc has
    been.
 
+**Step 2, the performance spike — done, result: PASS (go).**
+
+Built two temporary, protected probe routes
+(`/internal/perf-spike/control` and `/internal/perf-spike/lazy-map`,
+gated behind the existing `X-Resync-Token` used by `/internal/resync`
+— no new secret, and `X-Robots-Tag: noindex, nofollow` +
+`Cache-Control: private, no-store` so neither is ever reachable by a
+normal visitor or crawler), rendering the exact same real homepage
+content with and without an `IntersectionObserver`-gated MapLibre
+section above the grid — per the advisor's guidance that curl timing
+alone can't stand in for real browser paint metrics, and that a
+synthetic/local page wouldn't be an honest measurement. Deployed
+briefly to production, measured with a real browser (Playwright
+with the cached Chromium build already used for Phase 1's mobile
+screenshots — the pinned revision still fails to download in this
+sandbox), then fully removed and redeployed clean once results were
+recorded, per the advisor's explicit recommendation not to leave
+temporary probes running.
+
+Real `PerformanceObserver`-based FCP/LCP measurements, 6 interleaved
+runs per variant, fresh browser context per run (no shared cache):
+
+| Variant | FCP median | LCP median |
+|---|---|---|
+| control (no map) | 1632 ms | 1920 ms |
+| lazy-map | 1680 ms | 1820 ms |
+
+FCP difference: ~48 ms — well inside the advisor's suggested ~150 ms/
+10% regression budget. LCP was actually marginally better on the
+lazy-map variant (within run-to-run noise either way). **Note the
+absolute numbers here (~1.6s) don't match the doc's existing ~1.45s
+FCP baseline reference** — this session's network path to the
+production server runs measurably slower than whatever measured that
+original number; the *comparison* is what matters for this go/no-go
+(same network, same run, interleaved), not matching a historical
+absolute figure exactly.
+
+Separately confirmed via network-request logging (not just the paint
+timings): zero MapLibre CSS/JS/data requests fire before the section
+is scrolled near the viewport; all three fire only once it is — the
+deferral mechanism itself works, not just "happens to be cheap
+regardless."
+
+**A real, if minor, lesson from building the probe**: it used a real
+per-post `amenities.geojson` endpoint (`dream-of-north`) as a
+realistically-shaped stand-in payload for Phase 2b's not-yet-built
+aggregate endpoint, per the advisor's suggestion that this was valid
+for the FCP-isolation question specifically. That payload turned out
+to be 6.4 MB (confirmed via `curl`) — the same amenity-payload-size
+issue already documented in `docs/dev/review_17SEP2026.md` F1. Because
+it's fetched fully async, after paint, this had zero effect on the
+FCP/LCP numbers above — but it's a concrete, real warning that Phase
+2b's actual aggregate endpoint must return lightweight route
+summaries (coordinates + minimal metadata), not anything shaped like a
+per-post amenity dump, once that phase is built for real. The probe's
+minimal map-init script also deliberately omitted `pmtiles.js` (no
+protocol registration for `pmtiles://` tile URLs), so the base map
+tiles themselves didn't render in the probe — expected and irrelevant
+to the FCP question (the map canvas and GeoJSON layer both initialised
+fine), not a finding that carries into Phase 2b's real build.
+
+**Go/no-go verdict**: lazy-loading via `IntersectionObserver` is safe
+to build for real — proceed to step 3 (data contract + map/interaction)
+when this phase is picked up. Recommend deciding the aggregate
+endpoint's payload shape explicitly before starting, given the
+lesson above.
+
 ## Phase 2c (also elevated — audited against the full landing-page
 mockup, not just the map band) — Homepage composition gaps 📋
 researched, not implemented
