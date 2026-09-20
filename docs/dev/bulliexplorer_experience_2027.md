@@ -584,7 +584,7 @@ a cover image — verified visually, not just by template diff, since
 this phase is specifically about visual composition.
 
 ## Phase 3a (audited against the full trip-page mockup) — Trip-page
-metadata + Places chips 📋 researched, not implemented
+metadata + Places chips ✅ done
 
 Asked directly whether the trip-page design was fully met, the honest
 answer was **no** — same pattern as Phase 2c's landing-page audit.
@@ -653,10 +653,65 @@ fields as their own smaller schema decision.
   cross-referenced row 8 (country/`activity_type` fields for grid-card
   tags) the same way: not added, for the same reason.
 
-**Done when**: a real-browser screenshot of a trip page (same
+**Done when**: ~~a real-browser screenshot of a trip page (same
 technique used for Phase 1's mobile verification) shows an
 activity-type chip in the stat row and a Places-along-the-way chip row
-below the map, on both real posts that have POIs.
+below the map, on both real posts that have POIs.~~ **Corrected while
+verifying**: only one real post (`dream-of-north`) actually has any
+POIs — `feldberg-summit-loop` and `sunday-gravel-loop` both have empty
+`points_of_interest: []` lists (checked directly in `content/posts/`).
+The original wording presupposed 2+ POI-bearing posts that don't exist
+yet. Verified instead, live against production via `curl` post-deploy:
+- `dream-of-north`: activity chip shows "71°10′ N" (first tag) in the
+  stat row; "Places along the way" row shows a "Viewpoint" chip,
+  correctly positioned after the map/toggles and before the elevation
+  chart.
+- `feldberg-summit-loop`: activity chip shows "Black Forest"; Places
+  row correctly absent (0 POIs).
+- `sunday-gravel-loop`: activity chip shows "Gravel"; Places row
+  correctly absent (0 POIs).
+
+**Implementation notes**:
+- `app.routes.posts._poi_category_chips(pois)` (new, next to the
+  existing `_route_to_geojson`/`_pois_to_geojson` helpers) builds a
+  deduplicated, first-occurrence-ordered list of `{category, label}`
+  dicts. The humanisation rule ("gas_station" -> "Gas station", only
+  the first word capitalised) deliberately mirrors `categoryLabel()`
+  in `static/js/post-map.js` exactly, rather than introducing a second,
+  slightly different label format — the map's own POI popups and this
+  chip row now read consistently.
+- The activity chip itself needed no new backend logic —
+  `post.tags.split(",")[0].strip()` directly in `route_stats.html`,
+  guarded on `post is defined and post.tags` so the partial still
+  works from any future caller that doesn't pass `post`.
+- Both additions live in `templates/partials/route_stats.html`, which
+  is *only* ever included from `post.html` (confirmed by `grep` before
+  touching it) — `home.html`'s hero/grid stat chips are a separate,
+  inline block and were not touched.
+- Places chip row reuses `.tag-badge` (existing tag-list styling) for
+  each chip; only the `.poi-categories`/`.poi-categories-label`
+  container classes are new CSS, in `static/theme.css`.
+
+**A real, newly-discovered gap found while implementing — not fixed
+here, filed as a Leftover**: `route_stats.html` (and therefore this
+phase's whole "Places along the way" row) is only ever included when
+`route` is truthy — a post with POIs but *no* route currently renders
+no map, no stat chips, and no Places row at all. No real post
+exercises this today (all 3 have a route), but Phase 2b's own decided
+scope explicitly treats POI-only posts as real for the homepage
+aggregate map — so a POI-only trip page would currently be a dead end
+with nothing to show. Out of scope for this pass (Phase 3a assumed a
+route-bearing post, matching current real-world coverage); tracked
+below.
+
+**Tests added**: `tests/unit/test_poi_category_chips.py` (pure-function
+tests: empty list, single/duplicate/multi-word categories, dedup
+ordering, falsy-category skip) plus five new cases in
+`tests/unit/test_templates.py` (activity chip present/absent, Places
+row present/absent, and that it renders below the map, not above).
+`make ci` green: 459 tests passed, 96.38% coverage, lint/pyright/djlint
+and bandit/detect-secrets/pip-audit all clean. Deployed via `make
+deploy` and verified live as above.
 
 ## Phase 3 (review's P1) — Typed content blocks ⏸️ not started this pass
 
@@ -762,6 +817,24 @@ principle in `buckets.md`).
   recommended sequence) rather than left as a one-line Phase 4 bullet.
   Still not implemented — that section is explicitly research/scoping
   only, per the operator's own instruction for this round.
+- **POI-only trip pages currently render nothing at all.** Found while
+  implementing Phase 3a: `templates/partials/route_stats.html` (stat
+  chips, map, and now the Places chip row) is only ever `{% include
+  %}`-d from `post.html` inside a `{% if route %}` guard — confirmed
+  by reading `post.html` directly. A post with POIs but no `Route` row
+  would render no map, no stats, and no Places row at all, even though
+  it has real location data. No real post exercises this today (all 3
+  have a route), but Phase 2b's own decided scope explicitly treats
+  POI-only posts as real for the homepage aggregate map — so the first
+  POI-only post authored would land on a near-blank trip page. Fixing
+  this means restructuring `post.html`'s guard from `{% if route %}` to
+  `{% if route or pois %}` and making every block inside
+  `route_stats.html` independently conditional on what's actually
+  present (it isn't today — e.g. the map itself still hard-requires
+  `route_geojson`, not `pois_geojson` alone). Real, scoped work, not a
+  one-line fix — revisit when Phase 2b's POI-only-post support is
+  actually implemented, since that's what would make this reachable
+  from real content for the first time.
 - **Nav simplification ("Explore" / "Journal" two-mode nav)** —
   real and reasonable per the follow-up review, deliberately kept as
   its own separable decision from Phase 2b's homepage map (see that

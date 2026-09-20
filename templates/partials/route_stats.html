@@ -2,7 +2,9 @@
 — shared between post.html's [[route-map]] block dispatch and its render-time
 fallback for posts without an explicit marker. Expects `route`, `route_geojson`,
 `tiles_url`, and `icons` (the imported icons macro module) in the including
-template's context. #}
+template's context. `post` and `poi_category_chips` (Phase 3a,
+docs/dev/bulliexplorer_experience_2027.md) are optional — the activity chip
+and "Places along the way" row are each independently omitted when absent. #}
 <div class="route-stats" aria-label="Ride statistics">
     {% if route.distance_km %}
         <span class="stat-item">{{ icons.icon_road() }} {{ "%.1f"|format(route.distance_km)
@@ -23,6 +25,14 @@ template's context. #}
     <span class="stat-item">
         {{ icons.icon_clock() }} {% if dur_h %}{{ dur_h }}h&thinsp;{% endif %}{{ "%02d"|format(dur_m) }}min
     </span>
+{% endif %}
+{% if post is defined and post.tags %}
+    {# Activity-type chip (Phase 3a, docs/dev/bulliexplorer_experience_2027.md)
+    — reuses the first entry in post.tags as-is, no new frontmatter field.
+    The full tag list still renders separately at the bottom of the article
+    (post.html) unchanged — this is an additional, more prominent surfacing
+    of the same data, not a replacement. #}
+    <span class="stat-item">{{ post.tags.split(",")[0].strip() }}</span>
 {% endif %}
 {% if route.name %}
     <span class="stat-item text-muted"
@@ -71,6 +81,21 @@ independently gated exactly as before, only their order changed). #}
         <input type="checkbox" id="cyclosm-toggle-input" aria-controls="post-map" />
         Show CyclOSM cycling map
     </label>
+{% endif %}
+{# "Places along the way" chip row (Phase 3a,
+docs/dev/bulliexplorer_experience_2027.md) — informational-only, reuses the
+same POIs already loaded into pois_geojson above (no new data source).
+Decided against click-to-scroll/highlight for now; that interactive version
+stays deferred to Phase 4's map/story-sync scope rather than being built
+piecemeal here. Omitted entirely (no empty heading) when the post has no
+POIs at all — same established pattern as has_amenities above. #}
+{% if poi_category_chips %}
+    <div class="poi-categories" aria-label="Places along the way">
+        <span class="poi-categories-label text-muted">Places along the way:</span>
+        {% for chip in poi_category_chips %}
+            <span class="tag-badge">{{ chip.label }}</span>
+        {% endfor %}
+    </div>
 {% endif %}
 {# Elevation profile chart (docs/dev/elevation_profile_chart.md Tier 1) —
 gated independently of the route_geojson/tiles_url map guard above: a

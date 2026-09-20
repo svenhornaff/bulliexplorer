@@ -121,6 +121,7 @@ async def post_detail(
     # Jinja2's |tojson filter serialises these safely into <script> tags.
     route_geojson: dict[str, Any] | None = _route_to_geojson(route)
     pois_geojson: dict[str, Any] = _pois_to_geojson(list(pois))
+    poi_category_chips: list[dict[str, str]] = _poi_category_chips(list(pois))
 
     # JSON-LD structured data (docs/dev/seo_beyond_basics.md Phase 3) —
     # BlogPosting always, Trip layered in only when `route` is not None.
@@ -138,6 +139,7 @@ async def post_detail(
             "pois": pois,
             "route_geojson": route_geojson,
             "pois_geojson": pois_geojson,
+            "poi_category_chips": poi_category_chips,
             "has_amenities": has_amenities,
             "amenities_geojson_url": f"/posts/{post.slug}/amenities.geojson" if has_amenities else None,
             "tiles_url": settings.tiles_url,
@@ -201,6 +203,44 @@ async def post_amenities_geojson(
 # ---------------------------------------------------------------------------
 # GeoJSON conversion helpers — framework-free, pure Python
 # ---------------------------------------------------------------------------
+
+
+def _poi_category_chips(pois: list[PointOfInterest]) -> list[dict[str, str]]:
+    """Build a deduplicated, order-preserving list of POI category chips.
+
+    Powers the "Places along the way" chip row (Phase 3a,
+    docs/dev/bulliexplorer_experience_2027.md) below the map. Mirrors
+    ``categoryLabel()`` in ``static/js/post-map.js`` exactly — only the
+    first word of a snake_case category is capitalised (e.g.
+    ``gas_station`` -> "Gas station", not "Gas Station") — so the chip
+    row reads consistently with the labels already shown in the map's
+    own POI popups, rather than introducing a second, slightly different
+    humanisation rule.
+
+    Parameters
+    ----------
+    pois:
+        List of PointOfInterest ORM rows (may be empty), in query order.
+
+    Returns
+    -------
+    list[dict[str, str]]
+        One dict per distinct category, in first-occurrence order, each
+        with "category" (the raw slug, e.g. "bike_shop") and "label"
+        (humanised, e.g. "Bike shop") keys. Empty list if ``pois`` is
+        empty or every POI has a falsy category.
+    """
+    seen: set[str] = set()
+    chips: list[dict[str, str]] = []
+    for poi in pois:
+        category = poi.category
+        if not category or category in seen:
+            continue
+        seen.add(category)
+        words = category.split("_")
+        label = " ".join(word.capitalize() if i == 0 else word for i, word in enumerate(words))
+        chips.append({"category": category, "label": label})
+    return chips
 
 
 def _route_to_geojson(route: Route | None) -> dict[str, Any] | None:

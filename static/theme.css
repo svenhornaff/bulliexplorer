@@ -826,6 +826,19 @@ body.map-fullscreen-active {
   margin: 0 0.35rem 0.35rem 0;
 }
 
+/* "Places along the way" chip row (Phase 3a,
+   docs/dev/bulliexplorer_experience_2027.md) — reuses .tag-badge for each
+   chip, same visual family as the existing post-tag list; only the
+   container + label are new. */
+.poi-categories {
+  margin-bottom: var(--space-3);
+}
+
+.poi-categories-label {
+  font-size: 0.8rem;
+  margin-right: 0.5rem;
+}
+
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 .site-footer {
   border-top: 1px solid var(--color-border);

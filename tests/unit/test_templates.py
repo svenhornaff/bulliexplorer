@@ -248,6 +248,19 @@ async def _post_with_route_and_pois_session():
     )
 
 
+async def _post_with_route_and_tiles_no_pois_session():
+    """Post-detail session: route + tiles configured (map renders), but zero
+    POIs — Phase 3a's "Places along the way" chip row must be omitted, same
+    established omit-when-empty pattern as has_amenities.
+    """
+    yield _session(
+        _result(scalar=_FakePostWithRouteMapBlock()),
+        _result(scalar=_FakeRoute()),
+        _result(scalars_list=[]),  # POIs query
+        _result(scalar=None),  # NearbyAmenity existence check (route is not None)
+    )
+
+
 async def _post_with_route_no_elevation_session():
     """Post-detail session: route present but with no elevation_profile."""
     yield _session(
@@ -351,6 +364,19 @@ async def client_with_route_and_tiles():
         mock_settings.return_value.site_url = "https://bulliexplorer.com"
         mock_settings.return_value.legal_name = "Sven Hornaff"
         transport = ASGITransport(app=_app(_post_with_route_and_pois_session))
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+
+@pytest.fixture
+async def client_with_route_and_tiles_no_pois():
+    """Post detail with route + tiles configured, but zero POIs."""
+    with patch("app.routes.posts.get_settings") as mock_settings:
+        mock_settings.return_value.tiles_url = "pmtiles://https://example.com/tiles/black-forest.pmtiles"
+        mock_settings.return_value.is_production = False
+        mock_settings.return_value.site_url = "https://bulliexplorer.com"
+        mock_settings.return_value.legal_name = "Sven Hornaff"
+        transport = ASGITransport(app=_app(_post_with_route_and_tiles_no_pois_session))
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             yield ac
 
@@ -819,6 +845,78 @@ async def test_post_with_route_and_tiles_inlines_poi_geojson(client_with_route_a
     assert "poisGeojson" in resp.text
     assert "FeatureCollection" in resp.text
     assert "Wild Campsite" in resp.text
+
+
+@pytest.mark.unit
+async def test_post_with_route_shows_activity_chip(client_with_route):
+    """Activity-type chip (Phase 3a, docs/dev/bulliexplorer_experience_2027.md)
+    — the first entry in post.tags ("gravel,adventure" for _FakePost) shows
+    up in the stat row itself, not only in the tag list at the article's
+    bottom. Uses client_with_route (no tiles/POIs) since this chip belongs
+    to route_stats.html's top block, independent of the map or POIs.
+    """
+    resp = await client_with_route.get("/posts/test-post")
+    assert resp.status_code == 200
+    stats_start = resp.text.index('class="route-stats"')
+    stats_end = resp.text.index("</div>", stats_start)
+    stats_html = resp.text[stats_start:stats_end]
+    assert "gravel" in stats_html, "first tag must appear inside the stat row itself"
+
+
+@pytest.mark.unit
+async def test_post_no_tags_omits_activity_chip():
+    """A post with no tags at all must not render an empty activity chip."""
+
+    class _FakePostNoTags(_FakePostWithRouteMapBlock):
+        tags = None
+
+    async def _session_no_tags():
+        yield _session(
+            _result(scalar=_FakePostNoTags()),
+            _result(scalar=_FakeRoute()),
+            _result(scalars_list=[]),  # POIs query
+            _result(scalar=None),  # NearbyAmenity existence check
+        )
+
+    with patch("app.routes.posts.get_settings") as mock_settings:
+        mock_settings.return_value.tiles_url = ""
+        mock_settings.return_value.is_production = False
+        mock_settings.return_value.site_url = "https://bulliexplorer.com"
+        mock_settings.return_value.legal_name = "Sven Hornaff"
+        transport = ASGITransport(app=_app(_session_no_tags))
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            resp = await ac.get("/posts/test-post")
+    assert resp.status_code == 200
+    stats_start = resp.text.index('class="route-stats"')
+    stats_end = resp.text.index("</div>", stats_start)
+    assert 'stat-item">gravel' not in resp.text[stats_start:stats_end]
+
+
+@pytest.mark.unit
+async def test_post_with_route_and_tiles_shows_places_chip_row(client_with_route_and_tiles):
+    """ "Places along the way" chip row (Phase 3a,
+    docs/dev/bulliexplorer_experience_2027.md) — client_with_route_and_tiles
+    has one POI (_FakePOI, category="campsite"); the humanised label
+    "Campsite" must appear below the map.
+    """
+    resp = await client_with_route_and_tiles.get("/posts/test-post")
+    assert resp.status_code == 200
+    assert "Places along the way" in resp.text
+    assert '<span class="tag-badge">Campsite</span>' in resp.text
+    map_index = resp.text.index('id="map-wrap"')
+    places_index = resp.text.index("Places along the way")
+    assert map_index < places_index, "places chip row must render below the map"
+
+
+@pytest.mark.unit
+async def test_post_with_route_no_pois_omits_places_chip_row(client_with_route_and_tiles_no_pois):
+    """A post with a route and tiles but zero POIs must not render an empty
+    "Places along the way" row — same established omit-when-empty pattern
+    as has_amenities.
+    """
+    resp = await client_with_route_and_tiles_no_pois.get("/posts/test-post")
+    assert resp.status_code == 200
+    assert "Places along the way" not in resp.text
 
 
 @pytest.mark.unit
