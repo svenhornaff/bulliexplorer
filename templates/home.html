@@ -76,7 +76,12 @@ routes — one van, endless roads.{% endblock %} {% block page_header %}
                 {% endif %}
             </article>
             {% if posts[1:] %}
-                <h2 class="post-grid-heading">More rides</h2>
+                {# id="explore" is the Phase 2d nav-anchor target (see
+                templates/base.html) — stays on this heading, not the
+                heading's text, so it survives Phase 2b's decided "More
+                stories" rename and its aggregate map landing directly
+                above this section without the anchor needing to move. #}
+                <h2 class="post-grid-heading" id="explore">More rides</h2>
                 <div class="post-grid">
                     {% for post in posts[1:] %}
                         {% set post_route = routes_by_post_id.get(post.id) %}

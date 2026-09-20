@@ -431,6 +431,21 @@ async def test_post_list_has_nav(mock_client):
 
 
 @pytest.mark.unit
+async def test_nav_has_explore_anchor_before_theme_toggle(mock_client):
+    """Phase 2d, docs/dev/bulliexplorer_experience_2027.md — decided per the
+    Open questions table: a same-page "Explore" anchor in the header nav,
+    placed before the dark-mode toggle. Checked on a non-homepage route
+    (/posts/) since the anchor must work identically from any page.
+    """
+    resp = await mock_client.get("/posts/")
+    assert resp.status_code == 200
+    assert '<a href="/#explore" class="nav-explore-link">Explore</a>' in resp.text
+    explore_index = resp.text.index('class="nav-explore-link"')
+    toggle_index = resp.text.index('id="theme-toggle"')
+    assert explore_index < toggle_index, "Explore anchor must precede the dark-mode toggle"
+
+
+@pytest.mark.unit
 async def test_post_list_has_site_intro(mock_client):
     """Homepage header: site-proposition text stack (site-heading/-tagline).
     Reopened per issue tracker to include a cover photo (site-intro-cover)
@@ -500,6 +515,17 @@ async def test_home_two_posts_shows_hero_and_grid(client_with_two_posts):
     assert "A Gravel Day in the Black Forest" in resp.text  # hero (newest)
     assert "post-grid-heading" in resp.text
     assert "An Older Ride" in resp.text  # grid (older)
+
+
+@pytest.mark.unit
+async def test_home_two_posts_grid_heading_has_explore_anchor_id(client_with_two_posts):
+    """Phase 2d, docs/dev/bulliexplorer_experience_2027.md — the nav's
+    "Explore" link (/#explore) must resolve to this heading, not a dangling
+    anchor. Deliberately on the heading element, not its text, so it
+    survives Phase 2b's decided "More stories" rename.
+    """
+    resp = await client_with_two_posts.get("/posts/")
+    assert '<h2 class="post-grid-heading" id="explore">' in resp.text
 
 
 @pytest.mark.unit

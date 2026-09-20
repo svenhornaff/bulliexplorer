@@ -87,6 +87,16 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Smooth in-page scroll for the new "Explore" nav anchor (Phase 2d,
+   docs/dev/bulliexplorer_experience_2027.md) — gated on
+   prefers-reduced-motion, not the *,*::before,*::after block below (that
+   one covers transition/animation-duration, not scroll-behavior). */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
 body {
   margin: 0;
   background: var(--color-bg);
@@ -201,6 +211,20 @@ p {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* "Explore" nav anchor (Phase 2d,
+   docs/dev/bulliexplorer_experience_2027.md) — same visual treatment as
+   the .nav-links dropdown items above, since it's the same style of
+   top-level nav text, just always visible rather than tucked in the menu. */
+.nav-explore-link {
+  color: var(--color-text);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.nav-explore-link:hover {
+  color: var(--color-link);
 }
 
 .theme-toggle {

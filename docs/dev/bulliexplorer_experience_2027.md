@@ -583,6 +583,69 @@ latest-journey card, and photo thumbnails on every grid card that has
 a cover image — verified visually, not just by template diff, since
 this phase is specifically about visual composition.
 
+## Phase 2d (the one fully-decided item left from Phase 2b's Leftover) —
+Nav simplification: "Explore" anchor ✅ done
+
+The nav-simplification decision was already resolved in the Open
+questions table (row 7: "same-page 'Explore' anchor, placed in the
+header nav before the dark-mode toggle") but never carved out as its
+own phase or implemented. Confirmed with the operator before starting
+— no other candidate fit the 2b/2c/3a pattern (decided, small,
+independent of new endpoints/schema) as cleanly.
+
+**A real dependency surfaced while scoping this**: the anchor's
+natural long-term target — Phase 2b's homepage aggregate map — doesn't
+exist yet. Rather than ship a dead link or defer the whole phase on
+that account, the anchor points at the homepage's existing "more
+rides" grid heading instead, via a new `id="explore"` placed on the
+`<h2>` element itself (not its text). Phase 2b's own decided scope
+already has the aggregate map rendering directly above that same
+section, so when Phase 2b ships, the anchor id can simply move up one
+element rather than being redesigned from scratch — a one-line
+follow-up noted in Phase 2b's own text, not a new decision.
+
+**Implementation notes**:
+- `templates/base.html`: `<a href="/#explore" class="nav-explore-link">Explore</a>`
+  added to `.nav-right`, immediately before the `#theme-toggle` button
+  — matches the decided placement exactly, and works identically from
+  any page (not just the homepage), since `/#explore` always navigates
+  home first.
+- `templates/home.html`: `id="explore"` added to the `<h2
+  class="post-grid-heading">` element.
+- `static/theme.css`: `.nav-explore-link` reuses the same color/hover
+  treatment as the existing `.nav-links a` dropdown items — visually
+  it's the same style of nav text, just always visible instead of
+  tucked in the mobile menu. Also added `scroll-behavior: smooth` on
+  `html`, gated inside `@media (prefers-reduced-motion:
+  no-preference)` — deliberately not folded into the existing
+  `*,*::before,*::after { transition-duration }` reduced-motion block
+  below it, since `scroll-behavior` isn't a transition/animation and
+  that block wouldn't have covered it.
+- "Journal" as a second nav mode was explicitly not decided or scoped
+  — only the "Explore" anchor was, per the Open questions table.
+
+**A real bug caught by an existing test, not a false positive**: the
+first version of the `base.html` comment explaining this decision
+literally contained the substring "post-grid" in prose, which broke
+`test_home_one_post_has_no_more_rides_section`'s `"post-grid" not in
+resp.text` assertion — every page now always renders that HTML
+comment in its `<head>`/nav markup, 1-post homepage included. Reworded
+the comment to avoid the literal class-name substring rather than
+weakening the test.
+
+**Done when**: the "Explore" link renders in the header nav, before
+the dark-mode toggle, on every page (not just the homepage); clicking
+it on the homepage scrolls to the existing grid heading without a
+dead/missing-anchor jump; both are confirmed live via `curl` against
+production post-deploy, not just template diff.
+
+Verified live: `curl`'d both `/` and `/posts/` against production
+post-deploy — the "Explore" link renders before `#theme-toggle` on
+both, and `id="explore"` lands on the grid heading. `make ci` green:
+461 tests passed (3 new: link placement/order, anchor-target id
+presence), 96.38% coverage, lint/pyright/djlint and
+bandit/detect-secrets/pip-audit all clean.
+
 ## Phase 3a (audited against the full trip-page mockup) — Trip-page
 metadata + Places chips ✅ done
 

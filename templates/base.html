@@ -68,6 +68,17 @@
             <div class="container">
                 <a class="brand" href="/">BulliExplorer</a>
                 <div class="nav-right">
+                    <!-- "Explore" anchor (Phase 2d, decided per the Open
+                     questions table in docs/dev/bulliexplorer_experience_2027.md:
+                     "same-page 'Explore' anchor, placed in the header nav
+                     before the dark-mode toggle"). Points at the homepage's
+                     older-rides heading (templates/home.html, id="explore")
+                     for now; Phase 2b's homepage aggregate map is decided to
+                     render directly above that same section, so the anchor
+                     id moves there — not re-pointed elsewhere — once that
+                     phase ships. "Journal" as a second nav mode is not
+                     decided/scoped. -->
+                    <a href="/#explore" class="nav-explore-link">Explore</a>
                     <button type="button"
                             id="theme-toggle"
                             class="theme-toggle"
