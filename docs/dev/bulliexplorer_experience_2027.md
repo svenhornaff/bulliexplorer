@@ -304,6 +304,179 @@ against the real deployed `/editor/config.yml` — the actual, narrower
 claim this phase's title ("CMS field UX") supports, not the broader
 "fewer fields" framing the original review sketch implied.
 
+## Phase 2b (elevated from Phase 4 — operator-confirmed top priority) — Homepage "Explore the map" 📋 researched, not implemented
+
+A second, follow-up review reaffirmed the same repositioning and
+specifically re-flagged the homepage's own large interactive map as
+the highest-value item still missing. Asked directly, the operator
+confirmed this is the one thing most wanted and not yet built — not a
+speculative nice-to-have buried behind Phases 3-4, which is where the
+original review's version of this item was previously filed (see this
+doc's original Phase 4 scope and its Leftover entry, both superseded
+by this section). Per the advisor consulted for this doc's own
+scoping: this gets its own phase, inserted between Phase 2 and Phase 3
+rather than renumbering anything (`app/routes/posts.py`, `templates/
+post.html`, and `templates/home.html` all carry inline comments
+referencing this doc's "Phase 1"/"Phase 2" by number; renumbering would
+strand those references for no real benefit) — **this section is
+research and scoping only, per explicit instruction; nothing below is
+implemented yet.**
+
+**Verified current-state evidence** (so the next pass starts from real
+code, not the review's prose):
+- No aggregate "all trips" GeoJSON endpoint exists. `app/routes/
+  posts.py` has per-post `route_geojson`/`pois_geojson` (built inline
+  in `post_detail`) and a separate `/posts/{slug}/amenities.geojson`
+  route — nothing that returns every post's route/POIs in one
+  response.
+- No `/explore` route or page exists. Confirmed via `grep` across
+  `app/routes/*.py` — the only routes are `/`, `/posts/`,
+  `/posts/{slug}`, the two legal pages, and SEO/feed endpoints.
+- `templates/home.html` (Phase 1, done) has a hero, the latest post's
+  stat chips, and a "more rides" grid — confirmed by direct read,
+  zero map presence anywhere on the page today.
+- Navigation is minimal on purpose: `templates/base.html`'s nav is a
+  `<details>/<summary>` menu with a single "Home" link plus footer
+  legal links. The second review's "Explore / Journal" two-mode nav
+  sketch is real and reasonable but is its own, smaller, separable
+  decision from the map itself — not bundled into this phase (see
+  Non-goals below).
+- **The real, load-bearing prerequisite risk**: MapLibre currently
+  initializes eagerly on trip pages (confirmed in `static/js/
+  post-map.js` — no `IntersectionObserver` or any other lazy-init
+  gate, the map constructor runs on page load), and this project's own
+  `fix_lcp_image_and_static_cache.md` already documents an *unresolved*
+  LCP/FCP regression specific to route/map pages (LCP ~10.4-10.8s vs.
+  this project's own <2.5s target; FCP regressed specifically on
+  MapLibre-carrying pages, with the render-blocking `maplibre-gl.css`
+  named as a *plausible but not confirmed* mechanism — that doc is
+  explicit about the distinction). The homepage today has a healthy
+  ~1.45s FCP with zero MapLibre on it. Adding a second full MapLibre
+  instance naively would risk reproducing the same regression on the
+  site's single most-visited page — this is a go/no-go gate for this
+  phase, not a sub-task to fit in afterward (see "Riskiest unknowns"
+  below).
+
+**Goal**: the homepage gains a section where every trip's route
+appears on one interactive map, so a visitor can discover trips
+geographically, not just chronologically — the second review's
+"Explore the map" section in its homepage sketch, scoped to *just*
+that section on the existing homepage, not a new page.
+
+**Explicit non-goals for this phase** (each is real, each is a
+separable decision, none of them block shipping the homepage map on
+its own):
+- A dedicated `/explore` route/page, distinct from the homepage.
+- Nav simplification into "Explore" / "Journal" modes — real and
+  reasonable, but its own product decision (does "Explore" become a
+  page, or is it just a same-page anchor link to this new section?),
+  not assumed here.
+- Marker clustering, vector tiles, or any dedicated spatial
+  infrastructure — at 3 real posts today, a plain `FeatureCollection`
+  built from the existing `Route`/`PointOfInterest` tables is more
+  than sufficient; this project's own established "2 posts, don't
+  build for 20 yet" principle (`buckets.md`) applies directly.
+- Filtering (activity/region/duration chips from the second review's
+  sketch) — already correctly gated in this doc's Phase 4 on post
+  count actually growing; unchanged, not pulled forward.
+
+**Open product decisions, to ask the operator before implementing**
+(not assumed here, per the pattern this doc already used for the
+slug-field decision in Phase 2):
+1. Which posts appear on the map — published posts with a valid route
+   only, or also posts with only POIs and no GPX track? What renders
+   for a post with neither (excluded entirely, or shown as a
+   place-only pin)?
+2. What does clicking a route/marker do — navigate straight to the
+   trip page, or show an inline popup (title, stats, cover thumbnail)
+   with a link, matching the existing trip-page POI-popup pattern in
+   `post-map.js`?
+3. Where does the section sit on the page — above or below the "more
+   rides" grid? (Affects whether it competes with or complements the
+   grid for the homepage's own LCP element, which is currently the
+   hero's cover image.)
+
+**Technical approach candidates — not yet chosen, deliberately left
+open** (per the advisor's guidance: don't prematurely commit to one
+before a real performance spike):
+- **Data delivery**: a new `GET /trips.geojson`-style endpoint
+  (mirrors the existing per-post GeoJSON pattern, cacheable, small at
+  this post count) vs. serializing the aggregate directly into the
+  homepage's own HTML (avoids a second request, but couples the
+  homepage response size to trip count as it grows). Either is
+  reasonable at 3 posts; the tradeoff should be documented when this
+  is actually built, not guessed now.
+- **Load timing**: `IntersectionObserver`-gated construction (defer
+  `new maplibregl.Map(...)` until the section scrolls near-viewport)
+  is necessary but likely *not sufficient* on its own — it defers
+  construction, not necessarily the `maplibre-gl.css`/`maplibre-gl.js`
+  *download*, which is what the existing trip-page regression
+  implicates. A real spike needs to check whether the `<link>`/
+  `<script>` tags themselves can be deferred too (e.g. the
+  `media="print"` + `onload`-swap technique for the stylesheet,
+  dynamically injecting the `<script src>` only when the
+  `IntersectionObserver` fires) — not just the map object.
+  Alternative worth spiking as a comparison: a static server-rendered
+  route-overview image/poster as the initial paint, with the real
+  interactive map swapped in only after the visitor scrolls to it or
+  interacts — closer to the second review's own "server-render route
+  preview / poster" suggestion.
+
+**Riskiest unknowns, worth spiking before committing to an
+implementation, not just listed as sub-tasks**:
+1. **Whether lazy-loading actually fixes the homepage's LCP/FCP risk,
+   not just the trip-page one** — the existing regression's root
+   cause is still only "plausible, not confirmed" per this project's
+   own LCP doc; the homepage's baseline (1.45s FCP, no MapLibre today)
+   is different enough from a trip page's that this needs its own
+   independent before/after measurement, not an assumption that
+   whatever fixes trip pages (if anything does) also fixes this.
+2. **The aggregate data contract**, specifically: how empty/malformed
+   states render (zero routes, a route with no valid geometry, a post
+   with POIs but no route) — undefined today, and this project's own
+   "never silently drop a post's map" precedent (from Phase 1's fix)
+   argues for deciding this deliberately rather than letting whatever
+   the first implementation happens to do become the de facto answer.
+3. **Mobile/touch and no-JS fallback behavior for a large map on the
+   homepage specifically** — a full-bleed interactive map is more
+   prone to scroll-trapping on touch devices than the existing
+   trip-page maps (which are lower on the page, past the point a
+   visitor has already committed to reading that trip); this needs an
+   explicit interaction design, not an inherited default from the
+   trip-page map component.
+
+**Acceptance criteria for when this is actually implemented** (defined
+now, per this doc's own established pattern, so "done when" isn't
+invented after the fact):
+- Real before/after Lighthouse/PageSpeed runs against the live
+  homepage (same methodology as `fix_lcp_image_and_static_cache.md`'s
+  own measurements) show no material regression in LCP/FCP versus the
+  current ~1.45s FCP baseline — this is the go/no-go gate, checked
+  *before* considering the feature shippable, not after.
+- Every published post with a valid route appears on the map,
+  confirmed against the real production DB (not just a mocked test
+  fixture) the same way Phase 1's card-metadata change was verified.
+- Unit tests for the new endpoint/serialization (if that's the chosen
+  approach) and an integration test round-tripping real `Route`/
+  `PointOfInterest` geometry through it, per this project's own
+  PostGIS-testing rule in `AGENTS.md`.
+- A real-browser mobile screenshot pass (same Playwright-with-cached-
+  Chromium technique already used for Phase 1's mobile verification)
+  confirming the section doesn't trap scroll or overflow on a phone-
+  sized viewport.
+
+**Recommended implementation sequence, once this phase is picked up**:
+1. Resolve the three open product decisions above with the operator.
+2. Spike the load-timing approach in isolation and measure it against
+   the acceptance criteria's performance gate *before* building the
+   rest — if it fails, that's new information worth its own decision
+   point, not a reason to ship the feature anyway.
+3. Only then build the data contract (endpoint or embedded, per the
+   spike's findings) and the map/interaction itself.
+4. Test and verify per the acceptance criteria above, live-verified
+   against production the same way every other phase in this doc has
+   been.
+
 ## Phase 3 (review's P1) — Typed content blocks ⏸️ not started this pass
 
 The real architectural evolution, building directly on the confirmed
@@ -399,12 +572,23 @@ principle in `buckets.md`).
   above-the-fold read is now verified (previous item); interaction
   testing on a touch device is a different kind of check and still
   open.
-- **Homepage large interactive map** (Phase 1's original scope, now
-  explicitly folded into Phase 4) — the review's homepage sketch
-  includes a map showing all trips, not just the current hero+grid;
-  real, but needs its own MapLibre-source design (aggregating every
-  route/POI across posts into one map) and belongs with the other
-  map/story-sync work in Phase 4, not bolted onto this pass.
+- ~~**Homepage large interactive map**~~ (Phase 1's original scope,
+  briefly folded into Phase 4) — **superseded by Phase 2b above**. A
+  follow-up review re-flagged this specifically, the operator
+  confirmed it as the top priority, and it's been researched and
+  scoped into its own phase (open product decisions, technical
+  approach candidates, riskiest unknowns, acceptance criteria,
+  recommended sequence) rather than left as a one-line Phase 4 bullet.
+  Still not implemented — that section is explicitly research/scoping
+  only, per the operator's own instruction for this round.
+- **Nav simplification ("Explore" / "Journal" two-mode nav)** —
+  real and reasonable per the follow-up review, deliberately kept as
+  its own separable decision from Phase 2b's homepage map (see that
+  section's Non-goals) rather than assumed to require a nav change.
+  Revisit once Phase 2b's product decisions are made — whether
+  "Explore" becomes a same-page anchor to the new map section or a
+  future dedicated page changes what, if anything, the nav needs to
+  do.
 - **Phase 2 (CMS field UX)** — Phase 0's findings are in and clear the
   path (no native sections; auto-slug is Sveltia's zero-config default,
   implementable by removing the explicit `slug` field rather than
@@ -471,3 +655,29 @@ the map-first-ordering regression pair — see `tests/unit/test_
 templates.py`), 96.41% coverage, security checks unchanged/clean. No
 schema/migration changes — `post_list`'s query change and the two
 template reorders are the only runtime code touched.
+
+A later session closed Phase 1's remaining open item (real-browser
+mobile verification, via a cached Chromium build) and completed Phase
+2 (CMS field grouping, plus the slug-field product decision asked of
+and answered by the operator) — both live-verified against production.
+See those phases' own "done when"/scope sections above for the full
+account; not repeated here.
+
+A follow-up external review reaffirmed the same repositioning and
+re-flagged the homepage's own large interactive map as the highest-
+value item still missing — the operator confirmed this directly.
+**Phase 2b is the result: research and scoping only, explicitly not
+implemented this round**, per the operator's own instruction. Verified
+against real code first (no aggregate GeoJSON endpoint, no `/explore`
+route, zero map presence on the current homepage, and — the load-
+bearing risk — MapLibre initializes eagerly today with an already-
+documented, unresolved LCP/FCP regression on trip pages that a naive
+second map instance on the homepage could reproduce on the site's most-
+visited page). Scoped with the advisor's input into: verified
+current-state evidence, a goal and explicit non-goals, three open
+product decisions to ask the operator, technical-approach candidates
+left deliberately open pending a real performance spike, three
+specific riskiest unknowns, acceptance criteria, and a recommended
+implementation sequence — see that section for the full scope. No
+code, tests, or config changed for this round; `make ci`/`make deploy`
+not re-run since nothing runtime changed.
