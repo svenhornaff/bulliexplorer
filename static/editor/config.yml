@@ -46,6 +46,13 @@ collections:
     slug: "{{fields.slug}}"
     format: "frontmatter"
     fields:
+      # ── Content (bulliexplorer_experience_2027.md Phase 2) ──────────────
+      # What the post actually is: title, identity, the words and hero image.
+      # No native field-grouping/tabs in the pinned Sveltia CMS 0.208.0 (see
+      # that doc's Phase 0 finding, tracked upstream at sveltia-cms#592) —
+      # these five banner comments are the fallback: field *order* plus a
+      # visible section label, not a real collapsible UI grouping.
+
       - label: "Title"
         name: "title"
         widget: "string"
@@ -56,13 +63,6 @@ collections:
         widget: "string"
         hint: "URL path segment — e.g. 'kinzig-valley-loop'. Lowercase, hyphens only."
         pattern: ["^[a-z0-9-]+$", "Lowercase letters, digits and hyphens only"]
-
-      - label: "Published date"
-        name: "date"
-        widget: "datetime"
-        date_format: "YYYY-MM-DD"
-        time_format: false
-        hint: "Date the post is (or will be) published."
 
       - label: "Summary"
         name: "summary"
@@ -76,18 +76,6 @@ collections:
         required: false
         hint: "Uploaded to Cloudflare R2. Leave blank for the default dark header."
 
-      - label: "Tags"
-        name: "tags"
-        widget: "list"
-        required: false
-        hint: "Comma-separated list of tags, e.g. gravel, germany, bikepacking."
-
-      - label: "Draft"
-        name: "draft"
-        widget: "boolean"
-        default: true
-        hint: "Draft posts are hidden on production but visible in development."
-
       - label: "Body"
         name: "body"
         widget: "markdown"
@@ -100,8 +88,8 @@ collections:
           is omitted and this post has a route, the map still renders after
           the body automatically.
 
-      # ── Geo fields (Phase 3 — maps_gis.md) ────────────────────────────────
-      # Both fields are optional — posts without a route or POIs are unaffected.
+      # ── Trip (bulliexplorer_experience_2027.md Phase 2 / maps_gis.md) ───
+      # The GPX-backed route this post is about, if it's a ride/hike at all.
 
       - label: "Route (GPX)"
         name: "route"
@@ -121,6 +109,17 @@ collections:
               widget: "text",
               required: false,
             }
+
+      # ── Places (bulliexplorer_experience_2027.md Phase 2 / maps_gis.md) ─
+      # Named locations mentioned in the post — campsites, viewpoints, etc.
+      # "Latitude/Longitude (manual override)" below are the advanced/rarely-
+      # needed fields: geocoding from "Place name or address" on sync is the
+      # primary path (Phase 0 finding: Sveltia's List/Object `collapsed`
+      # option exists in the pinned 0.208.0, but nesting lat/lng under a
+      # collapsed sub-object would rename the frontmatter shape used by the
+      # 3 existing posts and PointOfInterestFrontmatter — a schema change
+      # deliberately out of scope for a field-ordering pass; left flat with
+      # an explicit "manual override" label instead).
 
       - label: "Points of interest"
         name: "points_of_interest"
@@ -163,7 +162,8 @@ collections:
             }
           - { label: "Notes", name: "notes", widget: "text", required: false }
 
-      # ── Body-block content (Phase 4 — ui_ux_refresh.md §5.3) ────────────
+      # ── Story Elements (bulliexplorer_experience_2027.md Phase 2 / Phase 4
+      # — ui_ux_refresh.md §5.3) ──────────────────────────────────────────
       # Both are optional and have no effect unless referenced by a
       # [[gallery:<id>]] / [[callout:<id>]] marker in the Body field above.
       # Defining one here without using its marker is simply unused, not an
@@ -228,3 +228,25 @@ collections:
             name: "body"
             widget: "text"
             hint: "Short callout text — a sentence or two, not a full section."
+
+      # ── Publishing (bulliexplorer_experience_2027.md Phase 2) ─────────
+      # Controls for when/whether this post is live, not what it says.
+
+      - label: "Published date"
+        name: "date"
+        widget: "datetime"
+        date_format: "YYYY-MM-DD"
+        time_format: false
+        hint: "Date the post is (or will be) published."
+
+      - label: "Tags"
+        name: "tags"
+        widget: "list"
+        required: false
+        hint: "Comma-separated list of tags, e.g. gravel, germany, bikepacking."
+
+      - label: "Draft"
+        name: "draft"
+        widget: "boolean"
+        default: true
+        hint: "Draft posts are hidden on production but visible in development."

@@ -313,6 +313,68 @@ def test_config_yml_draft_defaults_to_true():
 
 
 @pytest.mark.unit
+def test_config_yml_fields_grouped_into_five_conceptual_sections():
+    """docs/dev/bulliexplorer_experience_2027.md Phase 2: no native
+    sections/tabs exist in the pinned Sveltia CMS 0.208.0 (see that doc's
+    Phase 0 finding), so grouping is field *order* plus a comment banner
+    per group — this regression-guards the order itself, since a comment
+    alone can't be asserted on but the resulting field sequence can.
+    """
+    parsed = yaml.safe_load(CONFIG_YML.read_text())
+    names = [f["name"] for f in parsed["collections"][0]["fields"]]
+
+    # Content, then Trip, then Places, then Story Elements, then Publishing.
+    assert names == [
+        "title",
+        "slug",
+        "summary",
+        "cover_image",
+        "body",
+        "route",
+        "points_of_interest",
+        "galleries",
+        "callouts",
+        "date",
+        "tags",
+        "draft",
+    ]
+
+
+@pytest.mark.unit
+def test_config_yml_lat_lng_stay_flat_not_nested():
+    """Regression guard for the Phase 2 scoping decision: lat/lng on a
+    point_of_interest entry must stay flat siblings of place_query/notes,
+    not nested under a collapsed "advanced" sub-object — nesting them
+    would rename the frontmatter shape read by PointOfInterestFrontmatter
+    and written by the 3 existing posts, which is a schema change
+    deliberately out of scope for a field-ordering pass (see that doc's
+    Phase 2 notes).
+    """
+    parsed = yaml.safe_load(CONFIG_YML.read_text())
+    fields = parsed["collections"][0]["fields"]
+    poi_field = next(f for f in fields if f["name"] == "points_of_interest")
+    poi_subfield_names = {f["name"] for f in poi_field["fields"]}
+    assert "lat" in poi_subfield_names
+    assert "lng" in poi_subfield_names
+
+
+@pytest.mark.unit
+def test_config_yml_slug_field_still_explicit_and_required():
+    """Regression guard for the Phase 2 product decision (kept, not
+    dropped for Sveltia's bare {{title}} auto-slug default): the explicit,
+    pattern-validated slug field must still exist and still be required,
+    and the collection's slug template must still key off it.
+    """
+    parsed = yaml.safe_load(CONFIG_YML.read_text())
+    posts = parsed["collections"][0]
+    assert posts["slug"] == "{{fields.slug}}"
+    fields = posts["fields"]
+    slug_field = next(f for f in fields if f["name"] == "slug")
+    assert slug_field.get("required") is not False  # required by default (no required: false)
+    assert slug_field["pattern"][0] == "^[a-z0-9-]+$"
+
+
+@pytest.mark.unit
 async def test_editor_bare_redirect(mock_client):
     """GET /editor (no trailing slash) also redirects."""
     resp = await mock_client.get("/editor", follow_redirects=False)

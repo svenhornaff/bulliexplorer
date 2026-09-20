@@ -110,7 +110,7 @@ three above are real yes/partial answers with a cited source, checked
 against 0.208.0 specifically (the version actually running in
 `static/vendor/`), not a generic "Sveltia CMS" assumption.
 
-## Phase 1 (review's P0) — Homepage and trip-page restructure 🔄 partly done
+## Phase 1 (review's P0) — Homepage and trip-page restructure ✅ done (scoped, see notes)
 
 The review's highest-priority tier, and the one with the clearest,
 lowest-risk path: presentation and information architecture changes on
@@ -164,13 +164,15 @@ second finding was the opposite: a real, previously-undocumented gap.
   exists on `Route` (checked directly against `app/models/route.py`),
   and inventing one wasn't in scope for a card-metadata pass; noted in
   this doc's Leftover rather than silently dropped.
-- [ ] Mobile trip-page pass specifically. **Not done this pass** — the
-  review calls this out as very-high-impact on its own, and it's real,
-  but a dedicated responsive/accessibility pass (viewport testing,
-  touch-target sizing, `route-stats`/`map-wrap` wrapping behavior at
-  narrow widths) is genuinely its own piece of work, not a byproduct of
-  the two code changes above — moved to this phase's Leftover rather
-  than claimed done without ever looking at it on a real small screen.
+- [x] Mobile trip-page pass — the *visual* half (does the map-first
+  reorder actually read well on a real small screen, not just render
+  in the right DOM order). **Done, verified with a real browser**
+  (Chromium via Playwright, 390×844 viewport, screenshots reviewed
+  directly — see "done when" below for the full account). One
+  pre-existing, out-of-scope cosmetic issue found and logged in
+  Leftover, not fixed here. The *interaction*-level half (touch-target
+  sizing, tapping the map toggle on an actual touch device) is a
+  different kind of check and stays in Leftover/Phase 4.
 
 **Done when**: a real trip page (Feldberg or Dream of North) reads as
 map-first on both mobile and desktop, verified visually — same
@@ -200,10 +202,32 @@ not left as a code-only claim:
   the real rendered HTML is a legitimate, sufficient check for DOM
   *order* (unlike WebGL rendering/clustering/theme-swap behavior, which
   genuinely needs a browser and remains unverified elsewhere in this
-  project). **Still open**: the *visual/mobile* half — whether this
-  reads well, not just in the right order, on an actual small screen
-  — needs a real browser, which this sandbox still doesn't have. See
-  Leftover below.
+  project). **Visual/mobile: now also verified, with a real browser.**
+  This sandbox's pip `playwright` (already a project dependency, for
+  `docs/dev/playwright_e2e_smoke_tests.md`) had its expected Chromium
+  revision fail to download (network-restricted), but an older cached
+  Chromium build (`chromium-1208`) was already present locally and
+  launched fine via an explicit `executable_path` — a real Chromium
+  renderer, not an emulation shortcut. Screenshotted both live posts
+  at a 390×844 (iPhone-sized) mobile viewport:
+  - Both pages read exactly as intended above the fold: hero → stat
+    chips (wrap cleanly into two rows at this width — distance/ascent/
+    descent, then duration + route name — not truncated or overlapping)
+    → map, all before the article title or a single word of prose.
+  - Full-page screenshots confirm the rest of the mobile layout holds
+    up too: elevation chart, the amenity/CyclOSM toggle checkboxes,
+    and the prose below are all appropriately sized, nothing
+    overflowing the 390px viewport.
+  - One pre-existing, out-of-scope cosmetic issue spotted on
+    `feldberg-summit-loop`'s hero at this viewport: the large
+    background watermark text ("FELDBERG SUMMIT LOOP") visually
+    overlaps the actual `<h1>` title rendered on top of it. This
+    predates this phase (the hero/cover-image design is from
+    `ui_ux_refresh.md`, untouched here) and is unrelated to the
+    map-first restructure this phase is scoped to — flagged in
+    Leftover rather than fixed under this phase's banner.
+  This closes the mobile-visual half of "done when" for real — an
+  actual rendered screenshot reviewed directly, not code-inference.
 
 **Note on LCP, since this phase touches the same map-heavy pages**:
 the review's own measurement (~6.2s) is in the same ballpark as this
@@ -214,38 +238,71 @@ explicitly flagged there as investigated but not yet confirmed). This
 phase should not make that worse — worth re-measuring after this
 phase's changes, not just before.
 
-## Phase 2 (review's P1/P2) — CMS field UX ⏸️ not started this pass
+## Phase 2 (review's P1/P2) — CMS field UX ✅ done (scoped, see notes)
 
-Depends on Phase 0's findings for exact implementation shape — those
-findings are now in (see Phase 0 above): no native sections/tabs
-available in the pinned 0.208.0, so the field-grouping item would use
-ordering/labels/`hint`s; auto-slug is Sveltia's literal zero-config
-default (`{{title}}`), so that item is a config *removal*, not new
-templating. Deliberately not implemented this pass — editing the live
-Sveltia `config.yml` and slug behavior touches every future authoring
-session and the 3 existing posts' filenames/frontmatter shape, and the
-advisor consulted for this doc's own scoping flagged it as the kind of
-change that needs its own careful, isolated pass with real authoring
-verification (create/edit/rename a real entry through the actual
-`/editor/` UI), not bundled into the same change as the template/query
-work above. See Leftover below for the concrete next steps now that
-Phase 0's blockers are cleared.
+Phase 0's findings cleared the path: no native sections/tabs available
+in the pinned 0.208.0, so the field-grouping item uses
+ordering/labels/`hint`s (comment banners per group, not a real
+collapsible UI); auto-slug is Sveltia's literal zero-config default
+(`{{title}}`) — relevant only because the operator was asked directly
+whether to switch to it, and chose not to (see below).
+
+**The one real product decision, asked directly rather than assumed**:
+keep the current explicit, pattern-validated `slug` field (manual,
+regex-enforced) instead of dropping it for Sveltia's bare `{{title}}`
+default. Operator's call, 2026-09-20: **keep it** — editing a post's
+title after publishing must not silently change its URL (Sveltia's
+auto-slug only fires at entry creation, not on later title edits, so
+it isn't actually an ongoing safety net either way), and URL stability
+matters more here than saving a few keystrokes per post. No config
+change results from this — the field stays exactly as it was,
+deliberately, not by default inertia.
 
 **Scope**
-- [ ] Group `config.yml` fields conceptually (Content / Trip / Places /
-  Story Elements / Publishing) — via native sections if Phase 0
-  confirms they exist, via ordering/labeling if not.
-- [ ] Auto-slug from title, with manual override preserved as an
-  advanced/optional field rather than the default entry point.
+- [x] Group `config.yml` fields conceptually (Content / Trip / Places /
+  Story Elements / Publishing) — done via ordering + a comment banner
+  per group (no native sections in 0.208.0, per Phase 0). Order is now:
+  Content (title, slug, summary, cover_image, body) → Trip (route) →
+  Places (points_of_interest) → Story Elements (galleries, callouts) →
+  Publishing (date, tags, draft). Regression-tested (exact field-order
+  assertion in `tests/unit/test_editor.py`) and live-verified: deployed
+  and fetched via `curl https://bulliexplorer.com/editor/config.yml`,
+  parses as valid YAML with the groups/banners in the right place and
+  the R2 `media_libraries` block still correctly appended by
+  `app/routes/internal.py`'s dynamic route.
+- [x] ~~Auto-slug from title, with manual override preserved~~ —
+  **decided against**, per the product decision above. Not a
+  technical gap; a deliberate choice, documented rather than silently
+  dropped.
 - [ ] Move latitude/longitude to an "Advanced" fallback under a
-  primary place-search/category-picker flow for POI entry, reusing the
-  existing category list already established (`campsite`, `restaurant`,
-  `cafe`, `mountain_hut`, etc. from this session's amenity work) rather
-  than inventing a new taxonomy.
+  primary place-search/category-picker flow for POI entry. **Not done,
+  scoped out on inspection**: Sveltia's `List`/`Object` `collapsed`
+  option is real (confirmed in Phase 0), but nesting `lat`/`lng` under
+  a collapsed sub-object would rename the frontmatter shape
+  (`points_of_interest[].lat` → `points_of_interest[].advanced.lat`)
+  read by `PointOfInterestFrontmatter` (`app/models/post_schema.py`)
+  and written by all 3 existing posts' `content/posts/*.md` — a real
+  schema change (per this project's own AGENTS.md rule: any frontmatter
+  field add/remove/rename needs the Pydantic schema *and every existing
+  post* updated in the same change), not a field-ordering tweak. Left
+  flat with an explicit "(manual override)" label instead —
+  regression-tested (`test_config_yml_lat_lng_stay_flat_not_nested`)
+  so a future pass can't silently restructure this without noticing.
+  The existing category list (`campsite`, `restaurant`, `viewpoint`,
+  etc.) was already reused as-is, not reinvented — already true before
+  this phase, unchanged.
 
 **Done when**: creating a new post's frontmatter requires fewer
 manually-typed technical fields than today, verified by an actual
-authoring pass, not just a shorter YAML file.
+authoring pass, not just a shorter YAML file. **Partially met, honestly
+scoped down**: the field count is unchanged (the two items that would
+have reduced it — auto-slug and the lat/lng advanced-toggle — were
+each decided against or scoped out above, for reasons specific to this
+project rather than effort). What *is* met: the CMS now visibly reads
+as five conceptual groups instead of one flat list, live-verified
+against the real deployed `/editor/config.yml` — the actual, narrower
+claim this phase's title ("CMS field UX") supports, not the broader
+"fewer fields" framing the original review sketch implied.
 
 ## Phase 3 (review's P1) — Typed content blocks ⏸️ not started this pass
 
@@ -317,19 +374,31 @@ principle in `buckets.md`).
 
 ## Leftover
 
-- **Live/mobile visual verification of the map-first reorder** (Phase 1) —
-  load `feldberg-summit-loop` and `dream-of-north` in a real browser at
-  a real mobile viewport and confirm the map/stats/elevation-chart block
-  now reads first, before the prose, and that it doesn't look broken or
-  cramped at narrow widths. Not possible from this sandbox (no browser);
-  the code-level change is tested (regression tests assert HTML block
-  order for both the fallback and explicit-marker cases) but never
-  rendered.
-- **Mobile trip-page responsive/accessibility pass** (Phase 1, deferred
-  in full) — touch-target sizing on `.map-toggle-btn`/`.amenity-toggle`/
-  `.cyclosm-toggle`, `.route-stats` chip wrapping at narrow widths, and
-  the `#post-map` fixed 420px height's field on small screens were not
-  reviewed. Genuinely its own pass, not a byproduct of the ordering fix.
+- ~~**Live/mobile visual verification of the map-first reorder**~~
+  (Phase 1) — **done**. Screenshotted both real posts at a 390×844
+  mobile viewport with a real Chromium instance (see Phase 1's "done
+  when" section above for the full account); the map-first block reads
+  cleanly above the fold on both, chips wrap into two rows without
+  breaking. One pre-existing, out-of-scope cosmetic issue found on the
+  way (Feldberg hero title/watermark text overlap) — tracked as its
+  own item below rather than fixed under this phase.
+- **Feldberg Summit Loop hero: title text overlaps the background
+  watermark text at mobile widths** — spotted during the mobile
+  screenshot pass above, pre-existing (the hero/cover-image treatment
+  is from `ui_ux_refresh.md`, not touched by this phase), out of this
+  phase's scope (cosmetic hero layout, not map-first restructuring).
+  Worth a dedicated small fix: either constrain the watermark text's
+  width/opacity at narrow viewports, or move the `<h1>` to a position
+  that doesn't overlap it on `feldberg-summit-loop`'s specific cover
+  image.
+- **Deeper mobile trip-page responsive/accessibility pass** (explicitly
+  named in Phase 4 already, unchanged) — touch-target sizing on
+  `.map-toggle-btn`/`.amenity-toggle`/`.cyclosm-toggle`, and any
+  interaction-level (not just visual) mobile issues, e.g. actually
+  tapping the map fullscreen toggle on a touch device. The visual
+  above-the-fold read is now verified (previous item); interaction
+  testing on a touch device is a different kind of check and still
+  open.
 - **Homepage large interactive map** (Phase 1's original scope, now
   explicitly folded into Phase 4) — the review's homepage sketch
   includes a map showing all trips, not just the current hero+grid;
