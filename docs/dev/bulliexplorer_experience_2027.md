@@ -366,11 +366,16 @@ that section on the existing homepage, not a new page.
 **Explicit non-goals for this phase** (each is real, each is a
 separable decision, none of them block shipping the homepage map on
 its own):
-- A dedicated `/explore` route/page, distinct from the homepage.
-- Nav simplification into "Explore" / "Journal" modes — real and
-  reasonable, but its own product decision (does "Explore" become a
-  page, or is it just a same-page anchor link to this new section?),
-  not assumed here.
+- A dedicated `/explore` route/page, distinct from the homepage —
+  still deferred; the nav decision below resolves to a same-page
+  anchor, not a new page.
+- Nav simplification into "Explore" / "Journal" modes — **decided**:
+  add a same-page "Explore" anchor link into `templates/base.html`'s
+  header nav, placed before the dark-mode toggle. Still filed as a
+  non-goal *of this phase specifically* because it's a template/nav
+  change independent of the map itself and can ship on its own
+  timeline; "Journal" (as a second nav mode) isn't decided or scoped
+  — only the "Explore" anchor was.
 - Marker clustering, vector tiles, or any dedicated spatial
   infrastructure — at 3 real posts today, a plain `FeatureCollection`
   built from the existing `Route`/`PointOfInterest` tables is more
@@ -380,21 +385,36 @@ its own):
   sketch) — already correctly gated in this doc's Phase 4 on post
   count actually growing; unchanged, not pulled forward.
 
-**Open product decisions, to ask the operator before implementing**
-(not assumed here, per the pattern this doc already used for the
-slug-field decision in Phase 2):
-1. Which posts appear on the map — published posts with a valid route
-   only, or also posts with only POIs and no GPX track? What renders
-   for a post with neither (excluded entirely, or shown as a
-   place-only pin)?
-2. What does clicking a route/marker do — navigate straight to the
-   trip page, or show an inline popup (title, stats, cover thumbnail)
-   with a link, matching the existing trip-page POI-popup pattern in
-   `post-map.js`?
-3. Where does the section sit on the page — above or below the "more
-   rides" grid? (Affects whether it competes with or complements the
-   grid for the homepage's own LCP element, which is currently the
-   hero's cover image.)
+**Product decisions — resolved by the operator** (recorded here per
+the pattern this doc already used for the slug-field decision in
+Phase 2; see also the Open questions & decisions table at the end of
+this doc):
+1. **Which posts appear on the map**: route+POI posts and POI-only
+   posts both appear; a post with neither a route nor any POI is
+   never on the map (grid-only). Ordering/sort tiers for the map's own
+   post list: route+POI posts first, then POI-only posts, then
+   everything else by `published_date` newest-first. The originally
+   proposed "most comments/likes" top tier was dropped — no
+   comments/likes/engagement-count feature exists anywhere in this
+   codebase (confirmed by `grep`), and building one is explicitly out
+   of scope for this phase; the sort is 3-tier, not 4.
+2. **Click behavior**: navigate straight to the post the marker/route
+   belongs to. No inline popup — decided against this doc's own
+   recommendation (an inline popup matching the trip-page POI-popup
+   pattern), operator preference for direct navigation instead.
+3. **Section placement**: **above** the "more rides" grid — also
+   decided against this doc's own recommendation (which favored
+   below, to protect the homepage's LCP element). This needs to be
+   accounted for explicitly in the load-timing spike (risk item 1
+   below): a map placed above the grid is closer to the viewport on
+   page load, which changes how much runway an `IntersectionObserver`
+   gate actually has before the map enters view.
+4. **Grid rename**: the "more rides" grid becomes **"More stories"** —
+   the site's content scope is broadening beyond van/gravel trips (the
+   operator named hiking and cooking as real near-term post
+   categories, not hypothetical), so the heading needed to stop
+   presupposing "rides." This is a small, independent template change
+   that can ship on its own, ahead of the rest of this phase.
 
 **Technical approach candidates — not yet chosen, deliberately left
 open** (per the advisor's guidance: don't prematurely commit to one
@@ -466,11 +486,17 @@ invented after the fact):
   sized viewport.
 
 **Recommended implementation sequence, once this phase is picked up**:
-1. Resolve the three open product decisions above with the operator.
+1. ~~Resolve the open product decisions above with the operator~~ —
+   **done**, recorded above and in the Open questions & decisions
+   table.
 2. Spike the load-timing approach in isolation and measure it against
    the acceptance criteria's performance gate *before* building the
    rest — if it fails, that's new information worth its own decision
-   point, not a reason to ship the feature anyway.
+   point, not a reason to ship the feature anyway. The spike must
+   specifically account for the section now sitting **above** the
+   grid (decided), not below as this doc originally recommended —
+   less scroll runway before the map enters view than the deferred
+   recommendation assumed.
 3. Only then build the data contract (endpoint or embedded, per the
    spike's findings) and the map/interaction itself.
 4. Test and verify per the acceptance criteria above, live-verified
@@ -611,23 +637,21 @@ fields as their own smaller schema decision.
 
 **Scope**
 - [ ] Move (or duplicate) an activity-type chip into the stat row
-  itself, sourced from `post.tags` as-is — no new field, just a
-  template/CSS change plus deciding which tag (if several) is "the"
-  activity type shown up top versus the full tag list staying at the
-  bottom.
+  itself, sourced from `post.tags` as-is — no new field. **Decided**:
+  the first tag in `post.tags` (comma-separated, order as authored) is
+  "the" activity-type chip shown up top; the full tag list stays
+  rendered at the bottom as-is, unchanged.
 - [ ] Add a "Places along the way" chip row below the map, grouping
   the same POIs already loaded into `pois_geojson` by category (reuse,
-  not a new data source) — needs a decision on whether chips are
-  purely informational or link back to the map/scroll to the marker
-  (the latter edges toward Phase 4's map/story-sync scope, so decide
-  deliberately rather than drift into it here).
-- [ ] **Open product decision, not assumed**: is a trip's `country`
-  and start/end date range (vs. the current single `published_date`)
-  worth adding as real frontmatter fields? This is a genuine schema
-  change (per `AGENTS.md`'s rule: needs the Pydantic schema *and* all
-  3 existing posts' frontmatter updated together) — worth asking the
-  operator directly before scoping further, same as the slug-field and
-  Phase 2b decisions earlier in this doc.
+  not a new data source). **Decided**: informational-only for now, no
+  click-to-scroll/highlight — the interactive version stays correctly
+  deferred to Phase 4's map/story-sync scope, not built piecemeal here.
+- **Decided — no**: adding a `country`/date-range frontmatter field is
+  explicitly *not* happening for now ("keep it simple, no
+  over-engineering" — operator). The stat row keeps `published_date`
+  only, no location/date-range line. This also resolves Phase 2c's
+  cross-referenced row 8 (country/`activity_type` fields for grid-card
+  tags) the same way: not added, for the same reason.
 
 **Done when**: a real-browser screenshot of a trip page (same
 technique used for Phase 1's mobile verification) shows an
@@ -842,23 +866,20 @@ not re-run since nothing runtime changed.
 
 ## Open questions & decisions
 
-Every open decision surfaced across the phases above, in one place.
-Rows already resolved keep their answer in the User input column
-instead of being deleted, so the decision trail stays intact. Blank
-rows are genuinely blocking the next implementation pass on that item
-— filling them in is the fastest way to unblock this doc's Leftover
-list.
+Every open decision surfaced across the phases above, in one place. Rows already resolved keep their answer in the User input column instead of being deleted, so the decision trail stays intact. Blank rows are genuinely blocking the next implementation pass on that item — filling them in is the fastest way to unblock this doc's Leftover list.
 
-| # | Phase | Question / Decision | Recommendation | User input |
-|---|-------|----------------------|-----------------|-------------|
-| 1 | Phase 2 | Keep the explicit, pattern-validated `slug` field, or drop it for Sveltia's bare `{{title}}` auto-slug default? | Keep it — auto-slug only fires at entry creation, not on later title edits, so it isn't an ongoing safety net either way; URL stability matters more than a few saved keystrokes. | **Decided 2026-09-20: keep the explicit `slug` field.** |
-| 2 | Phase 2b | Which posts appear on the homepage's aggregate map — routes only, or also POI-only posts with no GPX track? What renders for a post with neither? | Include both route posts and POI-only posts (a place-only pin beats invisibility); exclude a post entirely only if it has neither a route nor any POIs. | |
-| 3 | Phase 2b | What happens on clicking a route/marker on the aggregate map — navigate straight to the trip page, or show an inline popup (title, stats, cover thumbnail) first? | Inline popup with a link, matching the existing trip-page POI-popup pattern in `post-map.js` — consistent interaction model, one less click-vs-navigate inconsistency across the site. | |
-| 4 | Phase 2b | Where does "Explore the map" sit on the homepage — above or below the "more rides" grid? | Below the grid — keeps the existing LCP element (hero cover image) undisturbed and lets the map load only once a visitor has already scrolled past the fold. | |
-| 5 | Phase 2b | Data delivery for the aggregate map — a new `GET /trips.geojson` endpoint, or embed the aggregate directly in the homepage's own HTML? | New endpoint — mirrors the existing per-post GeoJSON pattern, is independently cacheable, and doesn't couple homepage response size to trip count as it grows. | |
-| 6 | Phase 2b | Load-timing approach for the map — `IntersectionObserver`-gated script/stylesheet injection, or a static server-rendered route-overview poster swapped for the live map on interaction? | Spike both and measure against the current ~1.45s FCP baseline before choosing — this is the phase's actual go/no-go gate, not a preference call. | |
-| 7 | Phase 2b / Leftover | Nav simplification into "Explore" / "Journal" — a same-page anchor link to the new map section, a dedicated future page, or no nav change at all? | Same-page anchor for now — cheapest, doesn't presuppose a dedicated `/explore` page that doesn't exist yet and isn't otherwise scoped. | |
-| 8 | Phase 2c | Add `country` / `activity_type` frontmatter fields to power grid-card tags (flag/activity chips), beyond what Phase 2c itself scopes? | Defer until Phase 3a's overlapping `country`/date-range decision (row 9) is made — don't add the same field twice from two different phases. | |
-| 9 | Phase 3a | Add `country` and a start/end date range to `Post`/`Route` frontmatter, replacing/supplementing the single `published_date`? | Yes, if trip pages should show "11–13 Sep 2026 · Germany" — but it's a real schema change (Pydantic schema + all 3 existing posts' frontmatter must update together, per `AGENTS.md`); worth confirming the appetite for that migration before scoping it further. | |
-| 10 | Phase 3a | "Places along the way" chip row — purely informational, or does clicking a chip scroll to / highlight the matching map marker? | Start informational-only; the interactive version edges into Phase 4's map/story-sync scope and shouldn't be built piecemeal ahead of that phase. | |
-| 11 | Phase 3a | Which of a post's `tags` (if several) counts as "the" activity-type chip shown in the stat row, versus the full tag list staying at the bottom of the article? | First tag by convention (already the de facto primary category in how tags are authored today) — avoids a new field just for this. | |
+  
+
+| #   | Phase               | Question / Decision                                                                                                                                                                     | Recommendation                                                                                                                                                                                                                                                     | User input                                                                                                               |
+| --- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Phase 2             | Keep the explicit, pattern-validated `slug` field, or drop it for Sveltia's bare `{{title}}` auto-slug default?                                                                         | Keep it — auto-slug only fires at entry creation, not on later title edits, so it isn't an ongoing safety net either way; URL stability matters more than a few saved keystrokes.                                                                                  | **Decided 2026-09-20: keep the explicit `slug` field.**                                                                  |
+| 2   | Phase 2b            | Which posts appear on the homepage's aggregate map — routes only, or also POI-only posts with no GPX track? What renders for a post with neither?                                       | Include both route posts and POI-only posts (a place-only pin beats invisibility); exclude a post entirely only if it has neither a route nor any POIs.                                                                                                            | **Decided**: route+POI posts, then POI-only posts, then everything else by `published_date` newest-first, in the grid only (never on the map if it has neither). No comments/likes tier — that feature doesn't exist; dropped after clarifying, per Phase 2b's updated text. |
+| 3   | Phase 2b            | What happens on clicking a route/marker on the aggregate map — navigate straight to the trip page, or show an inline popup (title, stats, cover thumbnail) first?                       | Inline popup with a link, matching the existing trip-page POI-popup pattern in `post-map.js` — consistent interaction model, one less click-vs-navigate inconsistency across the site.                                                                             | go to the post the marker is from                                                                                        |
+| 4   | Phase 2b            | Where does "Explore the map" sit on the homepage — above or below the "more rides" grid?                                                                                                | Below the grid — keeps the existing LCP element (hero cover image) undisturbed and lets the map load only once a visitor has already scrolled past the fold.                                                                                                       | **Decided**: above the grid (against the recommendation — noted as a load-timing spike consideration in Phase 2b). Grid itself renamed **"More stories"**, since content is broadening beyond rides (hiking, cooking, etc. — confirmed real, not hypothetical). |
+| 5   | Phase 2b            | Data delivery for the aggregate map — a new `GET /trips.geojson` endpoint, or embed the aggregate directly in the homepage's own HTML?                                                  | New endpoint — mirrors the existing per-post GeoJSON pattern, is independently cacheable, and doesn't couple homepage response size to trip count as it grows.                                                                                                     | new endpoint                                                                                                             |
+| 6   | Phase 2b            | Load-timing approach for the map — `IntersectionObserver`-gated script/stylesheet injection, or a static server-rendered route-overview poster swapped for the live map on interaction? | Spike both and measure against the current ~1.45s FCP baseline before choosing — this is the phase's actual go/no-go gate, not a preference call.                                                                                                                  | agree with recommendation                                                                                                |
+| 7   | Phase 2b / Leftover | Nav simplification into "Explore" / "Journal" — a same-page anchor link to the new map section, a dedicated future page, or no nav change at all?                                       | Same-page anchor for now — cheapest, doesn't presuppose a dedicated `/explore` page that doesn't exist yet and isn't otherwise scoped.                                                                                                                             | **Decided**: same-page "Explore" anchor, placed in the header nav before the dark-mode toggle. "Journal" as a second nav mode not decided/scoped. |
+| 8   | Phase 2c            | Add `country` / `activity_type` frontmatter fields to power grid-card tags (flag/activity chips), beyond what Phase 2c itself scopes?                                                   | Defer until Phase 3a's overlapping `country`/date-range decision (row 9) is made — don't add the same field twice from two different phases.                                                                                                                       | **Decided, per row 9: no.** Same "keep it simple" answer applies to both. |
+| 9   | Phase 3a            | Add `country` and a start/end date range to `Post`/`Route` frontmatter, replacing/supplementing the single `published_date`?                                                            | Yes, if trip pages should show "11–13 Sep 2026 · Germany" — but it's a real schema change (Pydantic schema + all 3 existing posts' frontmatter must update together, per `AGENTS.md`); worth confirming the appetite for that migration before scoping it further. | **Decided: no.** "Keep it simple, no over-engineering for now." Stat row keeps `published_date` only; no location/date-range line. |
+| 10  | Phase 3a            | "Places along the way" chip row — purely informational, or does clicking a chip scroll to / highlight the matching map marker?                                                          | Start informational-only; the interactive version edges into Phase 4's map/story-sync scope and shouldn't be built piecemeal ahead of that phase.                                                                                                                  | agree with recommendation                                                                                                |
+| 11  | Phase 3a            | Which of a post's `tags` (if several) counts as "the" activity-type chip shown in the stat row, versus the full tag list staying at the bottom of the article?                          | First tag by convention (already the de facto primary category in how tags are authored today) — avoids a new field just for this.                                                                                                                                 | **Decided**: first tag (e.g. cycling, hiking, cooking, ...) — confirms tags already span non-travel categories today. |
