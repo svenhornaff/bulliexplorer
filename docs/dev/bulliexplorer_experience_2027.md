@@ -557,6 +557,83 @@ latest-journey card, and photo thumbnails on every grid card that has
 a cover image — verified visually, not just by template diff, since
 this phase is specifically about visual composition.
 
+## Phase 3a (audited against the full trip-page mockup) — Trip-page
+metadata + Places chips 📋 researched, not implemented
+
+Asked directly whether the trip-page design was fully met, the honest
+answer was **no** — same pattern as Phase 2c's landing-page audit.
+Checked the review's trip-page mockup section-by-section against the
+real `templates/post.html`, `templates/partials/route_stats.html`,
+`app/models/post.py`, and `app/models/route.py`. Most of it is genuinely
+there (title, hero photo, prose, interactive route map, elevation
+profile all confirmed present by direct read); four gaps were not
+previously listed anywhere in this doc.
+
+**Verified current-state evidence**:
+- **No date range or country anywhere in the data model.** `Post` has
+  a single `published_date` (the date it was posted, not a trip's
+  start/end), and neither `Post` nor `Route` has a `country` (or any
+  location-name) field — confirmed by reading both models in full.
+  The mockup's "11–13 September 2026 · Germany" line needs new fields,
+  not just new template markup.
+- **Activity type exists but isn't surfaced where the mockup wants
+  it.** `post.tags` (free-text, already populated on real posts —
+  e.g. "Black Forest, Hiking") is already rendered, but only as tag
+  badges at the very bottom of the article, not as a chip in the
+  stat row up top the way the mockup shows "Gravel" beside the
+  distance/elevation stats. This is a placement/reuse gap, not a
+  missing-field gap — cheaper to close than the other three.
+- **No "trip length in days" concept.** `route.duration_minutes` is
+  GPX-derived moving time (hours/minutes, confirmed in `partials/
+  route_stats.html`'s own duration rendering), not a calendar-day
+  span. The mockup's "3 days" has no equivalent source field today.
+- **"PLACES ALONG THE WAY" chip row doesn't exist.** POIs today are
+  only ever markers on the map itself (`_pois_to_geojson` in `app/
+  routes/posts.py`, rendered by `post-map.js`'s category-coloured
+  marker elements) — there's no standalone summary list of POI
+  categories below the map, confirmed by `grep` across `templates/`
+  returning nothing for "places along"/similar.
+
+**Explicitly not new findings — already tracked elsewhere, not
+repeated as gaps here**:
+- Numbered photo/POI markers along the route, linked to specific
+  gallery photos — covered by Phase 4's map/story-sync item ("the
+  most technically ambitious item in the whole review"), unchanged.
+- "THE JOURNEY" day-by-day narrative sections with a per-day map
+  highlight — needs day-grouping as a content-authoring concept,
+  which is what Phase 3's typed-blocks work below actually enables;
+  cross-referenced, not duplicated as its own item here.
+
+**Goal**: close the two cheapest gaps (activity-type chip placement,
+Places-along-the-way summary) without waiting on Phase 3's larger
+block-model rework; treat the date-range/country and trip-day-count
+fields as their own smaller schema decision.
+
+**Scope**
+- [ ] Move (or duplicate) an activity-type chip into the stat row
+  itself, sourced from `post.tags` as-is — no new field, just a
+  template/CSS change plus deciding which tag (if several) is "the"
+  activity type shown up top versus the full tag list staying at the
+  bottom.
+- [ ] Add a "Places along the way" chip row below the map, grouping
+  the same POIs already loaded into `pois_geojson` by category (reuse,
+  not a new data source) — needs a decision on whether chips are
+  purely informational or link back to the map/scroll to the marker
+  (the latter edges toward Phase 4's map/story-sync scope, so decide
+  deliberately rather than drift into it here).
+- [ ] **Open product decision, not assumed**: is a trip's `country`
+  and start/end date range (vs. the current single `published_date`)
+  worth adding as real frontmatter fields? This is a genuine schema
+  change (per `AGENTS.md`'s rule: needs the Pydantic schema *and* all
+  3 existing posts' frontmatter updated together) — worth asking the
+  operator directly before scoping further, same as the slug-field and
+  Phase 2b decisions earlier in this doc.
+
+**Done when**: a real-browser screenshot of a trip page (same
+technique used for Phase 1's mobile verification) shows an
+activity-type chip in the stat row and a Places-along-the-way chip row
+below the map, on both real posts that have POIs.
+
 ## Phase 3 (review's P1) — Typed content blocks ⏸️ not started this pass
 
 The real architectural evolution, building directly on the confirmed
