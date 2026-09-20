@@ -343,7 +343,11 @@ startup without error.
   `content/posts/`, with a real cover image.
 - [ ] Cover image goes in `static/uploads/` for now (gitignored per the
   boilerplate) — the R2 media pipeline is its own later slice; don't
-  block the first post on it.
+  block the first post on it. (Doc-drift audit note: superseded, not
+  simply done-or-not — `media_storage_r2.md` later moved cover images
+  off `static/uploads/`/git entirely onto R2; leaving unchecked rather
+  than marking done, since the plan as literally written here no
+  longer describes the current architecture at all.)
 - [x] Judge the `summary`-as-subtitle question against this real content —
   decide split-or-keep now, while changing it costs one migration and
   one file edit.

@@ -120,6 +120,20 @@ existing `log_factory` JSON formatter (uvicorn supports `--log-config`
 deliberately. Low urgency; becomes real the day logs get shipped
 anywhere.
 
+**Doc-drift audit correction**: the *specific* per-request example
+cited above (`"GET / HTTP/1.1" 200 OK`) no longer reproduces —
+`Dockerfile`'s uvicorn `CMD` gained `--no-access-log` in `cb4fb03`
+("Add German legal pages and minimize monitoring data"), a later,
+unrelated commit, which suppresses exactly that per-request access-log
+line. Confirmed this landed *after* this review was written (`cb4fb03`
+is not an ancestor of this doc's own creation commit `d38e705`), so the
+evidence was accurate at the time, just never revisited once an
+unrelated change happened to resolve part of it. The narrower general
+finding still holds, unresolved: uvicorn's own startup/lifecycle
+messages (`INFO: Application startup complete`, etc.) remain
+plain-text, still distinct from the app's JSON logs — just not via the
+specific access-log example originally given.
+
 ---
 
 ## Tech debt register (smaller items, tracked so they don't need re-finding)

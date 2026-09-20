@@ -254,6 +254,30 @@ run both standalone and after a full `make ci` run.
 
 ## Leftover
 
+- **Doc-drift audit finding (real, currently unresolved, found
+  independently of this doc's own writing)**: this doc's Summary
+  claims the CI migration-gap bug was "fixed... re-verified clean
+  against the same fresh container." That fix (adding an "Apply
+  database migrations" step) genuinely works when tested —
+  independently re-confirmed during the audit: `uv run alembic upgrade
+  head` runs cleanly against both a brand-new local `postgis/postgis:
+  16-3.4` container and a completely fresh `uv sync`'d venv, matching
+  this doc's own original reproduction method exactly. **But the real
+  GitHub Actions CI is failing again right now**, on the identical
+  "Apply database migrations" step, on every run today (confirmed via
+  the real Actions API — `workflows/ci.yml/runs` shows `"conclusion":
+  "failure"` on the 5 most recent `develop` runs, including the run
+  for this exact repo's own most recent commit). Root cause not found
+  despite a genuine attempt: `.venv/bin/pyright`-style local
+  reproduction succeeded cleanly both ways tried, ruling out the
+  migrations/lockfile/dependencies themselves; the actual GitHub
+  Actions job log requires admin/write repo access this environment
+  doesn't have (`403` on the logs endpoint), and `act` (a local
+  Actions-runner emulator) isn't installed here. Flagged honestly as
+  "unverifiable from here" per this audit's own instruction, not
+  guessed at either direction — needs the operator's own GitHub
+  Actions log access to diagnose further. Tracked as a new item in
+  `buckets.md`.
 - **The exact same destructive-reconciliation exposure already exists
   in `tests/integration/`, and is real, not theoretical** — found
   while restoring local dev content a second time: after a full `make

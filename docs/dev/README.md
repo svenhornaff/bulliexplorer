@@ -25,7 +25,9 @@ change, not a separate chore.
 | `cloudflare_r2_setup.md` | R2 bucket/CORS/credentials setup reference. |
 | `review_17SEP2026.md` | The most recent full-codebase review — findings, tech-debt register, and the implementation log working through them. |
 | `prompts.md` | Prompt template for implementing one phase of a multi-phase doc — reusable process, not tied to one feature. |
+| `doc_audit_prompt.md` | Companion to `prompts.md` — that one drives implementing a single phase; this one drives periodically checking whether the whole `docs/dev/` set still tells the truth (checkbox states vs. real code, header/body self-contradictions, README entries vs. the docs they point to, docs silently missing from this index). Doc-drift audit correction: this file existed but wasn't indexed here at all — exactly the kind of gap its own process is designed to catch. |
 | `legal_gdpr.md` | Legal/GDPR release notes — required `LEGAL_*` env vars, the `LEGAL_ADDRESS`/virtual-address reasoning, classification semantics. Consult before touching `/impressum` or `/datenschutz`. |
+| `privacy_data_flows.md` | GDPR data-flow matrix — every data flow (hosting, logs, Sentry, PMTiles/R2, Nominatim, Overpass, theme cookie, GPX/route content, CMS, contact email), each with a purpose/legal-basis note and a retention/transfer/verification action. Doc-drift audit: this file existed but wasn't indexed here at all; also found one stale row while checking it — "Resync client-address log removed" was accurate at the pinned commit but a later, legitimate security fix (`security_review_owasp.md`) re-added source-IP logging on auth-failure paths for a good reason, and this row was never reconciled with that. Corrected in place rather than silently left wrong. |
 | `DATA_PROCESSING.md` | Internal RoPA-style record of concrete infrastructure facts (hosting entity/location, monitoring vendor/region/plan, storage vendor/region hint, log rotation) — never published. The source of truth `datenschutz.md`'s abstracted categories trace back to; keep current as the stack changes. |
 
 ## Historical — implemented; kept as the record of what was decided and why
@@ -39,7 +41,7 @@ something that already exists, not to decide what to do next.
 | `maps_gis.md` | Maps & GIS, Phases 1–5 (schema, GPX parsing, geocoding, PMTiles, rendering) — bucket #1. |
 | `gis_refactor.md` | Europe-wide basemap swap + coverage-check safeguard, following `maps_gis.md`. |
 | `gis_cycling_upgrade.md` | Cycling-specific tile layers + nearby-amenity discovery (Overpass) — bucket #1 follow-on. |
-| `elevation_profile_chart.md` | Elevation profile chart — Tier 1 (static chart, storage + rendering) not started, Tier 2 (Komoot-style hover sync) optional/additive on top. |
+| `elevation_profile_chart.md` | Elevation profile chart — Tier 1 (static chart, storage + rendering) done: `Route.elevation_profile` column, migration `4a7b4678b2db`, `elevation-chart.js` wired into `post.html`/`route_stats.html`. Tier 2 (Komoot-style hover sync) also done, hover-sync only — zoom/pan deferred, per the operator's own choice recorded in the doc. |
 | `fix_overpass_urban_density_timeout.md` | Overpass resilience: timeout → mirror → split → 429 backoff. |
 | `fix_incremental_amenity_writes.md` | Per-chunk amenity writes so partial Overpass failures don't lose completed work. |
 | `fix_startup_blocking_amenity_sync.md` | Moved amenity discovery off the startup-blocking path into a background task. |
@@ -53,7 +55,7 @@ something that already exists, not to decide what to do next.
 | `media_storage_r2.md` | R2 media library (browser→R2 uploads via Sveltia) — bucket #5. |
 | `post_and_backend.md` | Original post/backend architecture — FastAPI + Jinja2 + Markdown sync design. |
 | `editor_cms.md` | Sveltia CMS integration (`/editor/`) + GitHub webhook auto-publish design. |
-| `ui_ux_refresh.md` | 2026 UI/UX refresh concept — bucket #2 (signed off; Phase 1 not started, still current for *when* it starts). |
+| `ui_ux_refresh.md` | 2026 UI/UX refresh — bucket #2. Doc-drift audit correction: this entry previously said "Phase 1 not started"; verified against real commits/code instead — Phases 1-4 (Bootstrap retirement, dark mode, editorial homepage, post-body block vocabulary) have all shipped. Only Phase 5 (Hardening — accessibility pass, 200%-zoom check, Lab-CWV re-measurement) remains genuinely open. |
 | `issues_phase4.md` | Bugs found and fixed after `ui_ux_refresh.md` Phase 4 — all resolved. |
 | `legal_gdpr_classification_refactor.md` | Legal classification decision (`LEGAL_CLASSIFICATION=personal`), the deploy/passthrough bugs that followed, `LEGAL_ADDRESS` becoming optional for `/datenschutz`, and the later de-detailing of the public notice to recipient categories only. |
 | `seo_beyond_basics.md` | SEO beyond the basics, Sept-2026-evidence-checked — bucket #4. AI training/citation crawler split in `robots.txt` (operator decision: block training, allow citation), `sitemap.xml`/`feed.xml`, OpenGraph/Twitter Card meta, and `BlogPosting`/`Trip` JSON-LD. |

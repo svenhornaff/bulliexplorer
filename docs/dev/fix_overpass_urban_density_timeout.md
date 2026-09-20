@@ -102,10 +102,15 @@ splits) rather than open-ended.
 
 **Scope**
 - [x] `_HTTP_TIMEOUT_S`: `35.0` → `90.0` in `overpass.py`.
-- [ ] Re-run the sync for `dream-of-north` and check whether the
+- [x] Re-run the sync for `dream-of-north` and check whether the
   Rhineland chunk now succeeds outright — if it does, Phase 2 may not
   even be necessary; if it still times out, that's useful evidence the
   problem is genuinely structural, not just "35s was a bit tight."
+  (Doc-drift audit correction: this was left unchecked even though the
+  "Done when" section immediately below — already `[x]` — documents
+  this exact re-run's real result, a genuine 504 from `overpass-api.de`
+  itself. The action described here obviously happened; only the
+  checkbox above it was never ticked.)
 
 **Done when**
 - [x] Either the chunk succeeds (informs whether Phase 2 is still

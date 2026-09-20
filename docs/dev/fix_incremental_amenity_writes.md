@@ -153,8 +153,16 @@ anything new.
   `route_id=3` gets non-zero rows *during* the run, not only if/when it
   fully completes — checked via the same `SELECT ... GROUP BY route_id`
   query used throughout this investigation, run partway through a sync
-  rather than only after. **Not yet verified live** — no production
-  access from this sandbox; left for the user's next deploy + resync.
+  rather than only after. **Still not verified this specifically** —
+  doc-drift audit update, real new evidence, not the same claim as
+  before: `dream-of-north` now genuinely has 21,673 amenity rows live
+  in production (confirmed via `GET /posts/dream-of-north/amenities.
+  geojson` against the real deployed site), so the *sync itself*
+  demonstrably completes successfully end-to-end at real scale. What
+  remains unconfirmed is narrower than the original claim: actually
+  observing a non-zero, still-growing row count mid-sync (not just
+  confirming the eventual completed result) — nobody has captured that
+  specific timing snapshot.
 
 **Design decisions made during implementation** (confirmed with the
 user before proceeding — this changes `sync_amenities`'s transaction

@@ -1,10 +1,18 @@
 # BulliExplorer — UI/UX Refresh for 2026
 
 > Concept doc for bucket #2 from `buckets.md`. All blocking decisions in
-> §9 are signed off; implementation (Phase 1) has not started yet — this
-> is the plan, written before any code changes, the same way
-> `maps_gis.md` was written before bucket #1's implementation. Nothing
-> below is shipped.
+> §9 are signed off. **Doc-drift audit correction**: this header
+> previously claimed "implementation (Phase 1) has not started yet...
+> Nothing below is shipped" — stale even at the time it was last edited.
+> Verified against real commits and code: Phases 1-4 have all shipped
+> (`d431d5e`/`47d38b9` Phase 1 — Bootstrap genuinely removed, confirmed
+> via `grep -ri bootstrap static/ templates/` returning only a
+> historical comment; `2063071`/`0026bc4` Phase 2 — dark mode
+> confirmed live via `data-theme`/`theme-toggle` in `base.html`;
+> `c583a61` Phase 3; `89827fd` Phase 4 — the `[[route-map]]`/
+> `[[gallery:]]`/`[[callout:]]` block vocabulary confirmed real in
+> `app/services/post_blocks.py`). Only **Phase 5 (Hardening)** remains
+> open — its own checkboxes below are still unchecked, matching reality.
 
 ---
 
