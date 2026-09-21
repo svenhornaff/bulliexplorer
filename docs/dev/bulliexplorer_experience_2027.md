@@ -570,6 +570,194 @@ when this phase is picked up. Recommend deciding the aggregate
 endpoint's payload shape explicitly before starting, given the
 lesson above.
 
+### Step 3 — the data contract 📋 scoped, not implemented
+
+Picking up exactly where the spike left off, with its one concrete
+lesson (the 6.4 MB amenity-shaped stand-in payload) treated as a
+hard constraint on the schema, not a footnote.
+
+**Delivery mechanism — decided here, not left open**: a new
+`GET /trips.geojson` endpoint, not data embedded in the homepage's own
+HTML. Reasoning: it mirrors the existing per-post GeoJSON pattern
+(`/posts/{slug}/amenities.geojson`) this codebase already has, it's
+independently cacheable without coupling to the homepage response's
+own cache lifetime, and — the deciding factor — it keeps the
+`IntersectionObserver` deferral *complete*. The spike confirmed zero
+MapLibre JS/CSS/data requests fire before near-viewport; embedding the
+payload in the homepage's initial HTML would quietly undo that for the
+data itself, sending it to every visitor whether or not they ever
+scroll to the map.
+
+**Schema — deliberately minimal, the direct answer to the spike's
+lesson**:
+
+```json
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": { "type": "LineString", "coordinates": [...] },
+      "properties": {
+        "slug": "feldberg-summit-loop",
+        "title": "Feldberg Summit Loop",
+        "distance_km": 25.2,
+        "elevation_gain_m": 974,
+        "tier": "route"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [...] },
+      "properties": {
+        "slug": "some-poi-only-post",
+        "title": "...",
+        "tier": "poi_only"
+      }
+    }
+  ]
+}
+```
+
+**Explicitly excluded from this schema, by name, so it doesn't
+reappear as scope creep later**: full-resolution GPX coordinates (a
+simplified/decimated polyline only — precision suitable for a
+whole-Europe zoomed-out view, not turn-by-turn trip-page accuracy),
+`elevation_profile`, any amenity/POI-detail data beyond the single
+representative point needed for a `tier: "poi_only"` marker, and
+anything else that isn't directly rendered by the homepage map itself.
+If the homepage map's click behavior ever needs more than a
+slug-based navigation (already decided: click → navigate to the post,
+no inline popup), that's a schema change to make deliberately then,
+not something to over-provision for now.
+
+**Which posts, and in what order — already decided, restated here as
+the literal query this endpoint runs**: posts with a route (tier
+`route`) first, POI-only posts (tier `poi_only`) second, both groups
+newest-`published_date`-first within their tier; a post with neither a
+route nor any POI never appears in the response at all.
+
+**Empty/malformed-state handling — decided explicitly, per the
+spike's risk #2, not left to whatever the first implementation happens
+to do**:
+- **Zero qualifying posts** (a genuinely empty site, or a future state
+  where content types other than routes dominate): the endpoint
+  returns a valid, empty `FeatureCollection` — `{"type":
+  "FeatureCollection", "features": []}` — never a 404 or an error. The
+  frontend section itself simply doesn't render (no broken empty map
+  shown to a visitor) when the response has zero features.
+- **A route with invalid/missing geometry** (a real data-integrity
+  case, distinct from "no route at all"): excluded from this aggregate
+  response, and a `logger.warning()` fires server-side naming the
+  post — this project's established "log anomalies, don't silently
+  swallow" convention (`security_review_owasp.md`'s auth-logging fix,
+  same reasoning applied here). This is intentionally *different* from
+  the per-post trip page's own "never silently drop a post's map"
+  precedent: that rule protects a single post's own page from losing
+  its map; this is an aggregate, discovery-oriented view where quietly
+  excluding one bad row is the right behavior, logged so it doesn't go
+  unnoticed rather than surfaced to every homepage visitor.
+- **A POI-only post with POI coordinates but no route**: renders as a
+  `tier: "poi_only"` point feature, per the already-decided ordering —
+  not excluded, not treated as an error state.
+
+**Caching**: a moderate `Cache-Control` (content changes on sync, not
+on every request — nowhere near as static as the versioned assets from
+`fix_lcp_image_and_static_cache.md`, but far from request-volatile
+either). A short `max-age` (minutes, not the static-asset pattern's
+year-long `immutable`) is the right shape; exact value worth setting
+once real traffic patterns exist, not guessed precisely here.
+
+**Scope**
+- [ ] `GET /trips.geojson` route in `app/routes/posts.py` (or a new
+  `app/routes/trips.py` if that reads cleaner — a real, small naming
+  decision to make at implementation time, not a blocker to scoping
+  now).
+- [ ] Serialization function producing the schema above from the
+  existing `Route`/`PointOfInterest` tables — a coordinate-simplification
+  step for the LineString (worth checking whether Shapely's own
+  simplify, already a dependency per this project's geometry work
+  elsewhere, is sufficient before reaching for anything new).
+- [ ] The three-way empty/malformed/POI-only handling above,
+  implemented exactly as decided, not as whatever falls out of the
+  query naturally.
+- [ ] `Cache-Control` header matching the reasoning above.
+
+**Done when**
+- A real request to `/trips.geojson` against production data returns a
+  correctly-tiered, correctly-ordered `FeatureCollection` — checked
+  against the actual current 3 posts, not a fixture alone.
+- Payload size is checked and stated explicitly against the 6.4 MB
+  lesson — this endpoint's response should be small enough that citing
+  an exact KB figure here (once built) is itself part of the "done"
+  evidence, not assumed safe by construction.
+- A deliberately-malformed test fixture (invalid geometry) is excluded
+  from the response and produces exactly one `logger.warning()` — not
+  zero, not an unhandled exception.
+- Unit tests for the serialization function (tiering, ordering,
+  malformed-geometry exclusion, empty-input handling) plus an
+  integration test round-tripping real `Route`/`PointOfInterest`
+  geometry through the live endpoint, per `AGENTS.md`'s PostGIS-testing
+  rule — matching this doc's own already-stated acceptance criteria.
+
+**Explicitly out of scope for this step**: the actual MapLibre
+section/markup/interaction on the homepage (the next, final part of
+Phase 2b once this contract exists), and anything from the schema's
+own "explicitly excluded" list above.
+
+### Step 3 — implemented ✅
+
+`GET /trips.geojson`, `app/routes/trips.py` (the naming decision left
+open above: a new file, mirroring `app/routes/seo.py`'s root-level, no-
+prefix convention rather than nesting under `/posts`).
+
+**Real, checked evidence against the doc's own "Done when" above —
+not assumed safe by construction**:
+
+- **Payload size**: 28,979 bytes (~28.3 KB) total for the 3 real
+  production posts, `Cache-Control: public, max-age=300` present.
+  Nowhere near the spike's 6.4 MB lesson — but getting there required
+  a real correction, not just following the spike's stated tolerance.
+  The schema's own promise ("precision suitable for a whole-Europe
+  zoomed-out view") was checked against real geometry, not assumed:
+  `dream-of-north`'s 63,395 raw track points simplified to 4,822
+  coordinates at the originally-planned 0.001° tolerance — not
+  "pointless for a whole-Europe view" at all. Retuned to 0.01°
+  (~1.1 km) after checking multiple tolerance values against all 3
+  real routes' actual PostGIS geometry (`ST_AsText`/`ST_NPoints` via
+  the production DB): `dream-of-north` 63,395 → 841,
+  `sunday-gravel-loop` 16,318 → 490, `feldberg-summit-loop` 695 → 5.
+- **Tiering/ordering**: confirmed on the live endpoint against the 3
+  real posts — all 3 currently have routes (no POI-only post exists
+  yet in production), so the `route`-tier-first, POI-only-tier-second
+  split is verified structurally via the integration test's synthetic
+  fixtures (real Postgres round-trip, not mocked), not yet observable
+  on live production data until a POI-only post exists.
+- **Malformed-geometry handling**: unit-tested directly against the
+  pure `_route_feature`/`_poi_only_feature` functions with an
+  unparseable geometry value — excluded, exactly one
+  `logger.warning()` each, confirmed via `caplog`.
+- **Tests**: 8 new tests (6 unit — `tests/unit/test_trips_geojson.py`,
+  covering the tiering/ordering/malformed/empty-input cases from this
+  step's acceptance criteria directly against the pure serialization
+  functions; 2 integration —
+  `tests/integration/test_trips_geojson_integration.py`, round-tripping
+  real `Route`/`PointOfInterest` PostGIS geometry through the live
+  endpoint via a real Postgres container, per `AGENTS.md`'s rule).
+  `make ci` green: 469 tests, 95.28% coverage,
+  lint/pyright/djlint/bandit/detect-secrets/pip-audit all clean.
+- **A real bug caught and fixed while building this, not a false
+  positive**: FastAPI's `Depends`-injected `response: Response`
+  pattern silently drops its headers when the endpoint returns
+  `JSONResponse(...)` directly instead of mutating the injected object
+  — the same class of gotcha already hit and documented while building
+  Phase 2b's spike probes; sidestepped here by passing
+  `headers={...}` directly to the `JSONResponse` constructor instead.
+
+**Go/no-go for the next step**: safe to proceed to Phase 2b's final
+piece — the actual MapLibre section/markup/interaction on the
+homepage, per this step's own explicit "out of scope" boundary above.
+
 ## Phase 2c (also elevated — audited against the full landing-page
 mockup, not just the map band) — Homepage composition gaps 📋
 researched, not implemented

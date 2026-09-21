@@ -289,6 +289,7 @@ def create_app() -> FastAPI:
     from app.routes.legal import router as legal_router
     from app.routes.posts import router as posts_router
     from app.routes.seo import router as seo_router
+    from app.routes.trips import router as trips_router
 
     # /impressum and /datenschutz are HTML pages, not an API — a bare JSON
     # 503 body (FastAPI's HTTPException default) reads as a broken API
@@ -306,6 +307,7 @@ def create_app() -> FastAPI:
 
     app.include_router(legal_router)
     app.include_router(seo_router)
+    app.include_router(trips_router)
     app.include_router(home_router)
     app.include_router(posts_router)
     app.include_router(editor_router)
