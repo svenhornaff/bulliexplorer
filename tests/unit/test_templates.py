@@ -518,14 +518,54 @@ async def test_home_two_posts_shows_hero_and_grid(client_with_two_posts):
 
 
 @pytest.mark.unit
-async def test_home_two_posts_grid_heading_has_explore_anchor_id(client_with_two_posts):
-    """Phase 2d, docs/dev/bulliexplorer_experience_2027.md — the nav's
-    "Explore" link (/#explore) must resolve to this heading, not a dangling
-    anchor. Deliberately on the heading element, not its text, so it
-    survives Phase 2b's decided "More stories" rename.
+async def test_home_two_posts_explore_section_has_anchor_id(client_with_two_posts):
+    """Phase 2b's final piece, docs/dev/bulliexplorer_experience_2027.md —
+    the nav's "Explore" link (/#explore) must resolve to the map section
+    itself, not the grid below it (moved off the grid heading, where an
+    earlier Phase 2d comment had assumed it would permanently stay,
+    before this section actually existed to be the real target).
     """
     resp = await client_with_two_posts.get("/posts/")
-    assert '<h2 class="post-grid-heading" id="explore">' in resp.text
+    assert '<section class="explore-map-section" id="explore"' in resp.text
+
+
+@pytest.mark.unit
+async def test_home_grid_heading_renamed_more_stories(client_with_two_posts):
+    """Phase 2b product decision: "more rides" -> "More stories" (content
+    scope broadening beyond van/gravel trips).
+    """
+    resp = await client_with_two_posts.get("/posts/")
+    assert "More stories" in resp.text
+    assert "More rides" not in resp.text
+
+
+@pytest.mark.unit
+async def test_home_explore_map_section_renders_unconditionally(client_with_one_post):
+    """The map section (heading + container) renders even for a 1-post
+    site — distinct from the grid, which correctly stays absent there
+    (test_home_one_post_has_no_more_rides_section). Whether the map
+    itself ends up empty is home-map.js's own client-side decision
+    (GET /trips.geojson's documented empty-state handling), not
+    something this template precomputes.
+    """
+    resp = await client_with_one_post.get("/posts/")
+    assert 'id="explore-map"' in resp.text
+    assert "Explore the map" in resp.text
+
+
+@pytest.mark.unit
+async def test_home_explore_map_assets_deferred_until_intersection(client_with_one_post):
+    """Phase 2b's performance spike validated exactly this technique —
+    zero MapLibre CSS/JS requests fire eagerly; the <link>/<script> tags
+    only exist inside the IntersectionObserver callback, as literal JS
+    strings assigned at runtime, not as real <link>/<script> elements in
+    the initial HTML.
+    """
+    resp = await client_with_one_post.get("/posts/")
+    assert "IntersectionObserver" in resp.text
+    before_script_block = resp.text.split("loadMapAssets")[0]
+    assert "maplibre-gl.css" not in before_script_block
+    assert "maplibre-gl.js" not in before_script_block
 
 
 @pytest.mark.unit

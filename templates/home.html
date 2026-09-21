@@ -75,13 +75,27 @@ routes — one van, endless roads.{% endblock %} {% block page_header %}
                         </div>
                 {% endif %}
             </article>
+            {# Phase 2b's final piece (docs/dev/bulliexplorer_experience_2027.md)
+            — the homepage aggregate map. id="explore" moves here from the
+            grid heading below: this section, not the grid, is what the nav's
+            "Explore" link (templates/base.html, Phase 2d) actually means —
+            the grid heading's own comment claiming the anchor "doesn't need
+            to move" predated this section actually existing and didn't
+            reflect where a click on "Explore" should really land. Rendered
+            unconditionally (cheap — just a heading + an empty container);
+            hidden by home-map.js itself if GET /trips.geojson resolves to
+            zero features (documented, valid empty state), not precomputed
+            here — this page's own context has no per-post POI data to
+            replicate that check server-side without an extra query. #}
+            <section class="explore-map-section" id="explore" aria-label="Explore the map">
+                <h2 class="explore-map-heading">Explore the map</h2>
+                <div id="explore-map"
+                     role="application"
+                     aria-label="Map of all published trips"
+                     data-tiles-url="{{ tiles_url }}"></div>
+            </section>
             {% if posts[1:] %}
-                {# id="explore" is the Phase 2d nav-anchor target (see
-                templates/base.html) — stays on this heading, not the
-                heading's text, so it survives Phase 2b's decided "More
-                stories" rename and its aggregate map landing directly
-                above this section without the anchor needing to move. #}
-                <h2 class="post-grid-heading" id="explore">More rides</h2>
+                <h2 class="post-grid-heading">More stories</h2>
                 <div class="post-grid">
                     {% for post in posts[1:] %}
                         {% set post_route = routes_by_post_id.get(post.id) %}
@@ -126,4 +140,55 @@ routes — one van, endless roads.{% endblock %} {% block page_header %}
             <p class="text-muted fst-italic">No posts yet — check back soon.</p>
         {% endif %}
     </div>
+{% endblock %}
+{% block scripts %}
+    {# Deferred MapLibre load. Phase 2b's performance spike (result:
+    PASS) validated exactly this technique: defer the asset download
+    itself, not just the map object's construction, until #explore-map
+    scrolls near the viewport. Sequenced onload chain below, since these
+    have a real dependency order: pmtiles.js, basemaps.js and home-map.js
+    all assume the maplibregl global already exists; home-map.js also
+    assumes the pmtiles and basemaps globals exist. #}
+    <script>
+      (function () {
+        var el = document.getElementById("explore-map");
+        if (!el || typeof IntersectionObserver === "undefined") return;
+        var triggered = false;
+
+        function loadScript(src, onload) {
+          var script = document.createElement("script");
+          script.src = src;
+          script.onload = onload;
+          document.head.appendChild(script);
+        }
+
+        function loadMapAssets() {
+          if (triggered) return;
+          triggered = true;
+
+          var cssLink = document.createElement("link");
+          cssLink.rel = "stylesheet";
+          cssLink.href = "/static/vendor/maplibre-gl.css?v={{ asset_version }}";
+          document.head.appendChild(cssLink);
+
+          loadScript("/static/vendor/maplibre-gl.js?v={{ asset_version }}", function () {
+            loadScript("/static/vendor/pmtiles.js?v={{ asset_version }}", function () {
+              loadScript("/static/vendor/basemaps.js?v={{ asset_version }}", function () {
+                loadScript("/static/js/home-map.js?v={{ asset_version }}", function () {});
+              });
+            });
+          });
+        }
+
+        var observer = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) loadMapAssets();
+            });
+          },
+          { rootMargin: "200px" }
+        );
+        observer.observe(el);
+      })();
+    </script>
 {% endblock %}

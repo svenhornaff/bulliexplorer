@@ -492,6 +492,28 @@ p {
   gap: var(--space-3);
 }
 
+/* Homepage aggregate map (Phase 2b's final piece,
+   docs/dev/bulliexplorer_experience_2027.md). Same fixed-height/
+   border-radius/box-shadow recipe as #post-map (trip pages) so the
+   two look like the same feature, not two different ones — a
+   distinct id since both could theoretically render on the same page
+   in principle (they don't today). background is a plain surface
+   colour visible for the entire IntersectionObserver-gated deferral
+   window and the brief moment before the map's own "load" event
+   fires, not a loading spinner — same "just a coloured box until
+   ready" approach the Phase 2b spike's probe already used. */
+.explore-map-heading {
+  margin-top: var(--space-4);
+}
+
+#explore-map {
+  height: 420px;
+  border-radius: 8px;
+  margin-bottom: var(--space-4);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+  background: var(--color-surface-2);
+}
+
 /* ── Post list ──────────────────────────────────────────────────────────── */
 .post-preview {
   margin-bottom: var(--space-3);

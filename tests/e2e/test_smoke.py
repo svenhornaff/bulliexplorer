@@ -211,6 +211,40 @@ def test_map_fullscreen_toggle_does_not_throw(e2e_base_url):
         browser.close()
 
 
+# ---------------------------------------------------------------------------
+# Check 5 — the homepage's aggregate map (Phase 2b's final piece,
+# docs/dev/bulliexplorer_experience_2027.md). Same reasoning as check 2:
+# a real browser check for the exact class of bug a unit test's string
+# assertions can't see, this time for a page that carries route+POI data
+# spanning both /trips.geojson tiers (the with-route and pois-only
+# fixtures) rather than a single post's own map.
+# ---------------------------------------------------------------------------
+
+
+def test_homepage_explore_map_renders_without_maplibre_error_event(e2e_base_url):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(channel="chrome")
+        page = browser.new_page()
+        _install_maplibre_error_hook(page)
+        errors = _collect_console_errors(page)
+
+        page.goto(f"{e2e_base_url}/posts/", wait_until="networkidle")
+        # The map is IntersectionObserver-gated (Phase 2b's performance
+        # spike) — scroll_into_view_if_needed() is what actually triggers
+        # loading, not just navigating to the page.
+        page.locator("#explore-map").scroll_into_view_if_needed()
+        page.wait_for_timeout(3000)  # asset chain (4 scripts) + fetch + map "load"
+
+        canvas = page.query_selector("#explore-map canvas")
+        assert canvas is not None, "homepage map canvas never appeared"
+
+        maplibre_errors = page.evaluate("window.__maplibreErrors")
+        assert maplibre_errors == [], f"MapLibre 'error' event fired on homepage map: {maplibre_errors}"
+        assert errors == [], f"console/page errors alongside homepage map load: {errors}"
+
+        browser.close()
+
+
 def test_nearby_services_toggle_does_not_throw(e2e_base_url):
     with sync_playwright() as p:
         browser = p.chromium.launch(channel="chrome")

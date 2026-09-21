@@ -68,6 +68,14 @@ async def post_list(
             "latest_route": latest_route,
             "routes_by_post_id": routes_by_post_id,
             "year": datetime.now().year,
+            # Homepage aggregate map (Phase 2b's final piece) — same
+            # settings.tiles_url used by post_detail's own per-post map,
+            # read into home-map.js via #explore-map's data-tiles-url
+            # attribute rather than a second window.BULLIEXPLORER_*
+            # inline-script payload (there's no other per-request data
+            # this page's map needs baked in — the trip data itself
+            # comes from a separate fetch to GET /trips.geojson).
+            "tiles_url": get_settings().tiles_url,
         },
     )
 

@@ -758,6 +758,145 @@ not assumed safe by construction**:
 piece — the actual MapLibre section/markup/interaction on the
 homepage, per this step's own explicit "out of scope" boundary above.
 
+### Final piece — implemented ✅, Phase 2b now fully done
+
+New `<section id="explore" class="explore-map-section">` (`templates/
+home.html`), placed above "More stories" (the grid, also renamed here
+per the decided Phase 2b product decision — previously "more rides"),
+containing an "Explore the map" heading and an empty `#explore-map`
+container. New standalone `static/js/home-map.js` — deliberately not
+an extension of `post-map.js`: this phase's own non-goals rule out
+marker clustering/vector-tile infrastructure/anything post-map.js's
+much larger feature set (amenity overlay, CyclOSM toggle, elevation-
+chart sync) would pull in.
+
+**Load-timing implementation, exactly as the performance spike
+validated** — not just deferred map construction: a small inline
+script in `home.html`'s `{% block scripts %}` gates the *entire* asset
+chain (the `maplibre-gl.css` `<link>`, and `maplibre-gl.js` →
+`pmtiles.js` → `basemaps.js` → `home-map.js`, sequenced via `onload`
+since they have a real dependency order) behind an `IntersectionObserver`
+on `#explore-map`. Confirmed on live production, not assumed: `curl`
+against the deployed homepage shows the only two `maplibre-gl.css`/
+`maplibre-gl.js` mentions in the entire initial HTML response are
+string literals inside the deferred function body, never real
+`<link>`/`<script>` tags; a real headless-browser check with network-
+request logging confirmed zero requests for any of the four assets or
+`/trips.geojson` itself fire without scrolling `#explore-map` near the
+viewport, and confirmed the element's real position (`top: 1224px` at
+a 1280×800 viewport) sits well past the `800px + 200px rootMargin`
+trigger threshold — the deferral isn't accidentally firing on load for
+common desktop viewport sizes.
+
+**Rendering**: one GeoJSON source from `GET /trips.geojson` (Step 3),
+two layers filtered by the endpoint's own `tier` property — a line
+layer for `"route"` (reusing `post-map.js`'s exact WCAG-checked colours,
+`#b85c00`/`#f0954a` light/dark) and a circle layer for `"poi_only"`.
+`map.fitBounds()` walks every feature's coordinates (LineString arrays
+and Point pairs handled the same way) to frame all trips at once,
+regardless of how disparately sized they are — confirmed on real
+production data, which turned out to be a genuinely good exercise of
+this: `dream-of-north`'s Norway-spanning route and the two short
+southern-Germany day rides sit at wildly different scales, and the fit
+still correctly frames all three together. Per the decided product
+decisions: clicking any feature navigates straight to `/posts/{slug}`
+(no popup) via a helper that only builds the URL after validating the
+slug against an explicit `^[a-z0-9]+(?:-[a-z0-9]+)*$` allowlist —
+`slug` is already server-controlled (sourced from the `Post.slug` DB
+column via our own endpoint, not third-party input), but validating it
+explicitly before building a navigation string removes any ambiguity
+rather than relying on that trust chain alone. A zero-feature response
+(the documented, valid empty-site state) hides the entire section
+client-side, matching `home.html`'s own "No posts yet" philosophy —
+not precomputed server-side, since this page's context has no per-post
+POI data to replicate that check without an extra query.
+
+**Testing — four tiers, not just unit**:
+- 5 new/updated unit tests (`tests/unit/test_templates.py`): the map
+  section renders unconditionally (even for a 1-post site, distinct
+  from the grid which correctly stays absent there), the grid rename
+  landed, the anchor moved to the section not the heading, and the
+  deferred-script assertions (`IntersectionObserver` present, zero
+  eager `<link>`/`<script>` tags before the deferred function).
+- **A new, real e2e test** (`tests/e2e/test_smoke.py`,
+  `test_homepage_explore_map_renders_without_maplibre_error_event`) —
+  this project's own established bar for anything touching MapLibre
+  (the tier's own docstring: a real production incident's map crash
+  stayed invisible to every unit test's string assertions). Actually
+  **run**, not just written: Chrome is installed in this environment,
+  so `make e2e` executed for real — 10/10 passed, including the new
+  test, against a real running app process and a real isolated e2e
+  Postgres database seeded via the tier's existing with-route/
+  POI-only/no-geo fixtures through the real `sync_posts()` path — the
+  first time in this doc's history that both `/trips.geojson` tiers
+  (route *and* POI-only) have been exercised together against real
+  seeded data, since production itself has zero POI-only posts today.
+- **Live production verification**: deployed, then confirmed via a
+  real headless browser (not just `curl`) that `fitBounds` genuinely
+  spans real production data — screenshotted the map correctly framing
+  all 3 real trips at once (Norway down to southern Germany), route
+  line rendering in the correct colour, zero MapLibre `error` events.
+- **A real mobile screenshot pass** (the doc's own explicit acceptance
+  criterion, same cached-Chromium technique as Phase 1's) — confirmed
+  visually, not just structurally: hero → stat chips → "Explore the
+  map" heading → map, reads cleanly on a 390×844 viewport, no
+  horizontal overflow, and normal page scroll (`mouse.wheel`) still
+  advances past the section — doesn't trap scroll, the specific
+  concern this criterion named.
+
+**Two real bugs caught and fixed while building this, not false
+positives**:
+1. Reusing `.post-grid-heading`'s class on the new "Explore the map"
+   heading would have broken `test_home_one_post_has_no_more_rides_
+   section` — that heading renders unconditionally (not gated on
+   `posts[1:]` like the grid's own heading), so a shared class would
+   make a 1-post site's page contain `post-grid-heading` text despite
+   having no grid. Fixed by giving it its own `.explore-map-heading`
+   class — also the more semantically correct choice, since it's a
+   genuinely different heading for a different purpose, not styling
+   reuse for its own sake.
+2. `GET /posts/` (`post_list`) never had `tiles_url` in its template
+   context — only `post_detail` did. Without it, `#explore-map`'s
+   `data-tiles-url` attribute would have rendered empty and the map's
+   vector source would have had no tile URL at all. Caught by tracing
+   the actual data flow before assuming the attribute would just work,
+   not by a failing test (no test asserted the attribute's *value*,
+   only its presence — a real coverage gap in what was written first,
+   fixed alongside the underlying bug).
+
+**An honest, inconclusive performance finding — not glossed over**:
+a real before/after paint-timing comparison against the live,
+now-shipped feature measured ~1818–1928ms median FCP, versus the
+spike's own control-arm measurement of ~1632ms from earlier in this
+same session — a ~200–300ms gap that, taken at face value, would sit
+outside the spike's own "~150ms/10%" comfort margin. Investigated
+rather than either dismissed or treated as a confirmed regression:
+a direct mechanical check (network-request logging, not timing) shows
+**zero bytes** of any of the four deferred assets or `/trips.geojson`
+itself are requested without scrolling `#explore-map` near the
+viewport — by construction, nothing the deferred code does can affect
+a paint metric captured before any scroll interaction. Separately,
+six repeated measurements of the identical, completely unchanged live
+homepage URL in a single batch showed a 420ms spread on their own —
+larger than the gap under investigation — confirming this sandboxed
+environment's network path to the real remote server is too noisy for
+a 6-sample timing comparison to distinguish a small real regression
+from ordinary jitter. Given the direct mechanical proof is strictly
+stronger evidence than a noisy timing measurement either way, the
+go/no-go verdict stands as PASS — but a real Lighthouse/PageSpeed
+Insights run from a normal residential network (not this sandbox)
+would be worth doing before treating the ~1.45s FCP baseline number
+itself as still accurate, rather than taking that as settled here.
+
+**`make ci`**: 469 tests (unit+integration), 95.22% coverage,
+lint/pyright/djlint/bandit/detect-secrets/pip-audit all clean.
+`make e2e`: 10/10 passed. Deployed via `make deploy`, live-verified
+throughout as described above.
+
+**Phase 2b is now fully done** — all three steps (product decisions,
+performance spike, data contract, and this final piece) complete, per
+the recommended sequence defined at the top of this phase.
+
 ## Phase 2c (also elevated — audited against the full landing-page
 mockup, not just the map band) — Homepage composition gaps 📋
 researched, not implemented
